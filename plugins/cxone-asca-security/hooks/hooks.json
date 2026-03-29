@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/asca-scan-write.py",
+            "timeout": 60,
+            "statusMessage": "Running ASCA security scan..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/asca-scan-edit.py",
+            "timeout": 60,
+            "statusMessage": "Running ASCA security scan..."
+          }
+        ]
+      }
+    ]
+  }
+}

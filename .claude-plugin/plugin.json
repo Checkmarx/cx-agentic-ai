@@ -1,0 +1,10 @@
+{
+  "name": "cxone-asca-security",
+  "version": "1.0.0",
+  "description": "Automatic ASCA security scanning on Write and Edit operations via the Checkmarx CxOne CLI.",
+  "author": {
+    "name": "CxOne Dev"
+  },
+  "license": "MIT",
+  "keywords": ["security", "asca", "checkmarx", "cxone", "sast"]
+}
