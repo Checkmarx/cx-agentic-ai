@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/asca-scan-write.sh",
+            "timeout": 60,
+            "statusMessage": "Running ASCA security scan..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/asca-scan-edit.sh",
+            "timeout": 60,
+            "statusMessage": "Running ASCA security scan..."
+          }
+        ]
+      }
+    ]
+  }
+}
