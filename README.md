@@ -89,9 +89,7 @@ cxone-scanners/
 │           ├── hooks.json       # PreToolUse wiring (auto-loaded)
 │           ├── asca-scan-write.py
 │           └── asca-scan-edit.py
-├── hooks/                       # Top-level copies (for --plugin-dir use)
 ├── .claude/                     # Local dev settings (not distributed)
-│   ├── hooks/
 │   └── settings.json
 ├── CLAUDE.md                    # Autonomous-remediation rules for Claude
 └── README.md
