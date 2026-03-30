@@ -1,6 +1,6 @@
 {
   "name": "cx-security-asca-with-skill",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Automatic ASCA security scanning on Write and Edit operations via the Checkmarx CxOne CLI using also skill",
   "author": {
     "name": "CxOne Dev"

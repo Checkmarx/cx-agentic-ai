@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/asca-scan-write.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/asca-scan-write.sh",
             "timeout": 60,
             "statusMessage": "Running ASCA security scan..."
           }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/asca-scan-edit.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/asca-scan-edit.sh",
             "timeout": 60,
             "statusMessage": "Running ASCA security scan..."
           }
