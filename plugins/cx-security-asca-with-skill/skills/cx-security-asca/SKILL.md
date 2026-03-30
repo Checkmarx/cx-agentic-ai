@@ -1,6 +1,6 @@
 ---
 name: cx-security-asca
-description: Runs a Checkmarx ASCA (AI Security Code Assistant) scan on source files to detect SAST vulnerabilities, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan or fix their code, or when SAST vulnerabilities detected by ASCA need to be fixed.
+description: Runs a Checkmarx ASCA (AI Security Code Assistant) scan on source files to detect SAST vulnerabilities, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan or fix their code, or when SAST vulnerabilities detected by ASCA need to be fixed. Invoke as: cx-security-asca-with-skill:cx-security-asca
 ---
 
 # CX Security ASCA
