@@ -163,3 +163,4 @@ Files Modified:
 |---------|------|---------|
 | 1.0.0 | 2026-03-25 | Initial release |
 | 1.0.1 | 2026-03-29 | Skip Flow 1 when findings already present in context (e.g., from hook) |
+| 1.0.2 | 2026-03-30 | Fix description for triggering name |
