@@ -1,0 +1,10 @@
+{
+  "name": "cx-security",
+  "version": "1.0.0",
+  "description": "Checkmarx CxOne security scanning plugin for Claude Code",
+  "author": {
+    "name": "CxOne Dev"
+  },
+  "license": "MIT",
+  "keywords": ["security", "checkmarx", "cxone", "sast"]
+}
