@@ -17,6 +17,12 @@
       "description": "Automatic ASCA security scanning on Write and Edit operations via the Checkmarx CxOne CLI using also skill",
       "category": "development",
       "source": "./plugins/cx-security-asca-with-skill"
+    },
+    {
+      "name": "cx-security",
+      "description": "Checkmarx CxOne security scanning plugin for Claude Code",
+      "category": "development",
+      "source": "./plugins/cx-security"
     }
   ]
 }
