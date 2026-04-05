@@ -57,11 +57,11 @@ def main():
 
         old_vulns = scan_file(file_path)
         new_vulns = scan_file(edited_file)
+
+        old_set = {(v["rule_id"], (v.get("problematicLine") or "").strip()) for v in old_vulns}
+        delta = [v for v in new_vulns if (v["rule_id"], (v.get("problematicLine") or "").strip()) not in old_set]
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    old_set = {(v["rule_id"], (v.get("problematicLine") or "").strip()) for v in old_vulns}
-    delta = [v for v in new_vulns if (v["rule_id"], (v.get("problematicLine") or "").strip()) not in old_set]
 
     asca_block(file_path, delta)
 
