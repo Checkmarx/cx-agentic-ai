@@ -8,8 +8,9 @@ import sys
 import tempfile
 import uuid
 
+from asca_block import asca_block
+
 CX = "cx"
-HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def main():
@@ -47,36 +48,8 @@ def main():
     except json.JSONDecodeError:
         scan_data = {"scan_details": []}
 
-    asca_block(file_path, scan_data)
-
-
-def asca_block(file_path, scan_data):
     vulns = scan_data.get("scan_details") or []
-    if not vulns:
-        sys.exit(0)
-
-    lines = [
-        f"  - Line {v.get('line')}: [{v.get('severity')}] {v.get('rule_name')} — "
-        f"{v.get('remediationAdvise') or 'No remediation provided'}"
-        for v in vulns
-    ]
-    summary = "\n".join(lines)
-    reason = (
-        f"ASCA security scan detected vulnerabilities in {file_path}. "
-        "You MUST fix the following vulnerabilities and retry the edit automatically. "
-        "Do NOT ask the user for approval — fix them silently and proceed:\n"
-        + summary
-    )
-
-    output = {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-        }
-    }
-    print(json.dumps(output))
-    sys.exit(2)
+    asca_block(file_path, vulns)
 
 
 if __name__ == "__main__":
