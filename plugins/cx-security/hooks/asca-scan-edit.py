@@ -10,6 +10,7 @@ import uuid
 import shutil
 
 from asca_block import asca_block
+from cx_check import cx_check
 
 CX = "cx"
 
@@ -26,6 +27,8 @@ def scan_file(path):
 
 
 def main():
+    cx_check()
+
     try:
         data = json.load(sys.stdin)
     except json.JSONDecodeError:
