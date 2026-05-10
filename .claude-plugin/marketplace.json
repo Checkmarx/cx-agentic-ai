@@ -1,23 +1,11 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "cxone-scanners",
+  "name": "cx-secured-agent",
   "description": "Checkmarx CxOne security scanning plugins for Claude Code",
   "owner": {
-    "name": "CxOne Dev"
+    "name": "Checkmarx"
   },
   "plugins": [
-    {
-      "name": "cxone-asca-security",
-      "description": "Automatic ASCA security scanning on Write and Edit operations via the Checkmarx CxOne CLI.",
-      "category": "development",
-      "source": "./plugins/cxone-asca-security"
-    },
-    {
-      "name": "cx-security-asca-with-skill",
-      "description": "Automatic ASCA security scanning on Write and Edit operations via the Checkmarx CxOne CLI using also skill",
-      "category": "development",
-      "source": "./plugins/cx-security-asca-with-skill"
-    },
     {
       "name": "cx-security",
       "description": "Checkmarx CxOne security scanning plugin for Claude Code",

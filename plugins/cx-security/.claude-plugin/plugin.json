@@ -1,9 +1,9 @@
 {
   "name": "cx-security",
   "version": "1.2.0",
-  "description": "Checkmarx CxOne security scanning plugin for Claude Code with ASCA skill",
+  "description": "Checkmarx CxOne security scanning plugin for Claude Code",
   "author": {
-    "name": "CxOne Dev"
+    "name": "Checkmarx"
   },
   "license": "MIT",
   "keywords": ["security", "checkmarx", "cxone", "sast"]
