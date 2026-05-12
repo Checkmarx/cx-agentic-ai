@@ -1,6 +1,6 @@
 ---
 name: cx-cli-setup
-description: Installs the Checkmarx cx CLI if it is not found on the system. Use when the cx CLI is missing. Invoke as: cx-security:cx-cli-setup
+description: "Installs the Checkmarx cx CLI if it is not found on the system. Use when the cx CLI is missing. Invoke as: cx-security:cx-cli-setup"
 ---
 
 # CX CLI Setup
@@ -242,4 +242,4 @@ Quick-start guide: https://docs.checkmarx.com/en/34965-68621-checkmarx-one-cli-q
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 1.0.0 | 2026-05-10 | Initial release — full install/configure/auth/verify flow per spec AST-147398 |
+| 1.0.0 | 2026-05-10 | Initial release — full install/configure/auth/verify flow |
