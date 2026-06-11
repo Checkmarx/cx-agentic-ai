@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Found a bug? You're welcome to [![GitHub Discussions](https://img.shields.io/badge/chat-discussions-blue.svg?style=flat-square)](https://github.com/Checkmarx/checkmarx-kiro-powers/discussions)
+        Found a bug? You're welcome to [![GitHub Discussions](https://img.shields.io/badge/chat-discussions-blue.svg?style=flat-square)](https://github.com/Checkmarx/cx-agentic-ai/discussions)
         
         **Please make sure to:**
         - Describe in details what the problem is

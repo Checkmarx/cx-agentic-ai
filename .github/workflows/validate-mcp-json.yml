@@ -4,10 +4,10 @@ on:
   push:
     branches: [main]
     paths:
-      - 'checkmarx-power/mcp.json'
+      - 'mcp/mcp.json'
   pull_request:
     paths:
-      - 'checkmarx-power/mcp.json'
+      - 'mcp/mcp.json'
 
 permissions:
   contents: read
@@ -20,11 +20,11 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Validate JSON syntax
-        run: python3 -m json.tool checkmarx-power/mcp.json > /dev/null
+        run: python3 -m json.tool mcp/mcp.json > /dev/null
 
       - name: Confirm placeholders are present (no real secrets committed)
         run: |
-          if grep -qE '"(https?://|Bearer |[A-Za-z0-9_-]{32,})' checkmarx-power/mcp.json; then
+          if grep -qE '"(https?://|Bearer |[A-Za-z0-9_-]{32,})' mcp/mcp.json; then
             echo "ERROR: mcp.json appears to contain real credentials or URLs."
             echo "Ensure all values use placeholder syntax like <PLACEHOLDER>."
             exit 1
@@ -35,7 +35,7 @@ jobs:
         run: |
           python3 - <<'EOF'
           import json, sys
-          with open("checkmarx-power/mcp.json") as f:
+          with open("mcp/mcp.json") as f:
               data = json.load(f)
           servers = data.get("mcpServers", {})
           if not servers:
