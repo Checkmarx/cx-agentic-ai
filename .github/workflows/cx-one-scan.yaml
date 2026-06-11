@@ -1,0 +1,25 @@
+name: cx-one-scan
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '30 9 * * *'
+
+jobs:
+  cx-one-scan:
+    runs-on: cx-public-ubuntu-x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - name: Checkmarx One CLI Action
+        uses: checkmarx/ast-github-action@327efb5d1dd16ac6c7c21a9ff8ec1e8ec393b5e6 # v.2.3.32
+        with:
+          base_uri: ${{ secrets.AST_RND_SCANS_BASE_URI }}
+          cx_tenant: ${{ secrets.AST_RND_SCANS_TENANT }}
+          cx_client_id: ${{ secrets.AST_RND_SCANS_CLIENT_ID }}
+          cx_client_secret: ${{ secrets.AST_RND_SCANS_CLIENT_SECRET }}
+          additional_params: --tags checkmarx-kiro-powers --scan-types sast,sca,iac-security,scs --threshold "sca-critical=1;sca-high=1;sca-medium=1;sca-low=1;sast-critical=1;sast-high=1;sast-medium=1;sast-low=1;iac-security-critical=1;iac-security-high=1;iac-security-medium=1;iac-security-low=1;scs-critical=1;scs-high=1;scs-medium=1;scs-low=1;"

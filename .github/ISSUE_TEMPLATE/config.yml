@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 GitHub Discussions
+    url: https://github.com/Checkmarx/cx-agentic-ai/discussions
+    about: Ask questions and discuss ideas with the community
+  - name: 📚 Documentation
+    url: https://github.com/Checkmarx/cx-agentic-ai/blob/master/docs/usage.md
+    about: Read the full Power documentation and workflows
+  - name: 🔒 Security Vulnerability
+    url: https://support.checkmarx.com/CheckmarxCustomerServiceCommunity/s/login/
+    about: Report security vulnerabilities to the Checkmarx One Integrations Team via the Support Portal
+  - name: 🆘 Checkmarx Support
+    url: https://support.checkmarx.com/CheckmarxCustomerServiceCommunity/s/
+    about: Get help from Checkmarx support team

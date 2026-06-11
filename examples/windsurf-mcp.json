@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "Checkmarx": {
+      "serverUrl": "https://{api_host}/api/security-mcp/mcp/{tenant}",
+      "headers": {
+        "cx-origin": "Windsurf",
+        "Authorization": "{api_key}"
+      }
+    }
+  }
+}
