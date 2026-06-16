@@ -4,7 +4,7 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 
 ---
 
-### Added
+### Added in v1.0 (24-o6-2026)
 
 #### Core MCP Server
 - Initial release of the Checkmarx Security MCP Server
@@ -37,19 +37,12 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 - `associateProject` — Link projects to an application
 
 #### Analytics & Risk Tools (7 tools)
-- `listProjectsOverview` — High-level project security status
-- `getProjectsOverviewAggregate` — Organization-wide project metrics
-- `getApplicationsOverviewCount` — Application count summary
-- `getApplicationsOverviewAggregate` — Organization-wide application metrics
-- `getTenantVulnerabilitiesSummary` — Time-windowed vulnerability analytics
-- `getRiskSummary` — Overall risk assessment
-- `listRiskResults` — Risk findings with filtering
-- `updateRiskResultStatus` — Update finding status (TO_VERIFY, CONFIRMED, URGENT, NOT_EXPLOITABLE)
+- `getTenantVulnerabilitiesSummary` — Returns org-wide severity counts by engine over a time window (trends).
 
 #### Remediation Tools (3 tools)
-- `codeRemediation` — AI-generated fixes for SAST findings, secrets, and IaC misconfigurations
-- `packageRemediation` — Safe upgrade paths for vulnerable open-source packages (npm, Maven, PyPI, Go, NuGet)
-- `imageRemediation` — Secure base image alternatives for vulnerable container images
+- `codeRemediation` — Provides fixes for code-level issues: SAST, secrets, and IaC misconfigurations.
+- `packageRemediation` — Analyzes and remediates a specific vulnerable or malicious package/dependency.
+- `imageRemediation` — Provides remediation for container image CVEs and safer base-image alternatives
 
 #### MCP Resources (5 resources)
 - `cxone://engines` — Supported scan engine definitions (SAST, SCA, KICS, Secret Detection)

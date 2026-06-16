@@ -86,7 +86,7 @@ Refer [Authentication](/docs/authentication.md) for detailed authentication inst
 - API Key (with required access if using API key authentication)
 
 ### JSON Configuration
-Below are examples to add the server to your MCP client configuration. See the [examples/](/examples) folder for ready-to-use client config files.
+Below are examples to add the server to your MCP client configuration. See the [examples/](examples) folder for ready-to-use client config files.
 
 #### Windsurf IDE
 
@@ -138,7 +138,7 @@ Below are examples to add the server to your MCP client configuration. See the [
 
 ## Available Tools
 
-Refer [usage](/docs/usage.md) for detail information.
+Refer [usage](docs/usage.md) for detail information.
 
 ### Scanning
 
@@ -174,21 +174,15 @@ Refer [usage](/docs/usage.md) for detail information.
 
 | Tool | Description |
 |---|---|
-| `listProjectsOverview` | High-level project security status |
-| `getProjectsOverviewAggregate` | Organization-wide project metrics |
-| `getApplicationsOverviewAggregate` | Organization-wide application metrics |
-| `getTenantVulnerabilitiesSummary` | Time-windowed vulnerability analytics |
-| `getRiskSummary` | Overall risk assessment |
-| `listRiskResults` | Risk findings with filtering |
-| `updateRiskResultStatus` | Update finding status (CONFIRMED, URGENT, NOT_EXPLOITABLE, …) |
+| `getTenantVulnerabilitiesSummary` | Returns org-wide severity counts by engine over a time window (trends). |
 
 ### Remediation
 
 | Tool | Description |
 |---|---|
-| `codeRemediation` | AI-generated fixes for SAST findings, secrets, and IaC misconfigurations |
-| `packageRemediation` | Safe upgrade paths for vulnerable open-source packages |
-| `imageRemediation` | Secure base image alternatives for vulnerable container images |
+| `codeRemediation` | Provides fixes for code-level issues: SAST, secrets, and IaC misconfigurations. |
+| `packageRemediation` | Analyzes and remediates a specific vulnerable or malicious package/dependency. |
+| `imageRemediation` | Provides remediation for container image CVEs and safer base-image alternatives. |
 
 
 ## License

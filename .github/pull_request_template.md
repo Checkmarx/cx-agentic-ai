@@ -13,7 +13,7 @@ Describe what changed and why.
 ## Validation
 
 - [ ] I verified docs/links impacted by this change
-- [ ] I validated atuthentication and `examples/-mcp.json` still contains placeholders (no secrets)
+- [ ] I validated authentication and `examples/-mcp.json` still contains placeholders (no secrets)
 - [ ] I tested the relevant workflow in Kiro (if applicable)
 
 ## DCO

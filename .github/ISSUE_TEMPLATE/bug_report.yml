@@ -61,5 +61,5 @@ body:
     attributes:
       label: Confirmation
       options:
-        - label: This is not a security vulnerability report (use SECURITY.md for those).
+        - label: This is not a security vulnerability report (use SECURITY.md (https://github.com/Checkmarx/.github/blob/main/SECURITY.md) for those).
           required: true

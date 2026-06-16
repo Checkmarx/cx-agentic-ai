@@ -169,7 +169,7 @@ If the issue persists after following the steps above:
 
 1. Check the [Checkmarx documentation](https://checkmarx.com/product/developer-assist/) for the latest setup guides.
 2. Contact your **Checkmarx administrator** for tenant-specific configuration or permission issues.
-3. Open an issue in the [GitHub repository](https://github.com/cx-anand-nandeshwar/security-mcp-marketplace) with:
+3. Open an issue in the [GitHub repository](https://github.com/Checkmarx/cx-agentic-ai) with:
    - Your client (Cursor, Claude, Windsurf, etc.) and version
    - The error message or unexpected behavior
    - Steps to reproduce (omit any API keys or credentials)
