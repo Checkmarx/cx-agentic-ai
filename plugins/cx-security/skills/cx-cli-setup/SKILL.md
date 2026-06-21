@@ -237,9 +237,3 @@ Official releases: https://github.com/Checkmarx/ast-cli/releases
 Quick-start guide: https://docs.checkmarx.com/en/34965-68621-checkmarx-one-cli-quick-start-guide.html
 
 ---
-
-## Version History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 1.0.0 | 2026-05-10 | Initial release — full install/configure/auth/verify flow |

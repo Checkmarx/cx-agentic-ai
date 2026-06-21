@@ -1,6 +1,6 @@
 ---
 name: cx-security-asca
-description: Runs a Checkmarx ASCA (AI Security Code Assistant) scan on source files to detect SAST vulnerabilities, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan or fix their code, or when SAST vulnerabilities detected by ASCA need to be fixed. Invoke as: cx-security:cx-security-asca
+description: "Runs a Checkmarx ASCA (AI Security Code Assistant) scan on source files to detect SAST vulnerabilities, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan or fix their code, or when SAST vulnerabilities detected by ASCA need to be fixed. Invoke as: cx-security:cx-security-asca"
 ---
 
 # CX Security ASCA
@@ -156,11 +156,3 @@ Files Modified:
 - Remediation must be deterministic, auditable, and fully automated
 
 ---
-
-## Version History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 1.0.0 | 2026-03-25 | Initial release |
-| 1.0.1 | 2026-03-29 | Skip Flow 1 when findings already present in context (e.g., from hook) |
-| 1.0.2 | 2026-03-30 | Fix description for triggering name |

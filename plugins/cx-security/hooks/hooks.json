@@ -2,13 +2,36 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking cx CLI is available..."
+          },
+          {
+            "type": "command",
+            "command": "cx hooks claude-pre-tool-use",
+            "timeout": 10,
+            "statusMessage": "Checking command against security policy..."
+          }
+        ]
+      },
+      {
         "matcher": "Write",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/asca-scan-write.py",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking cx CLI is available..."
+          },
+          {
+            "type": "command",
+            "command": "cx hooks claude-pre-file-write",
             "timeout": 60,
-            "statusMessage": "Running ASCA security scan..."
+            "statusMessage": "Checking file write against security policy..."
           }
         ]
       },
@@ -17,9 +40,57 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/asca-scan-edit.py",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking cx CLI is available..."
+          },
+          {
+            "type": "command",
+            "command": "cx hooks claude-pre-file-write",
             "timeout": 60,
-            "statusMessage": "Running ASCA security scan..."
+            "statusMessage": "Checking file edit against security policy..."
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking cx CLI is available..."
+          },
+          {
+            "type": "command",
+            "command": "cx hooks claude-pre-tool-use",
+            "timeout": 10,
+            "statusMessage": "Checking MCP tool call against security policy..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cx hooks claude-user-prompt-submit",
+            "timeout": 10,
+            "statusMessage": "Scanning prompt for sensitive content..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cx hooks claude-stop",
+            "timeout": 10
           }
         ]
       }
