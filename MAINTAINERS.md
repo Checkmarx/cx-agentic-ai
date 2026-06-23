@@ -4,7 +4,7 @@ This file defines project maintainers and ownership areas.
 
 | Name | GitHub                                 | Contact | Areas |
 | --- |----------------------------------------| --- | --- |
-| Checkmarx One Integrations Team | `@Checkmarx/agentic-ai-maintainers` (Syphers@checkmarx.com) | [Checkmarx Support Portal](https://support.checkmarx.com/CheckmarxCustomerServiceCommunity/s/login/) | Whole repository |
+| Checkmarx One Integrations Team | `@sg-rnd-eng-sypher` (Syphers@checkmarx.com) | [Checkmarx Support Portal](https://support.checkmarx.com/CheckmarxCustomerServiceCommunity/s/login/) | Whole repository |
 
 ## Responsibilities
 

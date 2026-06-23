@@ -13,9 +13,13 @@ Describe what changed and why.
 ## Validation
 
 - [ ] I verified docs/links impacted by this change
-- [ ] I validated authentication and `examples/-mcp.json` still contains placeholders (no secrets)
-- [ ] I tested the relevant workflow in Kiro (if applicable)
-
+- [ ] I validated `authentication` and `examples/{client}-mcp.json` still contains only placeholders (no real secrets)
+- [ ] I have successfully tested and verified the relevant workflow in at least one supported AI client:
+    - [ ] Cursor
+    - [ ] Claude
+    - [ ] Windsurf
+    - [ ] GitHub Copilot
+    - [ ] Kiro
 ## DCO
 
 - [ ] I signed off all commits (`git commit -s`)

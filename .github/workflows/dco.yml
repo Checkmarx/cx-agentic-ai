@@ -33,6 +33,6 @@ jobs:
           done < <(git rev-list --no-merges "${base_sha}..${head_sha}")
 
           if [ "$missing" -ne 0 ]; then
-            echo "DCO check failed. Rebase with signoff: git rebase --signoff origin/main"
+            echo "DCO check failed. Rebase with signoff: git rebase --signoff origin/master"
             exit 1
           fi
