@@ -2,9 +2,9 @@
 
 This file defines project maintainers and ownership areas.
 
-| Name | GitHub                                 | Contact | Areas |
-| --- |----------------------------------------| --- | --- |
-| Checkmarx One Integrations Team | `@sg-rnd-eng-sypher` (Syphers@checkmarx.com) | [Checkmarx Support Portal](https://support.checkmarx.com/CheckmarxCustomerServiceCommunity/s/login/) | Whole repository |
+| Name | GitHub                        | Contact | Areas |
+| --- |-------------------------------| --- | --- |
+| Checkmarx One Integrations Team | `@checkmarx/sg-rnd-eng-sypher` | [Checkmarx Support Portal](https://support.checkmarx.com/CheckmarxCustomerServiceCommunity/s/login/) | Whole repository |
 
 ## Responsibilities
 
