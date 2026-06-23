@@ -1,6 +1,6 @@
 ---
 name: cx-cli-setup
-description: "Installs the Checkmarx cx CLI if it is not found on the system. Use when the cx CLI is missing. Invoke as: cx-security:cx-cli-setup"
+description: "Installs, configures, or re-authenticates the Checkmarx cx CLI. Use when the cx CLI is missing, credentials have expired, or the CLI needs to be reconfigured. Invoke as: cx-security:cx-cli-setup"
 ---
 
 # CX CLI Setup
@@ -44,11 +44,16 @@ cx auth validate
 
 Route based on the results:
 
-| CLI present | Auth valid | Action |
+| CLI present | Auth result | Action |
 |---|---|---|
 | No | — | Offer custom path (see below), then proceed to Phase 1 |
-| Yes | Yes | Tell the developer everything looks good. Ask if they want to reconfigure or reauthenticate anyway. If no, exit. |
-| Yes | No / fails | Tell the developer the CLI is installed but authentication has failed. Skip to Phase 2. |
+| Yes | Success | Tell the developer everything looks good. Ask if they want to reconfigure or reauthenticate anyway. If no, exit. |
+| Yes | Credential failure (invalid/revoked/expired key) | Tell the developer the CLI is installed but authentication failed. Skip to Phase 2. |
+| Yes | Network failure (DNS error, connection refused, timeout) | Tell the developer the CLI is installed but the server is unreachable. Do not proceed to Phase 2 — ask them to check their network or proxy, then re-run `cx auth validate` to confirm. |
+
+To distinguish credential from network failure, check the error output of `cx auth validate`:
+- Credential failure: typically contains "invalid", "unauthorized", "401", or "forbidden"
+- Network failure: typically contains "no such host", "connection refused", "timeout", or "dial tcp"
 
 **Custom path offer** (when CLI is not found):
 
@@ -83,19 +88,34 @@ On confirmation:
 brew install checkmarx/ast-cli/ast-cli
 ```
 
-**If Homebrew is not available or the brew install fails**, tell the developer:
-> "Homebrew isn't available. I'll fall back to downloading the binary directly from GitHub and placing it in `/usr/local/bin`. Shall I run this for you?"
+**If Homebrew is not available or the brew install fails**, note that Checkmarx only publishes an x64 macOS binary — both Intel and Apple Silicon use it (Rosetta 2 handles the translation on M-series Macs).
+
+Tell the developer:
+> "Homebrew isn't available. I'll fall back to downloading the x64 binary from GitHub and extracting it to `~/.local/bin` (user-scope, no admin rights required). Shall I run this for you?"
 
 On confirmation:
 
 ```bash
+mkdir -p ~/.local/bin
 curl -fsSL https://github.com/Checkmarx/ast-cli/releases/latest/download/ast-cli_darwin_x64.tar.gz -o /tmp/cx-cli.tar.gz && \
-sudo tar -xzf /tmp/cx-cli.tar.gz -C /usr/local/bin cx && \
+tar -xzf /tmp/cx-cli.tar.gz -C ~/.local/bin cx && \
 rm /tmp/cx-cli.tar.gz
 ```
 
-If `curl` is also unavailable, direct the developer to download manually:
-https://github.com/Checkmarx/ast-cli/releases/latest/download/ast-cli_darwin_x64.tar.gz
+Then check whether `~/.local/bin` is on the PATH:
+
+```bash
+echo $PATH | grep -q "$HOME/.local/bin" && echo "on PATH" || echo "not on PATH"
+```
+
+If it is not on PATH, tell the developer:
+> "Add the following line to your `~/.zshrc` (or `~/.bashrc`), then open a new terminal:
+> ```
+> export PATH="$HOME/.local/bin:$PATH"
+> ```"
+
+If `curl` is also unavailable, direct the developer to download manually from:
+https://github.com/Checkmarx/ast-cli/releases/latest — download `ast-cli_darwin_x64.tar.gz`, extract `cx`, and move it to `~/.local/bin`.
 
 ### Linux
 
@@ -108,19 +128,40 @@ uname -m
 - `x86_64` → use `ast-cli_linux_x64.tar.gz`
 - `aarch64` / `arm64` → use `ast-cli_linux_arm64.tar.gz`
 - `armv6*` → use `ast-cli_linux_armv6.tar.gz`
+- anything else → tell the developer: "Your architecture is not supported by the pre-built Checkmarx CLI binaries. Please check https://github.com/Checkmarx/ast-cli/releases for available builds or contact Checkmarx support." Do not proceed.
 
 Tell the developer:
-> "I'll download the Checkmarx One CLI binary from GitHub and place it in `/usr/local/bin`. Shall I run this for you?"
+> "I'll download the Checkmarx One CLI binary from GitHub and extract it to `~/.local/bin` (user-scope, no admin rights required). Shall I run this for you?"
 
 On confirmation (x64 example — substitute the correct filename for the detected arch):
 
 ```bash
+mkdir -p ~/.local/bin
 curl -fsSL https://github.com/Checkmarx/ast-cli/releases/latest/download/ast-cli_linux_x64.tar.gz -o /tmp/cx-cli.tar.gz && \
-sudo tar -xzf /tmp/cx-cli.tar.gz -C /usr/local/bin cx && \
+tar -xzf /tmp/cx-cli.tar.gz -C ~/.local/bin cx && \
 rm /tmp/cx-cli.tar.gz
 ```
 
-If `curl` is unavailable, offer `wget` instead and ask the same confirmation question before running it.
+Then check whether `~/.local/bin` is on the PATH:
+
+```bash
+echo $PATH | grep -q "$HOME/.local/bin" && echo "on PATH" || echo "not on PATH"
+```
+
+If it is not on PATH, tell the developer:
+> "Add the following line to your `~/.bashrc` (or `~/.zshrc`), then open a new terminal:
+> ```
+> export PATH="$HOME/.local/bin:$PATH"
+> ```"
+
+If `curl` is unavailable, offer `wget` instead:
+
+```bash
+mkdir -p ~/.local/bin
+wget -qO /tmp/cx-cli.tar.gz https://github.com/Checkmarx/ast-cli/releases/latest/download/ast-cli_linux_x64.tar.gz && \
+tar -xzf /tmp/cx-cli.tar.gz -C ~/.local/bin cx && \
+rm /tmp/cx-cli.tar.gz
+```
 
 If neither is available, direct the developer to download manually from the releases page.
 
@@ -136,10 +177,11 @@ $dest = "$env:LOCALAPPDATA\Checkmarx\cx"
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 Invoke-WebRequest -Uri "https://github.com/Checkmarx/ast-cli/releases/latest/download/ast-cli_windows_x64.zip" -OutFile "$env:TEMP\cx-cli.zip"
 Expand-Archive "$env:TEMP\cx-cli.zip" -DestinationPath $dest -Force
+[Environment]::SetEnvironmentVariable("Path", "$([Environment]::GetEnvironmentVariable('Path','User'));$dest", "User")
 $env:PATH += ";$dest"
 ```
 
-Tell the developer they may need to add `$dest` to their permanent PATH via System Properties → Environment Variables.
+The first line persists the PATH change at user scope (survives new terminals). The second updates the current session immediately.
 
 ---
 
@@ -152,7 +194,7 @@ cx version
 - **Returns a version**: confirm — "The `cx` CLI is installed. Version: `<version>`." Proceed to Phase 2.
 - **Fails**: "The `cx` binary was not found after installation. The install directory may not be on your PATH. Open a new terminal or add the install directory to PATH, then confirm when ready." Retry `cx version` after confirmation. Do not proceed to Phase 2 until this passes.
 
-**Version compatibility**: if the version is below `2.0.0`, inform the developer and guide them to upgrade using the same install method before continuing.
+`cx version` is a sanity check only — a binary can print a version and still be broken. The real acceptance test is `cx auth validate` in Phase 3. If Phase 3 fails after a fresh install with anything other than a credential error (e.g. a crash or unexpected exit), treat the install itself as suspect and re-run Phase 1 before asking the developer to reconfigure.
 
 ---
 
@@ -160,7 +202,7 @@ cx version
 
 Tell the developer:
 
-> "To configure the CLI I'll need your Checkmarx One API key. When using API key authentication, the CLI automatically extracts the server URL, auth URL, and tenant from the key — so the API key is all you need."
+> "To configure the CLI I'll need your Checkmarx One API key. When using API key authentication, the CLI automatically extracts the server URL, auth URL, and tenant from the key — so the API key is all you need. Note that API keys expire after 30–365 days depending on your tenant's policy."
 
 Direct them to generate one if they don't have it, and give them the full instructions in one message:
 
@@ -180,6 +222,8 @@ Direct them to generate one if they don't have it, and give them the full instru
 
 Do NOT ask the developer to paste their API key into the chat. Wait for them to confirm they have run the command.
 
+Once they confirm, note: "Your API key is stored in plaintext in `~/.checkmarx/checkmarxcli.yaml` (Windows: `%USERPROFILE%\.checkmarx\checkmarxcli.yaml`). Protect that file like an SSH private key — restrict permissions (`chmod 600 ~/.checkmarx/checkmarxcli.yaml` on macOS/Linux) and exclude it from backups or version control."
+
 ---
 
 ## Phase 3 — Verify Connectivity
@@ -192,14 +236,27 @@ Interpret the result:
 
 - **Exit code 0 / "Successfully authenticated"**: confirm — "Authentication verified. The plugin is ready to scan."
 - **Auth/credential failure**: "Authentication check failed — your API key may be invalid. Would you like to re-enter it?" If yes, return to Phase 2. Do not proceed.
-- **Server unreachable** (connection refused, DNS error, timeout): "Could not reach the Checkmarx One server. This may be a network issue. Setup is complete, but connectivity could not be verified — scanning will be unavailable until the server is reachable."
+- **Server unreachable** (connection refused, DNS error, timeout): Ask the developer: "Could not reach the Checkmarx One server. Are you on a self-hosted or on-premises deployment?" If yes, the API key may not encode the server URL — ask them to also configure the base URIs:
+  ```
+  cx configure set --prop-name cx_base_uri --prop-value <your-base-url>
+  cx configure set --prop-name cx_base_auth_uri --prop-value <your-auth-url>
+  ```
+  Then re-run `cx auth validate`. If they are on SaaS, treat it as a network/proxy issue and advise them to check connectivity before retrying.
 - **Permission error** (authenticated but no project access): "Authentication succeeded but you don't have access to any Checkmarx One projects. Please contact your Checkmarx administrator."
 
 ---
 
 ## Phase 4 — Complete
 
-On successful verification:
+Run:
+
+```bash
+cx utils env
+```
+
+Surface the tenant and server URL from the output so the developer can confirm they authenticated against the right environment.
+
+Then tell the developer:
 
 > "Setup complete. The Checkmarx One CLI is installed, configured, and authenticated. Security scanning is now active."
 
@@ -216,14 +273,6 @@ The hook that triggered this skill will re-run automatically and the original ag
 
 ---
 
-## Re-Authentication Only (Expired Credentials)
-
-If invoked only because credentials expired (CLI already installed and configured), skip Phases 0–1 and start at Phase 2.
-
-Tell the developer at the start: "Your Checkmarx One credentials have expired. API keys expire after 30–365 days depending on your tenant's policy. You'll need to generate a new one. Let's re-authenticate — no reconfiguration needed."
-
----
-
 ## Quick Reference
 
 | CLI Command | Purpose |
@@ -237,3 +286,9 @@ Official releases: https://github.com/Checkmarx/ast-cli/releases
 Quick-start guide: https://docs.checkmarx.com/en/34965-68621-checkmarx-one-cli-quick-start-guide.html
 
 ---
+
+## Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 0.9.0 | 2026-06-02 | Pre-release — full flow implemented, pending end-to-end test matrix across OS/arch |
