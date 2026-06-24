@@ -1,0 +1,45 @@
+name: DCO
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  signoff-check:
+    name: Validate Signed-off-by
+    runs-on: cx-public-ubuntu-x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate Signed-off-by trailers
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          missing=0
+
+          while read -r commit; do
+            [ -z "$commit" ] && continue
+            if ! git show -s --format=%B "$commit" | grep -Eiq '^Signed-off-by:\s+.+ <.+>$'; then
+              echo "::error::Commit $commit is missing a valid Signed-off-by trailer."
+              missing=1
+            fi
+          done < <(git rev-list --no-merges "${BASE_SHA}..${HEAD_SHA}")
+
+          if [ "$missing" -ne 0 ]; then
+            echo "DCO check failed. Rebase with signoff: git rebase --signoff origin/master"
+            exit 1
+          fi
