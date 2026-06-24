@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "Checkmarx": {
+      "url": "https://{api_host}/api/security-mcp/mcp/{tenant}",
+      "headers": {
+        "cx-origin": "Cursor",
+        "Authorization": "{api_key}"
+      }
+    }
+  }
+}
