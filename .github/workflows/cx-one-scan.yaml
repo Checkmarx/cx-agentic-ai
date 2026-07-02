@@ -11,18 +11,31 @@ on:
   schedule:
     - cron: '20 7 * * 0-4' # 7:20 AM UTC, Sunday to Thursday
 
-permissions:
-  id-token: write
-  contents: read
-  pull-requests: write
+# Deny all GITHUB_TOKEN permissions by default; the job below grants only what it needs
+# (zizmor: excessive-permissions).
+permissions: {}
+
+# Only one scan per ref at a time; a newer commit supersedes an in-flight scan
+# (zizmor: concurrency-limits).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   cx-one-scan:
     name: cx-one-scan
     runs-on: cx-private-ubuntu-x64
+    # Least-privilege permissions, scoped to this single job rather than the whole
+    # workflow (zizmor: excessive-permissions / undocumented-permissions).
+    permissions:
+      id-token: write        # OIDC — assume the AWS role to read scan credentials
+      contents: read         # check out the repository
+      pull-requests: write   # post Checkmarx scan results/decorations on the PR
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          persist-credentials: false   # zizmor: artipacked — don't leave git creds on disk
 
       - name: Fetch Checkmarx scan credentials from AWS Secrets Manager
         uses: CheckmarxDev/gh-actions-library/workflows/common/get-secrets@9833f199243df2796a2ff932b9e7d585139cb966

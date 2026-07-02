@@ -1,0 +1,21 @@
+# Normalize line endings deterministically, independent of any contributor's core.autocrlf.
+# This repo ships POSIX shell scripts and a Python gate that run on Linux/macOS, where a stray
+# CR (\r) breaks the bootstrap and can fail the security gate OPEN. Pin everything text to LF.
+* text=auto eol=lf
+
+# Files that MUST be LF on every OS (executed by /bin/sh, /usr/bin/env bash, or read into a
+# version string where a trailing CR would corrupt comparisons):
+*.sh            text eol=lf
+*.py            text eol=lf
+*.json          text eol=lf
+*.yaml          text eol=lf
+*.yml           text eol=lf
+*.md            text eol=lf
+plugins/cx-security/scripts/cx-min-version text eol=lf
+
+# Binary assets must never be EOL-normalized.
+*.png  binary
+*.jpg  binary
+*.gif  binary
+*.zip  binary
+*.gz   binary

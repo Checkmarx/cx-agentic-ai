@@ -21,6 +21,11 @@ This skill has two entry points:
 - Checkmarx `cx` CLI installed and available in PATH
 - Checkmarx MCP server connected (required for remediation)
 
+> **Remediation is MCP-only.** Every fix MUST come from `mcp__Checkmarx__codeRemediation`. If that tool
+> is not available, you MUST NOT remediate by any other means — no manual edits, no generic or
+> LLM-generated fixes, and do not apply the `remediationAdvise` text yourself. Stop and recover the MCP
+> first (see Flow 2 → Step 2, "If the tool is not available").
+
 ---
 
 ## Flow 1: On-Demand Scan
@@ -103,8 +108,22 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
 ```
 
 - If the tool is **available**: parse `remediation_steps` from the response and proceed to Step 3.
-- If the tool is **not available**: display:
-  `[MCP ERROR] mcp__Checkmarx__codeRemediation tool is not available. Please check the Checkmarx MCP server.`
+- If the tool is **not available**: **STOP. Do NOT remediate by any other means** — no manual fix, no
+  generic fix, and do not apply the `remediationAdvise` text yourself. Leave the finding **unfixed**
+  (do not write or edit any code). Then recover the MCP:
+
+  1. The plugin **declares this MCP in `.mcp.json`**, so it starts automatically when the plugin is
+     enabled. If the tool is missing, the usual cause is that cx is not configured/authenticated —
+     the bridge can't derive the URL or auth header without a valid key. Verify with
+     `cx auth validate`; if it fails (or reports no API key), run `/cx-cli-setup`.
+  2. Then tell the user the **one** step only they can perform — Claude Code loads MCP servers at
+     startup, so the server can't become live in this running session on its own:
+
+     > "The Checkmarx remediation MCP isn't loaded in this session. Please run `/reload-plugins` (or
+     > restart Claude Code) to load it, then ask me to remediate again. I won't apply a non-Checkmarx
+     > fix in the meantime."
+
+  Then end the remediation flow without modifying any code.
 
 ### Step 3 — Apply the Fix
 
@@ -149,6 +168,8 @@ Files Modified:
 
 ### Constraints
 
+- **All remediation MUST come from `mcp__Checkmarx__codeRemediation`. Never apply a manual, generic, or
+  non-MCP fix — if the MCP is unavailable, stop and recover it (Step 2), do not improvise.**
 - Do not prompt the user
 - Do not skip or reorder fix steps
 - Only modify code corresponding to the identified problematic line

@@ -1,100 +1,62 @@
-# CxOne ASCA Security Plugin
+# cxone-scanners
 
-A Claude Code plugin that runs **Checkmarx ASCA** (Application Security Code Analysis) scans automatically before every `Write` or `Edit` tool call.
+A Claude Code plugin marketplace (`cx-secured-agent`) for **Checkmarx CxOne** security scanning.
 
-When a vulnerability is detected, Claude is instructed to fix it silently and retry — no user interruption required.
+## Plugins
 
-## Prerequisites
+| Plugin | Description |
+|---|---|
+| [**cx-security**](./plugins/cx-security) | A fail-closed security gate that scans Claude's file writes, shell commands, and MCP tool calls with the Checkmarx `cx` CLI **before** they happen, and exposes Checkmarx remediation tools over MCP. |
 
-- [Checkmarx CxOne CLI (`cx`)](https://checkmarx.com/resource/documents/en/34965-68621-checkmarx-one-cli-tool.html) installed and on your `$PATH`
-- `cx` authenticated to your CxOne tenant
+## How it works (at a glance)
 
-## Installation
+Each gated tool call runs a **two-stage PreToolUse chain**:
 
-### Option 1 — Local marketplace (recommended for on-prem / team use)
+1. **The gate** (`cx_check`) proves the scanner is trustworthy — cx is present, recent enough,
+   capable, and authenticated — or **blocks the action (exit 2)**.
+2. **The scanner** (native `cx hooks claude-*`) performs the actual SAST / SCA / policy analysis.
 
-Register this repo as a local marketplace, then install the plugin at project scope:
+| Tool event | Scans for |
+|---|---|
+| `Write` / `Edit` | Vulnerabilities in the file content (SAST / ASCA) |
+| `Bash` | Risky commands & vulnerable dependencies (SCA) |
+| MCP tool calls | Policy violations before the call runs |
+| Prompt submit / session stop | Sensitive-content & lifecycle checks |
+
+Only an explicit `exit 2` (deny) blocks — everything else is non-blocking — so the gate is
+**fail-closed**: anything it can't prove safe is blocked rather than let through. Remediation runs
+through the bundled Checkmarx MCP server (`cx mcp bridge`). Full detail, the plugin structure, and the
+fail-closed/cross-OS design are in the **[cx-security README](./plugins/cx-security/README.md)**.
+
+## Install
+
+Register this repository as a local marketplace, then install the plugin:
 
 ```bash
-claude plugin marketplace add /path/to/cxone-scanners --scope project
-claude plugin install cxone-asca-security@cxone-scanners --scope project
+claude plugin marketplace add /path/to/cxone-scanners
+claude plugin install cx-security@cx-secured-agent
 ```
 
-Verify:
+Or load it directly for local testing:
 
 ```bash
-claude plugin list
-# cxone-asca-security@cxone-scanners  v1.0.0  project  ✔ enabled
+claude --plugin-dir /path/to/cxone-scanners/plugins/cx-security
 ```
 
-### Option 2 — Direct plugin-dir (quick local testing)
+On first use the plugin walks you through installing and authenticating the `cx` CLI via the
+`cx-cli-setup` skill. See the [cx-security README](./plugins/cx-security/README.md#prerequisites) for
+host prerequisites (Git for Windows, Python 3, a downloader).
 
-```bash
-claude --plugin-dir /path/to/cxone-scanners/plugins/cxone-asca-security
-```
-
-### Option 3 — From a remote marketplace (once published)
-
-```
-/plugin install cxone-asca-security
-```
-
-### Reload after updating hook scripts
-
-```
-/reload-plugins
-```
-
-## How it works
-
-| Event | Hook | Behaviour |
-|---|---|---|
-| `Write` (new file) | `asca-scan-write.py` | Scans the full file content before writing |
-| `Edit` (patch file) | `asca-scan-edit.py` | Applies the diff in a temp file and scans only **new** vulnerabilities introduced by the change |
-
-If findings are detected the hook returns `permissionDecision: deny` with a structured reason listing every vulnerability and its `remediationAdvise`. Claude then fixes each issue and retries automatically (up to 5 attempts).
-
-## Project-level CLAUDE.md rules
-
-Add the following to your project's `CLAUDE.md` so Claude knows how to handle scan denials:
-
-```markdown
-## ASCA Security — Autonomous Remediation
-
-When a `Write` or `Edit` is blocked by the ASCA hook (`permissionDecision: deny`,
-reason starts with "ASCA security scan detected vulnerabilities"):
-
-1. **Never ask the user.** Fix silently and retry immediately.
-2. **Apply every fix** listed in the denial reason using the provided `remediationAdvise`.
-   Fix Critical/High before Medium/Low.
-3. **Retry** until the scan passes. After 5 failed attempts, report remaining findings to the user.
-4. **After success**, emit one line summarizing what was fixed and why.
-
-Do not add `# TODO` comments, use `# nosec` suppressions, or change anything beyond
-what the vulnerability requires.
-```
-
-## Plugin structure
+## Repository layout
 
 ```
 cxone-scanners/
-├── .claude-plugin/
-│   ├── plugin.json              # Root manifest (for --plugin-dir installs)
-│   └── marketplace.json         # Marketplace index
-├── plugins/
-│   └── cxone-asca-security/
-│       ├── .claude-plugin/
-│       │   └── plugin.json      # Plugin manifest
-│       └── hooks/
-│           ├── hooks.json       # PreToolUse wiring (auto-loaded)
-│           ├── asca-scan-write.py
-│           └── asca-scan-edit.py
-├── .claude/                     # Local dev settings (not distributed)
-│   └── settings.json
-├── CLAUDE.md                    # Autonomous-remediation rules for Claude
-└── README.md
+├── .claude-plugin/marketplace.json   # marketplace index (cx-secured-agent)
+├── plugins/cx-security/              # the plugin (ships to users) — see its README
+├── tests/                            # test suite + runner (not shipped with the plugin)
+└── .github/workflows/                # tri-OS CI (Ubuntu / macOS / Windows)
 ```
 
 ## License
 
-MIT
+MIT — see [plugins/cx-security/LICENSE](./plugins/cx-security/LICENSE).
