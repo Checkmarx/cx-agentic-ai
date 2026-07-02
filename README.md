@@ -16,8 +16,7 @@
 - [MCP Client Configuration](#mcp-client-configuration)
   - [Prerequisites](#prerequisites)
   - [JSON Configuration](#json-configuration)
-    - [Windsurf IDE](#windsurf-ide)
-    - [IntelliJ IDEA - GitHub Copilot](#intellij-idea---github-copilot)
+    - [Cursor IDE](#cursor-ide)
     - [Claude Desktop / Claude Code](#claude-desktop--claude-code)
 - [Available Tools](#available-tools)
   - [Scanning](#scanning)
@@ -70,7 +69,7 @@ The server uses **API Key** and **OAuth2** authentication.
 1. Clients authenticate to Checkmarx One and get an API key.
 2. This API key will be used during MCP client configuration, include the API Key in the `Authorization` header as mentioned in the [MCP Client Configuration](#mcp-client-configuration) section.
 
-### OAuth2 Authentication
+### OAuth2 Authentication (Recommended)
 Checkmarx MCP supports Dynamic Client Registration (DCR) flow allows an AI client (such as Cursor or Claude Desktop) to connect securely.
 1. User only needs to configure the MCP client as mentioned in the [MCP Client Configuration](#mcp-client-configuration) section.
 2. When the client attempts to connect to the MCP server, it will be redirected to Checkmarx One login page for authentication.
@@ -91,7 +90,7 @@ Refer [Authentication](/docs/authentication.md) for detailed authentication inst
 ### JSON Configuration
 Below are examples to add the server to your MCP client configuration. See the [examples/](examples) folder for ready-to-use client config files.
 
-#### Windsurf IDE
+#### Cursor IDE
 
 **API Key Authentication:**
 
@@ -101,7 +100,7 @@ Below are examples to add the server to your MCP client configuration. See the [
     "Checkmarx": {
       "serverUrl": "https://{api_host}/api/security-mcp/mcp/{tenant}",
       "headers": {
-        "cx-origin": "Windsurf",
+        "cx-origin": "Cursor",
         "Authorization": "API_KEY"
       }
     }

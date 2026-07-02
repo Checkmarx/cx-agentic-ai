@@ -1,0 +1,10 @@
+{
+  "name": "security-mcp",
+  "displayName": "Checkmarx",
+  "version": "1.0.0",
+  "author": { "name": "Checkmarx" },
+  "description": "Official Checkmarx MCP server.",
+  "keywords": ["mcp", "checkmarx", "security", "vulnerability-remediation", "realtime-scan", "sast", "iac", "sca"],
+  "license": "Apache-2.0",
+  "logo": "assets/logo.png"
+}

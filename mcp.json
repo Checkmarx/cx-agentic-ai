@@ -2,10 +2,7 @@
   "mcpServers": {
     "Checkmarx": {
       "url": "https://<api_host>/api/security-mcp/mcp/<tenant_id>",
-      "headers": {
-        "cx-origin": "<ORIGIN_IDENTIFIER>",
-        "Authorization": "<CHECKMARX_API_KEY>"
-      }
     }
   }
 }
+
