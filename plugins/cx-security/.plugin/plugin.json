@@ -1,0 +1,12 @@
+{
+  "name": "cx-security",
+  "version": "1.3.2",
+  "description": "Checkmarx CxOne security scanning plugin for GitHub Copilot CLI",
+  "author": {
+    "name": "Checkmarx"
+  },
+  "license": "MIT",
+  "keywords": ["security", "checkmarx", "cxone", "sast"],
+  "hooks": "./hooks/hooks-copilot-cli.json",
+  "skills": "./skills"
+}
