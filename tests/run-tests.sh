@@ -62,6 +62,7 @@ run_py "$DIR/test_packaging.py"
 run_sh "$DIR/scripts/test_cx_asset_resolver.sh"
 run_sh "$DIR/scripts/test_cx_path_probe.sh"
 run_sh "$DIR/scripts/test_cx_bootstrap.sh"
+run_sh "$DIR/scripts/test_cx_resolution_contract.sh"
 
 if [ "$COV" -eq 1 ]; then
     printf '\n========== coverage (hooks) ==========\n'

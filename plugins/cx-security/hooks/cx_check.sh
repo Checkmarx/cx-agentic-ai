@@ -41,12 +41,12 @@ export PYTHONUTF8=1
 # fallback). On a hang the probe is killed and reported as a failure → that candidate is rejected.
 probe_python() {
     if command -v timeout >/dev/null 2>&1; then
-        timeout 5 "$@"
+        timeout 3 "$@"
         return
     fi
     "$@" &
     _probe_pid=$!
-    ( sleep 5; kill "$_probe_pid" 2>/dev/null ) &
+    ( sleep 3; kill "$_probe_pid" 2>/dev/null ) &
     _probe_killer=$!
     wait "$_probe_pid" 2>/dev/null
     _probe_status=$?
@@ -55,8 +55,16 @@ probe_python() {
     return "$_probe_status"
 }
 
+# Bound the TOTAL probe phase (not just each probe): several present-but-wedged interpreters could
+# each burn a full per-probe timeout and, summed, exceed Claude Code's 45s hook budget — a KILLED
+# hook is non-2 = fail OPEN. If the budget is spent, stop probing and fall through to the no-Python
+# deny (exit 2) below. (date-less hosts skip the deadline; each probe is still individually bounded.)
+_probe_start="$(date +%s 2>/dev/null || echo 0)"
 PYTHON_BIN=""
-for candidate in python3.13 python3.12 python3.11 python3.10 python3.9 python3.8 python3 python; do
+# Try the canonical names FIRST (usually the one working interpreter), so a few wedged versioned
+# binaries early in the list can't burn the whole probe budget before python3/python are reached.
+for candidate in python3 python python3.13 python3.12 python3.11 python3.10 python3.9 python3.8; do
+    [ "$(( $(date +%s 2>/dev/null || echo "$_probe_start") - _probe_start ))" -ge 12 ] && break
     if command -v "$candidate" >/dev/null 2>&1 && \
        probe_python "$candidate" -c "import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)" >/dev/null 2>&1; then
         PYTHON_BIN="$candidate"

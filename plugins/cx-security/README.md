@@ -97,9 +97,14 @@ provide these first, or the gate can't run:
 | **Python 3** (gate logic) | install from python.org (**not** the Microsoft Store stub) | `xcode-select --install` or `brew install python3` | `apt`/`dnf`/`apk install python3` |
 | **`curl` or `wget`** (bootstrap download) | bundled with Git for Windows | built-in `curl` | usually present; minimal images may need it |
 
-If **Python 3** or **a downloader** is missing, the gate **fails closed** — it blocks the action with
-an install hint (safe). On **Windows specifically**, if **Git for Windows** is absent the hook cannot
-spawn at all, so it is a hard requirement.
+If **Python 3** is missing, the gate **fails closed** — it blocks the action with an install hint
+(safe). But if the **POSIX shell** (`sh`) is missing — the default on Windows without Git for Windows
+— the hook cannot spawn at all and **fails OPEN**: Claude Code treats an un-spawnable hook as a
+non-blocking error, so the action proceeds **UNSCANNED**. Claude Code offers no way to fail-close a
+missing-shell hook (a hook needs a shell to run, and hook entries cannot be scoped to a single OS), so
+**Git for Windows is a hard prerequisite** — install and verify it *before* relying on the gate.
+Without it, Claude Code's own Bash tool does not work either, so this is already part of a supported
+Windows setup.
 
 Then the **`cx` CLI** itself, which the bundled **`cx-cli-setup`** skill installs (with download
 checksum verification), puts on PATH, and authenticates (API key or OAuth). The minimum version is a

@@ -40,14 +40,15 @@ refused"/"timeout"/"dial tcp".
 ## Phase 1 — Install the CLI
 
 The plugin ships a self-contained installer, `scripts/cx-bootstrap.sh`, that downloads the right
-release asset for this OS/arch, verifies its checksum, and **places `cx` into a folder already on
-this session's PATH**, so the gate clears on the next tool call with no restart. It needs only
-`bash` (Git Bash on Windows) — no Python.
+release asset for this OS/arch, verifies its checksum (fail-closed by default), and installs `cx` to
+the **canonical store** (`%LOCALAPPDATA%\Checkmarx\cx\cx.exe` on Windows, `~/.checkmarx/bin/cx` on
+Unix). It needs only `bash` (Git Bash on Windows) — no Python.
 
-> **In-session activation (the one rule):** a running Claude Code captured its PATH at startup, so a
-> *newly added* PATH directory is invisible to it. Place `cx` into a directory **already on PATH**
-> (or use the `CX_BINARY` override); never rely on adding a new PATH entry for this session.
-> Platform detail: `references/windows-path-activation.md`.
+> **In-session activation:** the gate resolves cx from the canonical store by **absolute path**, so it
+> clears on your **next tool call with no restart** — even though a running Claude Code captured its
+> PATH at startup and cannot see the newly-persisted PATH entry. You do **not** need to place cx into
+> an on-PATH folder or "activate" it, and you must **never hand-place a second copy**. (The
+> remediation MCP resolves cx by absolute path too, via `cx_run.sh`; it activates after one `/reload-plugins`.)
 
 When a hook blocked an operation, its deny message already contains the exact command by resolved
 absolute path — e.g. `bash "/…/plugins/cx-security/scripts/cx-bootstrap.sh" install`. Use it
@@ -65,9 +66,19 @@ cx version
 ```
 
 - **Returns a version** → "The `cx` CLI is installed. Version: `<version>`." Proceed to Phase 2.
-- **Fails** → the install isn't on the hook's PATH. Re-place `cx` into an already-on-PATH folder
-  (re-run the bootstrap, or `references/windows-path-activation.md`); don't tell the developer to
-  "open a new terminal." Do not proceed until `cx version` passes.
+- **Fails with `command not found` / 127** → on a **first-install session this is EXPECTED and does
+  NOT mean the install failed.** The bootstrap writes cx to the **canonical store**
+  (`%LOCALAPPDATA%\Checkmarx\cx\cx.exe` / `~/.checkmarx/bin/cx`), which the **gate** resolves by
+  absolute path — but that store is **not on the agent shell's frozen PATH**, so a bare `cx` 127s here.
+  Do **NOT** loop re-running the bootstrap because of it. The real installed/capable signal is the
+  **gate's deny reason on your next gated action**:
+  - **"not authenticated"** → cx is installed **and** capable — proceed to Phase 2 (auth).
+  - **"not installed"** → the bootstrap genuinely did not land cx; re-run `install` once.
+  - **"incapable" / below minimum version** → not a PATH problem, and re-installing won't help (see
+    `references/troubleshooting.md`); do **not** hand-place a cx binary.
+
+  To confirm the binary directly without relying on PATH, invoke it by its canonical absolute path:
+  `"$HOME/.checkmarx/bin/cx" version` (Unix) or `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" version` (Windows).
 
 **Version gate:** the minimum is `scripts/cx-min-version` (the first ast-cli release with `cx mcp
 bridge` / `cx auth login`). A build **below** it is a hard block on every gated action — including
@@ -130,8 +141,8 @@ cx auth validate
 The hooks resolve `cx` in a separate process with a different PATH snapshot, so confirm both:
 
 1. **The gate clears** — the next gated tool call proceeds (no longer denied) and the `Stop` hook no
-   longer errors with `cx: command not found`. This is the real signal: if a *new* PATH folder was
-   added instead of placing `cx` into an already-on-PATH folder, this is where it would still fail.
+   longer errors with `cx: command not found`. After a bootstrap install this happens on the very next
+   call with **no restart**, because the gate resolves the canonical store by absolute path.
 2. **The MCP is loaded** — run `/reload-plugins`, then `/mcp` shows `Checkmarx` Connected
    (`references/mcp.md`).
 

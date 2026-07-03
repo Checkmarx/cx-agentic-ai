@@ -18,7 +18,10 @@ This skill has two entry points:
 
 ## Prerequisites
 
-- Checkmarx `cx` CLI installed and available in PATH
+- Checkmarx `cx` CLI installed. On a first-install session `cx` is in the **canonical store** but not
+  yet on the agent shell's PATH, so invoke it by its **absolute path** —
+  `"$LOCALAPPDATA/Checkmarx/cx/cx.exe"` on Windows, `"$HOME/.checkmarx/bin/cx"` on Unix (these env vars
+  are available in the agent's shell) — and fall back to a bare `cx` only when it is already on PATH.
 - Checkmarx MCP server connected (required for remediation)
 
 > **Remediation is MCP-only.** Every fix MUST come from `mcp__Checkmarx__codeRemediation`. If that tool
@@ -36,10 +39,14 @@ Ask the user which file(s) to scan if not already specified.
 
 ### Step 2 — Run the ASCA Scan
 
-Run the scan on each file:
+Run the scan on each file. Invoke cx by its canonical absolute path so it resolves even when cx isn't
+on the agent shell's PATH (a first-install session); use a bare `cx` only when cx is already on PATH:
 
 ```bash
-cx scan asca -s "<file-path>"
+# Unix (macOS/Linux):
+"$HOME/.checkmarx/bin/cx" scan asca -s "<file-path>"
+# Windows (Git Bash):
+"$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan asca -s "<file-path>"
 ```
 
 ### Step 3 — Process Results
@@ -114,8 +121,10 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
 
   1. The plugin **declares this MCP in `.mcp.json`**, so it starts automatically when the plugin is
      enabled. If the tool is missing, the usual cause is that cx is not configured/authenticated —
-     the bridge can't derive the URL or auth header without a valid key. Verify with
-     `cx auth validate`; if it fails (or reports no API key), run `/cx-cli-setup`.
+     the bridge can't derive the URL or auth header without a valid key. Verify with cx by its
+     canonical absolute path — `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) or
+     `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth validate` (Windows), or a bare `cx auth validate` when
+     cx is on PATH; if it fails (or reports no API key), run `/cx-cli-setup`.
   2. Then tell the user the **one** step only they can perform — Claude Code loads MCP servers at
      startup, so the server can't become live in this running session on its own:
 
@@ -137,10 +146,14 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
 
 ### Step 4 — Re-scan
 
-After all fixes are applied, re-run:
+After all fixes are applied, re-run (same canonical absolute-path invocation as Flow 1 Step 2;
+bare `cx` only when it is on PATH):
 
 ```bash
-cx scan asca -s "<file-path>"
+# Unix (macOS/Linux):
+"$HOME/.checkmarx/bin/cx" scan asca -s "<file-path>"
+# Windows (Git Bash):
+"$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan asca -s "<file-path>"
 ```
 
 Confirm all findings are resolved. If new findings appear, repeat the Remediation flow for them.

@@ -61,25 +61,33 @@ printf '%s  ast-cli_9.9.9_linux_x64.tar.gz\n' "$real" > "$sums"
 ( verify_checksum_against "$archive" "ast-cli_linux_x64.tar.gz" "$sums" ) >/dev/null 2>&1
 if [[ $? -eq 1 ]]; then ok "no exact entry → returns 1 (unverifiable, not a false pass)"; else bad "loose name match leaked a pass"; fi
 
-# 6. Unavailable: warn+proceed (exit 0) by default; die under CX_REQUIRE_CHECKSUM=1.
+# 6. Unavailable: FATAL by default (fail-closed for a security tool); warn+proceed only when the
+#    developer explicitly opts out with CX_REQUIRE_CHECKSUM=0.
 ( _checksum_unavailable "test reason" ) >/dev/null 2>&1
-if [[ $? -eq 0 ]]; then ok "unavailable proceeds by default"; else bad "unavailable should proceed"; fi
-( CX_REQUIRE_CHECKSUM=1; _checksum_unavailable "test reason" ) >/dev/null 2>&1
-if [[ $? -ne 0 ]]; then ok "CX_REQUIRE_CHECKSUM=1 makes unavailable fatal"; else bad "strict mode should die"; fi
+if [[ $? -ne 0 ]]; then ok "unavailable is fatal by default (fail-closed)"; else bad "unavailable should die by default"; fi
+( CX_REQUIRE_CHECKSUM=0; _checksum_unavailable "test reason" ) >/dev/null 2>&1
+if [[ $? -eq 0 ]]; then ok "CX_REQUIRE_CHECKSUM=0 downgrades to warn+proceed"; else bad "explicit opt-out should proceed"; fi
 
-# 7. install_unix placement (sandboxed HOME/PATH; copies a fake staged binary). The test PATH
-#    deliberately omits /usr/local/bin & /opt/homebrew/bin so assertions hold even if run as root.
+# 7. install_unix places the ONE canonical copy at ~/.checkmarx/bin/cx — the absolute path the gate
+#    resolves — regardless of PATH, and does NOT scatter a second copy into an on-PATH dir.
 staged="$tmp/staged-cx"; printf '#!/bin/sh\n' > "$staged"
 
-home1="$tmp/home1"; mkdir -p "$home1/.local/bin"
-dest="$( export HOME="$home1" PATH="$home1/.local/bin:/usr/bin:/bin"; install_unix "$staged" 2>/dev/null )"
-if [[ "$dest" == "$home1/.local/bin/cx" && -f "$dest" ]]; then ok "install_unix prefers ~/.local/bin when on PATH"
+home1="$tmp/home1"; mkdir -p "$home1"
+dest="$( export HOME="$home1" PATH="/usr/bin:/bin"; install_unix "$staged" 2>/dev/null )"
+if [[ "$dest" == "$home1/.checkmarx/bin/cx" && -f "$dest" ]]; then ok "install_unix installs to the canonical ~/.checkmarx/bin/cx"
 else bad "install_unix canonical placement got '$dest'"; fi
 
-fb="$tmp/fallback"; mkdir -p "$fb"
-dest="$( export HOME="$tmp/nohome" PATH="$fb:/usr/bin:/bin"; install_unix "$staged" 2>/dev/null )"
-if [[ "$dest" == "$fb/cx" && -f "$dest" ]]; then ok "install_unix falls back to first writable on-PATH dir"
-else bad "install_unix fallback placement got '$dest'"; fi
+fb="$tmp/fbdir"; mkdir -p "$fb"
+home2="$tmp/home2"; mkdir -p "$home2"
+dest="$( export HOME="$home2" PATH="$fb:/usr/bin:/bin"; install_unix "$staged" 2>/dev/null )"
+if [[ "$dest" == "$home2/.checkmarx/bin/cx" && ! -e "$fb/cx" ]]; then ok "install_unix does not scatter a copy onto PATH"
+else bad "install_unix scattered or misplaced: dest='$dest'"; fi
+
+# 7b. upgrade_unix targets the SAME canonical store (upgrade == install for canonical placement).
+home3="$tmp/home3"; mkdir -p "$home3"
+dest="$( export HOME="$home3" PATH="/usr/bin:/bin"; upgrade_unix "$staged" 2>/dev/null )"
+if [[ "$dest" == "$home3/.checkmarx/bin/cx" && -f "$dest" ]]; then ok "upgrade_unix targets the canonical store"
+else bad "upgrade_unix canonical placement got '$dest'"; fi
 
 # 8. install_binary_atomically: places an executable via stage+rename, leaving no temp file behind.
 atom="$tmp/atom"; mkdir -p "$atom"
@@ -114,10 +122,25 @@ chmod +x "$incap/cx"
 ( verify "$incap/cx" "2.3.54" ) >/dev/null 2>&1
 if [[ $? -ne 0 ]]; then ok "verify dies for an incapable cx (no mcp bridge / hooks)"; else bad "verify must reject incapable cx"; fi
 
-# 10. verify_checksum with an empty tag (caller couldn't resolve it) is UNAVAILABLE, not fatal —
-#     proceeds by default (warn) so an offline/curl-less host can still install.
+# 10. verify_checksum with an empty tag (caller couldn't resolve it) is UNAVAILABLE → now FATAL by
+#     default (fail-closed); proceeds only when the developer opts out with CX_REQUIRE_CHECKSUM=0.
 ( verify_checksum "$archive" "" ) >/dev/null 2>&1
-if [[ $? -eq 0 ]]; then ok "verify_checksum empty tag → unavailable, proceeds by default"; else bad "empty tag should proceed (warn)"; fi
+if [[ $? -ne 0 ]]; then ok "verify_checksum empty tag → fatal by default (fail-closed)"; else bad "empty tag should be fatal by default"; fi
+( CX_REQUIRE_CHECKSUM=0; verify_checksum "$archive" "" ) >/dev/null 2>&1
+if [[ $? -eq 0 ]]; then ok "verify_checksum empty tag proceeds under CX_REQUIRE_CHECKSUM=0"; else bad "explicit opt-out empty tag should proceed"; fi
+
+# 11. ensure_dir_on_path_profile CREATES a login profile on a fresh account (no dotfiles) so bare cx
+#     resolves in future sessions — B7 (fresh zsh/bash_profile users were silently skipped before).
+ph="$tmp/prof_home"; mkdir -p "$ph"
+( export HOME="$ph" SHELL="/bin/bash" PATH="/usr/bin:/bin"; ensure_dir_on_path_profile "$ph/.checkmarx/bin" >/dev/null 2>&1 )
+if grep -rqF "cx-security (cx-bootstrap)" "$ph" 2>/dev/null; then ok "ensure_dir_on_path_profile creates a profile on a fresh account"
+else bad "ensure_dir_on_path_profile wrote no profile on a fresh account"; fi
+
+# 11b. Idempotent — a second call must not duplicate the marker.
+( export HOME="$ph" SHELL="/bin/bash" PATH="/usr/bin:/bin"; ensure_dir_on_path_profile "$ph/.checkmarx/bin" >/dev/null 2>&1 )
+n="$(grep -rhF "cx-security (cx-bootstrap)" "$ph" 2>/dev/null | wc -l | tr -d ' ')"
+if [[ "$n" == "1" ]]; then ok "ensure_dir_on_path_profile is idempotent (marker written once)"
+else bad "ensure_dir_on_path_profile duplicated the marker (found $n)"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

@@ -12,7 +12,7 @@
           },
           {
             "type": "command",
-            "command": "cx hooks claude-pre-tool-use",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks claude-pre-tool-use",
             "timeout": 10,
             "statusMessage": "Checking command against security policy..."
           }
@@ -29,7 +29,7 @@
           },
           {
             "type": "command",
-            "command": "cx hooks claude-pre-file-write",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks claude-pre-file-write",
             "timeout": 60,
             "statusMessage": "Checking file write against security policy..."
           }
@@ -46,7 +46,7 @@
           },
           {
             "type": "command",
-            "command": "cx hooks claude-pre-file-write",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks claude-pre-file-write",
             "timeout": 60,
             "statusMessage": "Checking file edit against security policy..."
           }
@@ -63,7 +63,7 @@
           },
           {
             "type": "command",
-            "command": "cx hooks claude-pre-tool-use",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks claude-pre-tool-use",
             "timeout": 10,
             "statusMessage": "Checking MCP tool call against security policy..."
           }
@@ -76,7 +76,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v cx >/dev/null 2>&1 && exec cx hooks claude-stop || exit 0",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks claude-stop",
             "timeout": 10
           }
         ]

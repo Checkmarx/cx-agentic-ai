@@ -38,18 +38,18 @@ def _log(event, **fields):
 # (search marker: CX_MIN_VERSION)
 _MIN_VERSION_FALLBACK = (2, 3, 54)
 
-# The cx executable the GATE invokes for its own probes. CX_BINARY pins the gate to a specific
-# cx by ABSOLUTE path (e.g. when several cx builds exist) instead of whatever PATH resolves; it
-# must be an absolute path to an existing executable. A set-but-invalid value is reported as an
-# error so the gate fails CLOSED rather than silently falling back to a different binary. Note:
-# the native scanner (hooks.json) and the remediation MCP (.mcp.json) still run bare `cx` from
-# PATH and do NOT honor CX_BINARY, so cx_check() additionally REQUIRES that PATH cx exists and
-# resolves to the SAME file as CX_BINARY — otherwise the gate could pass while the scanner that
-# actually blocks bad writes can't run (fail open). CX_BINARY is a pin, not a PATH replacement.
+# The cx executable the GATE invokes for its own probes, resolved by ABSOLUTE path where possible so
+# the gate works the instant cx is installed — even before it is on PATH. A freshly-installed cx in
+# the canonical store is invisible to this frozen-PATH session (setx/shell-profile only affect
+# FUTURE sessions), so relying on PATH alone would keep the gate blocked until a restart. Resolution
+# precedence: CX_BINARY (explicit pin) -> the canonical per-OS store the bootstrap installs to -> PATH.
+# The stage-2 scanner runs through hooks/cx_run.sh, which uses the SAME precedence, so whatever the
+# gate validates (version/capability/auth) is exactly what scans — no PATH dependency, no fail-open.
+# (The remediation MCP resolves cx the SAME way, via hooks/cx_run.sh, so it is not a bare-PATH
+# consumer either; it activates after one /reload-plugins, no scan is bypassed.) CX_BINARY must be valid.
 def _cx_binary():
-    """Return (exe, error): exe is the validated CX_BINARY override, else 'cx' (PATH). error is
-    a human string when CX_BINARY is set but invalid (not absolute / missing / not executable),
-    else None."""
+    """Return (exe, error): exe is the validated CX_BINARY override, else 'cx'. error is a human
+    string when CX_BINARY is set but invalid (not absolute / missing / not executable), else None."""
     override = os.environ.get("CX_BINARY")
     if not override:
         return "cx", None
@@ -62,21 +62,35 @@ def _cx_binary():
     return override, None
 
 
-def _cx_exe():
-    """The cx executable string for subprocess calls — the valid override or 'cx'. Lenient:
-    strict validation + the fail-closed deny happen once in cx_check() via _cx_binary()."""
-    exe, err = _cx_binary()
-    return exe if err is None else "cx"
-
-
-def _same_file(a, b):
-    """True iff a and b are the SAME on-disk file (st_dev/st_ino on POSIX, file id on Windows),
-    resolving symlinks/hardlinks and path-spelling differences. Both must exist; any error →
-    False, so an indeterminate comparison is treated fail-CLOSED (a mismatch)."""
+def _canonical_cx():
+    """Absolute path of cx in the canonical per-OS store the bootstrap installs to, if it exists and
+    is executable — else None. Windows: %LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe ; Unix: ~/.checkmarx/bin/cx.
+    Lets the gate resolve cx by absolute path without waiting for a PATH / new-session refresh."""
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.path.join(
+            os.path.expanduser("~"), "AppData", "Local")
+        p = os.path.join(base, "Checkmarx", "cx", "cx.exe")
+    else:
+        p = os.path.join(os.path.expanduser("~"), ".checkmarx", "bin", "cx")
     try:
-        return os.path.samefile(a, b)
+        if os.path.isfile(p) and (os.name == "nt" or os.access(p, os.X_OK)):
+            return p
     except OSError:
-        return False
+        return None
+    return None
+
+
+def _cx_exe():
+    """The cx executable for subprocess calls, resolved by absolute path where possible:
+    a valid CX_BINARY -> the canonical store -> 'cx' (PATH). Lenient: strict CX_BINARY validation +
+    the fail-closed deny happen once in cx_check() via _cx_binary()."""
+    exe, err = _cx_binary()
+    if err is None and exe != "cx":
+        return exe
+    canon = _canonical_cx()
+    if canon:
+        return canon
+    return "cx"
 
 
 # Keep auth validation fast: no retries, short network timeout. Built per call so it honors a
@@ -149,9 +163,9 @@ _UNSCANNED_AUDIT_FILE = _state_path("cx_unscanned_audit.log")
 # Credential-recovery commands must be allowed even when unauthenticated — otherwise
 # the auth gate blocks the very command that fixes auth (a chicken-and-egg that forces
 # users to fall back to the shell `!` prefix). Matches a bare `cx auth ...` /
-# `cx configure ...` invocation; redirects (e.g. `1>/dev/null`) are fine, but chaining /
-# substitution metacharacters disqualify it so a benign prefix can't smuggle another
-# command past the gate.
+# `cx configure ...` invocation. The shared _bare_bash_command guard then disqualifies chaining /
+# substitution metacharacters AND any redirect to a real file (a null-sink `1>/dev/null` is fine) —
+# so a benign prefix can neither smuggle another command nor exfiltrate the live token past the gate.
 _AUTH_RECOVERY_RE = re.compile(r"^\s*cx\s+(?:auth|configure)\b")
 _SHELL_CHAINING = (";", "|", "&", "`", "$(", "\n")
 
@@ -187,6 +201,26 @@ def _bootstrap_command_str(mode):
     """The exact command the agent should run to escape the block — embedded in deny
     messages so the agent doesn't need ${CLAUDE_PLUGIN_ROOT} (which is empty in its shell)."""
     return 'bash "{0}" {1}'.format(_bootstrap_script_path(), mode)
+
+
+def _cx_bash_token():
+    """The gate's resolved cx as a single Bash-safe token, for embedding in deny messages the agent
+    runs in its OWN shell. On a first-install session cx sits in the canonical store but NOT on the
+    frozen PATH, so a bare `cx` would exit 127 — emit the resolved ABSOLUTE path instead (forward
+    slashes so Git-Bash doesn't treat backslashes as escapes; double-quoted so a path with spaces
+    survives). Falls back to bare 'cx' when only PATH resolution is available (later sessions / manual
+    install), so the guidance degrades cleanly with no regression."""
+    exe = _cx_exe()
+    if os.path.isabs(exe):
+        return '"{0}"'.format(exe.replace("\\", "/"))
+    return "cx"
+
+
+def _cx_recovery_command_str(args):
+    """A ready-to-run `cx auth …` / `cx configure …` recovery command using the gate's resolved cx
+    (absolute path when cx isn't yet on PATH). Mirrors _bootstrap_command_str, which likewise embeds a
+    resolved absolute path so the agent never needs ${CLAUDE_PLUGIN_ROOT} / cx on PATH."""
+    return "{0} {1}".format(_cx_bash_token(), args)
 
 
 def _load_min_version(path=None):
@@ -301,12 +335,14 @@ def _version_state_uncached():
     return numeric
 
 
-def _binary_identity():
+def _binary_identity(resolved=None):
     """(resolved cx path, mtime) — the identity used to invalidate cached gate state (version AND
-    auth) when the binary changes. Best-effort: an unresolvable binary yields a None mtime, which
-    differs from any real cached value and triggers a safe re-probe."""
-    exe = _cx_exe()
-    resolved = exe if os.path.isabs(exe) else (shutil.which(exe) or exe)
+    auth) when the binary changes. Pass an already-resolved path to skip re-running _cx_exe() +
+    shutil.which() (the gate resolves once per call and threads it through). Best-effort: an
+    unresolvable binary yields a None mtime, which differs from any real cached value → safe re-probe."""
+    if resolved is None:
+        exe = _cx_exe()
+        resolved = exe if os.path.isabs(exe) else (shutil.which(exe) or exe)
     try:
         mtime = os.path.getmtime(resolved)
     except OSError:
@@ -314,103 +350,69 @@ def _binary_identity():
     return resolved, mtime
 
 
-def _version_cache_key(identity=None):
-    """Identity of the inputs that determine the version state: the RESOLVED cx binary, its
-    mtime, and the configured minimum version. A cached 'ok'/'dev' is only reusable while all
-    three are unchanged — otherwise it is stale (e.g. PATH cx was swapped for an older/incapable
-    build, or cx was upgraded in place, or cx-min-version changed) and must be re-probed even
-    inside the TTL. `identity` lets the caller pass ONE binary-identity snapshot (taken once per
-    gate invocation) so the version/auth/scanner caches all key off the same (path, mtime)."""
-    cx, mtime = identity if identity is not None else _binary_identity()
-    return {"cx": cx, "mtime": mtime, "min": ".".join(str(n) for n in _load_min_version())}
+def _cached_probe(cache_file, ttl, key, probe, should_cache):
+    """Memoize probe() to `cache_file` for `ttl` seconds, keyed on the dict `key` (the resolved-binary
+    identity plus any extra invalidators — min version, credential mtime). A cached value is reused
+    ONLY while every `key` field still matches and its timestamp is within `ttl`; and ONLY results for
+    which should_cache(result) is True are ever written — so a failing/pass-through probe can never be
+    masked (the fail-open a stale positive would cause). A falsy `cache_file` (no private state dir)
+    disables caching — re-probe every call. Never raises: any I/O or decode error falls through to a
+    live probe (fail-safe). This is the single home for the gate's version/auth/scanner caching."""
+    if cache_file:
+        try:
+            with open(cache_file, encoding="utf-8") as f:
+                cached = json.loads(f.read())
+            ts = cached.get("ts") if isinstance(cached, dict) else None
+            if (isinstance(cached, dict) and "value" in cached
+                    and isinstance(ts, (int, float)) and not isinstance(ts, bool)
+                    and (time.time() - ts) < ttl
+                    and all(cached.get(k) == v for k, v in key.items())):
+                return cached["value"]
+        except (OSError, ValueError, TypeError):
+            pass
+    result = probe()
+    if cache_file and should_cache(result):
+        try:
+            record = {"value": result, "ts": time.time()}
+            record.update(key)
+            with open(cache_file, "w", encoding="utf-8") as f:
+                f.write(json.dumps(record))
+            _chmod_600(cache_file)
+        except OSError:
+            pass
+    return result
 
 
 def _version_state(identity=None):
-    """Cached _version_state_uncached(): reuse a fresh result to avoid spawning cx on every
-    gated call. Only 'ok'/'dev' are cached (a passing state is stable); failing states are
-    re-checked every time so a just-completed install/upgrade is picked up instantly even if the
-    bootstrap didn't clear the cache. The cache is KEYED to _version_cache_key() (resolved binary
-    + mtime + min-version), so a different/updated cx within the TTL re-probes instead of riding a
-    stale 'ok' = fail open."""
-    key = _version_cache_key(identity)
-    try:
-        if _VERSION_CACHE_FILE and (time.time() - os.path.getmtime(_VERSION_CACHE_FILE)) < _VERSION_CACHE_TTL:
-            with open(_VERSION_CACHE_FILE, encoding="utf-8") as f:
-                cached = json.loads(f.read())
-            if (isinstance(cached, dict) and cached.get("state") in ("ok", "dev")
-                    and cached.get("cx") == key["cx"]
-                    and cached.get("mtime") == key["mtime"]
-                    and cached.get("min") == key["min"]):
-                return cached["state"]
-    except (OSError, ValueError, TypeError):
-        pass
-    state = _version_state_uncached()
-    if state in ("ok", "dev") and _VERSION_CACHE_FILE:
-        try:
-            record = {"state": state}
-            record.update(key)
-            with open(_VERSION_CACHE_FILE, "w", encoding="utf-8") as f:
-                f.write(json.dumps(record))
-            _chmod_600(_VERSION_CACHE_FILE)
-        except OSError:
-            pass
-    return state
-
-
-def _auth_cache_valid(identity=None):
-    """A cached auth pass is reusable only while fresh AND for the SAME resolved cx binary — a
-    swapped/replaced binary (potentially different credentials) must re-validate. None path (no
-    private state dir) → never cached. `identity` lets the caller pass ONE binary-identity snapshot
-    (taken once per gate invocation) so a mid-invocation binary swap can't poison the cache."""
-    if not _AUTH_CACHE_FILE:
-        return False
-    try:
-        with open(_AUTH_CACHE_FILE, encoding="utf-8") as f:
-            cached = json.loads(f.read())
-    except (OSError, ValueError, TypeError):
-        return False
-    if not isinstance(cached, dict):
-        return False
+    """Cached _version_state_uncached(): reuse a fresh 'ok'/'dev' to avoid spawning cx on every gated
+    call. Failing states are re-probed every time so a just-completed install/upgrade is picked up
+    instantly. Keyed on the resolved binary (path + mtime) + the configured minimum version, so a
+    different/updated cx or a changed floor re-probes instead of riding a stale 'ok' = fail open."""
     cx, mtime = identity if identity is not None else _binary_identity()
-    if cached.get("cx") != cx or cached.get("mtime") != mtime:
-        return False
-    ts = cached.get("ts")
-    if not isinstance(ts, (int, float)) or isinstance(ts, bool):
-        return False
-    return (time.time() - ts) < _AUTH_CACHE_TTL
+    key = {"cx": cx, "mtime": mtime, "min": ".".join(str(n) for n in _load_min_version())}
+    return _cached_probe(_VERSION_CACHE_FILE, _VERSION_CACHE_TTL, key,
+                         _version_state_uncached, lambda s: s in ("ok", "dev"))
 
 
-def _write_auth_cache(identity=None):
-    if not _AUTH_CACHE_FILE:
-        return
-    cx, mtime = identity if identity is not None else _binary_identity()
+def _auth_validate_probe():
+    """True iff `cx auth validate` succeeds (the gate's notion of authenticated; accepts an OAuth
+    refresh token). Never raises — any spawn/timeout error is a non-authenticated result."""
     try:
-        with open(_AUTH_CACHE_FILE, "w", encoding="utf-8") as f:
-            f.write(json.dumps({"ts": time.time(), "cx": cx, "mtime": mtime}))
-        _chmod_600(_AUTH_CACHE_FILE)
-    except OSError:
-        pass
+        result = subprocess.run(_auth_validate_cmd(), stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, timeout=6)
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, TypeError):
+        return False
 
 
 def _is_authenticated(identity=None):
-    """Return True if cx can reach and authenticate with Checkmarx One. NOTE: this is the GATE's
-    notion of authenticated (`cx auth validate`), which accepts an OAuth refresh token. It is NOT
-    sufficient on its own — the native scanner authenticates differently (see _scanner_state)."""
-    if _auth_cache_valid(identity):
-        return True
-    try:
-        result = subprocess.run(
-            _auth_validate_cmd(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=6,
-        )
-        if result.returncode == 0:
-            _write_auth_cache(identity)
-            return True
-        return False
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, TypeError):
-        return False
+    """Return True if cx can reach and authenticate with Checkmarx One. Cached for the SAME resolved
+    cx binary only — a swapped binary (possibly different credentials) re-validates. NOTE: this is the
+    GATE's notion of authenticated; it is NOT sufficient on its own — the native scanner authenticates
+    differently (see _scanner_state)."""
+    cx, mtime = identity if identity is not None else _binary_identity()
+    return _cached_probe(_AUTH_CACHE_FILE, _AUTH_CACHE_TTL, {"cx": cx, "mtime": mtime},
+                         _auth_validate_probe, lambda ok: ok is True)
 
 
 # --- Scanner readiness: detect the native scanner's SILENT pass-through (the OAuth fail-open) -------
@@ -476,53 +478,15 @@ def _probe_scanner_passthrough():
     return _SCANNER_SCAN
 
 
-def _scanner_cache_valid(identity=None):
-    """A cached scanner-WILL-SCAN pass is reusable only while fresh AND for the SAME resolved cx
-    binary AND the SAME credential file. ONLY a positive (scan) result is ever cached — a
-    pass-through is NEVER cached, so it can never be masked. None path (no private state dir) →
-    never cached (mirrors the auth/version None-guard: a read-only home just re-probes)."""
-    if not _SCANNER_CACHE_FILE:
-        return False
-    try:
-        with open(_SCANNER_CACHE_FILE, encoding="utf-8") as f:
-            cached = json.loads(f.read())
-    except (OSError, ValueError, TypeError):
-        return False
-    if not isinstance(cached, dict):
-        return False
-    cx, mtime = identity if identity is not None else _binary_identity()
-    if cached.get("cx") != cx or cached.get("mtime") != mtime:
-        return False
-    if cached.get("cred") != _credential_mtime():
-        return False
-    ts = cached.get("ts")
-    if not isinstance(ts, (int, float)) or isinstance(ts, bool):
-        return False
-    return (time.time() - ts) < _SCANNER_CACHE_TTL
-
-
-def _write_scanner_cache(identity=None):
-    if not _SCANNER_CACHE_FILE:
-        return
-    cx, mtime = identity if identity is not None else _binary_identity()
-    try:
-        with open(_SCANNER_CACHE_FILE, "w", encoding="utf-8") as f:
-            f.write(json.dumps({"ts": time.time(), "cx": cx, "mtime": mtime, "cred": _credential_mtime()}))
-        _chmod_600(_SCANNER_CACHE_FILE)
-    except OSError:
-        pass
-
-
 def _scanner_state(identity=None):
     """Cached scanner readiness: _SCANNER_SCAN (cached on success), _SCANNER_PASSTHROUGH, or
-    _SCANNER_UNKNOWN. Only the positive scan result is cached; pass-through/unknown always re-probe
-    so a credential fix (or break) is reflected on the next gated call."""
-    if _scanner_cache_valid(identity):
-        return _SCANNER_SCAN
-    state = _probe_scanner_passthrough()
-    if state == _SCANNER_SCAN:
-        _write_scanner_cache(identity)
-    return state
+    _SCANNER_UNKNOWN. Only the positive scan result is cached (a pass-through/unknown is never masked);
+    keyed on the resolved cx binary AND the credential-file mtime, so a credential fix (or break) is
+    reflected on the next gated call."""
+    cx, mtime = identity if identity is not None else _binary_identity()
+    key = {"cx": cx, "mtime": mtime, "cred": _credential_mtime()}
+    return _cached_probe(_SCANNER_CACHE_FILE, _SCANNER_CACHE_TTL, key,
+                         _probe_scanner_passthrough, lambda s: s == _SCANNER_SCAN)
 
 
 def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, version_state=None) -> None:
@@ -560,7 +524,7 @@ def _read_hook_input():
         if sys.stdin.isatty():
             return {}
         raw = sys.stdin.read()
-    except Exception:
+    except (OSError, ValueError):
         return {}
     if not raw or not raw.strip():
         return {}
@@ -580,14 +544,66 @@ def _bash_command(hook_input):
     return command if isinstance(command, str) else ""
 
 
-def _is_auth_recovery_command(hook_input):
-    """True only for a bare `cx auth ...` / `cx configure ...` Bash command with no
-    command chaining — the credential-recovery path that must run even when
-    unauthenticated, so the auth gate never blocks the command that fixes auth."""
+# The ONLY redirect SAFE inside an allow carve-out: suppression to the shell's null device,
+# `/dev/null` (the oauth.md-mandated `1>/dev/null`, with an optional fd or `>>`). The carve-out only
+# ever matches a Bash tool command, whose shell is bash / Git-Bash — where `/dev/null` is the null
+# device but `NUL` / `$null` are ORDINARY files, so those are NOT safe here. The null-device name must
+# be a complete shell token — `(?=\s|$)`, not `\b` — so a real file whose name merely STARTS with it
+# (`/dev/null.bak`) is not mistaken for suppression. ANY other redirect could write the command's
+# stdout — which for `cx auth login` is the LIVE token — to a real file, so it disqualifies the
+# carve-out. (fd-dups like `2>&1` contain `&` and are already rejected by _SHELL_CHAINING.)
+_NULL_REDIRECT_RE = re.compile(r'(?:&|\d)?(?:>>?|<)\s*/dev/null(?=\s|$)')
+
+
+def _has_unsafe_redirect(command):
+    """True if the command contains a redirect to anything OTHER than `/dev/null`. A redirect to a
+    real file could exfiltrate a command's stdout (e.g. the live token `cx auth login` prints) to an
+    attacker-chosen path. The sanctioned `1>/dev/null` suppression stays allowed; any residual `>`/`<`
+    after stripping the exact null-device redirects is unsafe."""
+    residual = _NULL_REDIRECT_RE.sub(" ", command)
+    return ">" in residual or "<" in residual
+
+
+def _bare_bash_command(hook_input):
+    """The Bash command string IFF it is a single BARE command safe to consider for an allow carve-out:
+    a Bash tool call, with NO shell chaining/substitution (_SHELL_CHAINING) and NO unsafe redirect
+    (_has_unsafe_redirect). Returns None otherwise. This is the one audited guard the bootstrap and
+    auth-recovery carve-outs share, so a benign prefix can neither smuggle another command nor
+    exfiltrate a command's stdout past the gate."""
     command = _bash_command(hook_input)
-    if not command or not _AUTH_RECOVERY_RE.match(command):
+    if not command:
+        return None
+    if any(tok in command for tok in _SHELL_CHAINING):
+        return None
+    if _has_unsafe_redirect(command):
+        return None
+    return command
+
+
+def _is_auth_recovery_command(hook_input):
+    """True for a credential-recovery command (`cx auth …` / `cx configure …`) that passes the shared
+    bare-command guard — the path that must run even when unauthenticated so the auth gate never blocks
+    the command that fixes auth. Accepts the BARE form (`cx auth …`, for later sessions / manual install
+    where cx is on PATH) AND the resolved ABSOLUTE-path form the deny messages emit (`"<cx>" auth …`) so
+    cx resolves on a first-install session before it is on PATH. The absolute form is pinned to the
+    gate's OWN resolved cx (_cx_exe) — never an attacker-chosen path."""
+    command = _bare_bash_command(hook_input)
+    if command is None:
         return False
-    return not any(tok in command for tok in _SHELL_CHAINING)
+    if _AUTH_RECOVERY_RE.match(command):
+        return True
+    # The only remaining accepted form is `"<resolved cx>" auth|configure …`, which begins with a
+    # quote or an absolute path — so ordinary commands (echo, ls, …) skip the _cx_exe() filesystem
+    # stat + dynamic-regex build below.
+    s = command.lstrip()
+    if not (s[:1] in ('"', "/") or (len(s) >= 2 and s[1] == ":")):
+        return False
+    exe = _cx_exe()
+    if os.path.isabs(exe):
+        tok = re.escape(exe.replace("\\", "/"))
+        if re.match(r'^\s*"?' + tok + r'"?\s+(?:auth|configure)\b', command):
+            return True
+    return False
 
 
 def _is_bootstrap_command(hook_input):
@@ -598,10 +614,8 @@ def _is_bootstrap_command(hook_input):
     ${CLAUDE_PLUGIN_ROOT} placeholder (which the agent's shell does NOT expand) is honored only
     after expanding it from the gate's own environment and proving it resolves to the bundled
     bootstrap — never blessed blindly."""
-    command = _bash_command(hook_input)
-    if not command:
-        return False
-    if any(tok in command for tok in _SHELL_CHAINING):
+    command = _bare_bash_command(hook_input)
+    if command is None:
         return False
     m = _BOOTSTRAP_RE.match(command)
     if not m:
@@ -671,7 +685,7 @@ def cx_check():
     # 2.5 CX_BINARY override: validate before trusting it. A set-but-invalid value fails CLOSED
     #     (never silently use a different binary). When valid, every gate probe below uses it,
     #     and the version/capability/auth gates then prove it's a real, recent, capable, authed cx.
-    cx_path, cx_err = _cx_binary()
+    _, cx_err = _cx_binary()
     if cx_err is not None:
         _deny(
             reason=(
@@ -686,73 +700,40 @@ def cx_check():
             tool_name=tool,
         )
 
-    # 3. cx absent → block (even offline). No network-reachability allow path.
-    #    The native scanner (hooks.json: `cx hooks claude-*`) and the remediation MCP
-    #    (.mcp.json: `cx mcp bridge`) ALWAYS run bare `cx` resolved from PATH — they do NOT
-    #    honor CX_BINARY. So the cx the gate proves recent/capable/authed must be the cx ON
-    #    PATH, or the gate fails OPEN: it could bless an off-PATH CX_BINARY and pass while the
-    #    PATH-resolved scanner (absent, older, or incapable) exits non-blocking and the action
-    #    runs UNSCANNED. Therefore PATH cx must exist regardless of CX_BINARY, and when CX_BINARY
-    #    is set it must point at the SAME file as PATH cx.
-    path_cx = shutil.which("cx")
-    if path_cx is None:
-        if cx_path != "cx":
-            _deny(
-                reason=(
-                    "The Checkmarx CLI override CX_BINARY is set, but `cx` is not on PATH. The "
-                    "native security scanner and the remediation MCP run `cx` from PATH, so cx "
-                    "must be installed on PATH too — CX_BINARY alone is not enough. This operation "
-                    "is BLOCKED."
-                ),
-                context=(
-                    "CX_BINARY validated, but `cx` is not resolvable on PATH. hooks.json runs "
-                    "`cx hooks claude-*` and .mcp.json runs `cx mcp bridge`, both via PATH — so a "
-                    "gate that trusted only CX_BINARY would pass while the scanner could not run "
-                    "(fail open). Put the SAME cx on PATH (or unset CX_BINARY and install cx "
-                    "normally), then retry. All agent actions are blocked fail-closed. To "
-                    "self-install now, run the plugin's bundled bootstrap by its resolved absolute "
-                    "path:\n    " + _bootstrap_command_str("install")
-                ),
-                reason_code="cx_binary_not_on_path",
-                tool_name=tool,
-            )
+    # 3. Resolve the effective cx the gate (and the stage-2 hooks/cx_run.sh wrapper) will run:
+    #    CX_BINARY -> canonical store -> PATH. Because cx_run.sh uses the SAME precedence, the binary
+    #    the gate proves recent/capable/authed below is exactly the one that scans — no PATH
+    #    dependency, no fail-open. (The remediation MCP resolves cx the same way via hooks/cx_run.sh,
+    #    so it is not a bare-PATH consumer either; if cx is absent it merely doesn't load — non-fail-open
+    #    — so it is NOT required here.) A cx just
+    #    installed to the canonical store resolves immediately, even before this frozen-PATH session
+    #    can see it on PATH — which is what stops a fresh install from reading as "not installed".
+    #    If NOTHING resolves, cx is genuinely absent → block.
+    effective = _cx_exe()
+    resolved = effective if os.path.isabs(effective) else shutil.which(effective)
+    if resolved is None:
         _deny(
             reason=(
                 "The Checkmarx CLI (cx) is not installed. Security scanning cannot run, so this "
                 "operation is BLOCKED. Run /cx-cli-setup to install and authenticate it, then retry."
             ),
             context=(
-                "cx CLI is not installed on this machine. All agent actions are blocked fail-closed "
-                "until it is installed and authenticated. IMMEDIATELY invoke the cx-cli-setup skill "
-                "(via /cx-cli-setup). To self-install now, run the plugin's bundled bootstrap by its "
-                "resolved absolute path (its directory is empty in ${CLAUDE_PLUGIN_ROOT} in your "
-                "shell, so use this literal command):\n    " + _bootstrap_command_str("install")
+                "cx CLI is not installed on this machine (not found via CX_BINARY, the canonical "
+                "store, or PATH). All agent actions are blocked fail-closed until it is installed and "
+                "authenticated. IMMEDIATELY invoke the cx-cli-setup skill (via /cx-cli-setup). To "
+                "self-install now, run the plugin's bundled bootstrap by its resolved absolute path "
+                "(its directory is empty in ${CLAUDE_PLUGIN_ROOT} in your shell, so use this literal "
+                "command):\n    " + _bootstrap_command_str("install")
             ),
             reason_code="cx_absent",
             tool_name=tool,
         )
-    if cx_path != "cx" and not _same_file(path_cx, cx_path):
-        _deny(
-            reason=(
-                "The Checkmarx CLI override CX_BINARY points to a DIFFERENT cx than the one on "
-                "PATH. The native scanner and MCP run cx from PATH, so the gate cannot vouch for a "
-                "different binary. This operation is BLOCKED until they are the same cx."
-            ),
-            context=(
-                "CX_BINARY ({0}) and the cx on PATH ({1}) are not the same file. The gate validates "
-                "CX_BINARY, but hooks.json / .mcp.json invoke PATH cx — a mismatch could let an "
-                "unvalidated (older / incapable) scanner run = fail open. Point CX_BINARY at the "
-                "same cx that is on PATH, or unset it. All agent actions are blocked "
-                "fail-closed.".format(cx_path, path_cx)
-            ),
-            reason_code="cx_binary_mismatch",
-            tool_name=tool,
-        )
 
-    # Snapshot the cx binary identity ONCE so the auth and scanner-readiness caches key off the
-    # SAME (path, mtime): an atomic cx replace mid-invocation can't poison one cache with another
-    # binary's identity (which could let a stale 'authenticated'/'will-scan' ride a swapped cx).
-    identity = _binary_identity()
+    # Snapshot the cx binary identity ONCE (reusing the `resolved` path from step 3 — no second
+    # _cx_exe()/which() walk) so the auth and scanner-readiness caches key off the SAME (path, mtime):
+    # an atomic cx replace mid-invocation can't poison one cache with another binary's identity (which
+    # could let a stale 'authenticated'/'will-scan' ride a swapped cx).
+    identity = _binary_identity(resolved)
 
     # 4. Version gate — BEFORE auth-recovery, so a below-min cx can't sneak through via
     #    `cx auth login`. A below-min build lacks `cx mcp bridge` / `cx auth login`.
@@ -793,23 +774,23 @@ def cx_check():
             version_state="unrunnable",
         )
     if state == "incapable":
-        min_ver = ".".join(str(n) for n in _load_min_version())
         _deny(
             reason=(
                 "The Checkmarx CLI (cx) is installed but MISSING the security-scanner subcommands "
-                "(cx mcp bridge / cx hooks claude-*). This build cannot run the gate or the "
-                "remediation MCP, so this operation is BLOCKED until cx is upgraded to a build that "
-                "includes them."
+                "(cx mcp bridge / cx hooks claude-*). This build cannot run the gate, and re-running "
+                "install/upgrade will only re-fetch the same incapable build — so this operation is "
+                "BLOCKED and cannot be unblocked from here."
             ),
             context=(
-                "cx ran `cx version` but one or more of the `cx mcp bridge` / `cx hooks claude-*` "
-                "--help probes failed — this build predates (some of) the agent-security hooks "
-                "(capability_missing). A numeric version match is NOT sufficient. All agent actions "
-                "are blocked fail-closed until cx is upgraded to a capable build (>= v{0} WITH the "
-                "agent-hooks subcommands). Invoke /cx-cli-setup (Upgrade). To self-upgrade now, run "
-                "the plugin's bundled bootstrap by its resolved absolute path:\n    {1}".format(
-                    min_ver, _bootstrap_command_str("upgrade")
-                )
+                "cx ran `cx version` but the `cx mcp bridge` / `cx hooks claude-*` capability probes "
+                "failed — this build predates the agent-security hooks (capability_missing), and a "
+                "numeric version match is NOT sufficient. This is a TERMINAL state: it needs a "
+                "capability-complete cx build, which may not be publicly available yet. Do NOT try to "
+                "work around the gate — do NOT hand-place a cx binary, edit PATH, run setx, or clear "
+                "the gate's caches; that only hides the problem without restoring scanning. Tell the "
+                "developer a capable cx build is required, and stop. (If the developer has an internal "
+                "capable build, they can set CX_BINARY to its absolute path.) All agent actions remain "
+                "blocked fail-closed."
             ),
             reason_code="capability_missing",
             tool_name=tool,
@@ -832,16 +813,22 @@ def cx_check():
                 "Run /cx-cli-setup to configure and authenticate, then retry."
             ),
             context=(
-                "cx auth validate failed — the CLI could not reach Checkmarx One or credentials are "
-                "expired/missing. You can FIX THIS YOURSELF: the gate allows credential-recovery "
-                "commands (`cx auth …` / `cx configure …` / `cx auth validate`) through the Bash tool "
-                "even while it blocks everything else — so run `cx auth login --base-auth-uri <url> "
-                "--tenant <tenant>` (browser sign-in) or `cx configure set --prop-name cx_apikey "
-                "--prop-value <key>` (API key) DIRECTLY; do NOT hand the command to the developer with "
-                "the `!` prefix. `cx auth login` opens the browser automatically and blocks until login "
-                "finishes (~5 min) — run it with a long timeout or in the background. Invoke the "
-                "cx-cli-setup skill (/cx-cli-setup) for the guided flow. Only those credential-recovery "
-                "commands run until authentication succeeds."
+                "cx auth validate failed — cx is installed but not authenticated (credentials missing "
+                "or expired, or the backend was unreachable). Invoke the cx-cli-setup skill "
+                "(/cx-cli-setup) for the guided flow. There are two ways to authenticate, and they "
+                "differ in who runs them:\n"
+                "- Browser sign-in (OAuth): you may run this yourself — it opens the developer's "
+                "browser (with MFA) and no secret passes through you. The gate allows this recovery "
+                "command through while it blocks everything else, and it resolves cx by absolute path "
+                "so it works even before cx is on your PATH:\n    "
+                + _cx_recovery_command_str("auth login --base-auth-uri <url> --tenant <tenant>")
+                + "\n  It blocks until the developer finishes (~5 min) — run it with a long timeout or "
+                "in the background.\n"
+                "- API key: the DEVELOPER runs this in their own terminal (it is a plaintext secret — "
+                "do not type an API key yourself):\n    "
+                + _cx_recovery_command_str("configure set --prop-name cx_apikey --prop-value <key>")
+                + "\nOnly `cx auth …` / `cx configure …` recovery commands run until authentication "
+                "succeeds."
             ),
             reason_code="unauthenticated",
             tool_name=tool,
@@ -866,15 +853,16 @@ def cx_check():
             ),
             context=(
                 "`cx auth validate` passed, but `cx hooks claude-pre-file-write` reports 'pass-through "
-                "mode (not authenticated)' — the native scanner could not authenticate with the "
-                "current stored credential (it may be stale or expired, or the backend was "
-                "unreachable when it tried) and would silently allow everything UNSCANNED. IMMEDIATELY "
-                "invoke the cx-cli-setup skill (via /cx-cli-setup) and RE-AUTHENTICATE — a fresh "
-                "`cx auth login`, or set a valid API key: cx configure set --prop-name cx_apikey "
-                "--prop-value <key>. Run these recovery commands YOURSELF via the Bash tool — the gate "
-                "allows `cx auth …` / `cx configure …` through even while blocking, so do NOT hand them "
-                "to the developer with the `!` prefix (`cx auth login` opens the browser automatically). "
-                "Only those recovery commands run until the scanner itself is authenticated."
+                "mode (not authenticated)' — the native scanner could not authenticate with the current "
+                "stored credential (stale/expired, or the backend was unreachable) and would silently "
+                "allow everything UNSCANNED. Re-authenticate via the cx-cli-setup skill (/cx-cli-setup). "
+                "For browser sign-in you may run this yourself (opens the developer's browser; no secret "
+                "passes through you; resolves cx by absolute path so it works before cx is on PATH):\n    "
+                + _cx_recovery_command_str("auth login --base-auth-uri <url> --tenant <tenant>")
+                + "\nFor an API key, the DEVELOPER runs this in their own terminal (do not type an API "
+                "key yourself):\n    "
+                + _cx_recovery_command_str("configure set --prop-name cx_apikey --prop-value <key>")
+                + "\nOnly `cx auth …` / `cx configure …` commands run until the scanner is authenticated."
             ),
             reason_code="scanner_passthrough",
             tool_name=tool,

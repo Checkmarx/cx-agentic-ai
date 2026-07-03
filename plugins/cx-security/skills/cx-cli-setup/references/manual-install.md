@@ -26,28 +26,33 @@ brew install checkmarx/ast-cli/ast-cli
 **If Homebrew is unavailable or the install fails**, note that Checkmarx publishes only an x64
 macOS binary — both Intel and Apple Silicon use it (Rosetta 2 translates on M-series Macs; if
 `cx` later fails to launch on Apple Silicon, install Rosetta with
-`softwareupdate --install-rosetta --agree-to-license`). Download to `~/.local/bin` (user scope,
-no admin rights):
+`softwareupdate --install-rosetta --agree-to-license`). Download to `~/.checkmarx/bin` — the
+**canonical store** the gate resolves by absolute path (user scope, no admin rights):
 
 ```bash
-mkdir -p ~/.local/bin
+mkdir -p ~/.checkmarx/bin
 curl -fsSL https://github.com/Checkmarx/ast-cli/releases/latest/download/ast-cli_darwin_x64.tar.gz -o /tmp/cx-cli.tar.gz && \
-tar -xzf /tmp/cx-cli.tar.gz -C ~/.local/bin cx && \
+tar -xzf /tmp/cx-cli.tar.gz -C ~/.checkmarx/bin cx && \
+chmod +x ~/.checkmarx/bin/cx && \
 rm /tmp/cx-cli.tar.gz
 ```
 
 If `curl` is unavailable, direct the developer to download `ast-cli_darwin_x64.tar.gz` from
-https://github.com/Checkmarx/ast-cli/releases/latest, extract `cx`, and move it to `~/.local/bin`.
+https://github.com/Checkmarx/ast-cli/releases/latest, extract `cx`, and move it to `~/.checkmarx/bin`
+(`chmod +x`). Homebrew or `/usr/local/bin` are fine alternatives **only if already on PATH**, but
+`~/.checkmarx/bin` is the reliable target the gate always finds.
 
 ## Linux
 
 Resolve the asset for the architecture (`bash scripts/cx-asset-resolver.sh`), then download to
-`~/.local/bin` (x64 shown — substitute the resolved name):
+`~/.checkmarx/bin` — the **canonical store** the gate resolves by absolute path (x64 shown —
+substitute the resolved name):
 
 ```bash
-mkdir -p ~/.local/bin
+mkdir -p ~/.checkmarx/bin
 curl -fsSL https://github.com/Checkmarx/ast-cli/releases/latest/download/ast-cli_linux_x64.tar.gz -o /tmp/cx-cli.tar.gz && \
-tar -xzf /tmp/cx-cli.tar.gz -C ~/.local/bin cx && \
+tar -xzf /tmp/cx-cli.tar.gz -C ~/.checkmarx/bin cx && \
+chmod +x ~/.checkmarx/bin/cx && \
 rm /tmp/cx-cli.tar.gz
 ```
 
@@ -56,15 +61,33 @@ If only `wget` is available, swap the download line for
 releases page. An unsupported architecture (resolver prints `unsupported: …`) has no pre-built
 binary — stop and point the developer to the releases page or Checkmarx support.
 
-## In-session activation (Linux/macOS)
+## Windows
 
-`/usr/local/bin` is on PATH on virtually every system, so once `cx` lands there it is usable in
-this session immediately — the hooks re-resolve `cx` on their next run. Without `sudo`, install
-into `~/.local/bin` **only if it is already on PATH**
-(`case ":$PATH:" in *":$HOME/.local/bin:"*) echo on-path;; esac`); a `~/.local/bin/cx` symlink to
-a canonical copy works too. A *newly* added PATH directory will not be visible to the running
-session — see the canonical in-session rule in the main skill (Phase 1). For the remediation
-MCP, run `/reload-plugins` (see `references/mcp.md`).
+**Git for Windows is mandatory.** The gate launches through `sh`, and Claude Code needs Git Bash
+for its own Bash tool, so install it first from https://git-scm.com/download/win. Without it the
+gate cannot run at all.
+
+Install `cx.exe` into `%LOCALAPPDATA%\Checkmarx\cx\cx.exe` — the **canonical store** the gate
+resolves by absolute path (matching what the bootstrap writes). Do **not** scatter it into some
+folder that happens to be on PATH. From Git Bash:
+
+```bash
+mkdir -p "$LOCALAPPDATA/Checkmarx/cx"
+curl -fsSL https://github.com/Checkmarx/ast-cli/releases/latest/download/ast-cli_windows_x64.zip -o /tmp/cx-cli.zip && \
+unzip -o /tmp/cx-cli.zip cx.exe -d "$LOCALAPPDATA/Checkmarx/cx" && \
+rm /tmp/cx-cli.zip
+```
+
+If `curl`/`unzip` are unavailable, direct the developer to download `ast-cli_windows_x64.zip`
+from https://github.com/Checkmarx/ast-cli/releases/latest, extract `cx.exe`, and place it at
+`%LOCALAPPDATA%\Checkmarx\cx\cx.exe`.
+
+## Activation (all platforms)
+
+Install into the **canonical store** and you are done: the gate resolves cx by absolute path
+(`%LOCALAPPDATA%\Checkmarx\cx\cx.exe` on Windows, `~/.checkmarx/bin/cx` on Unix) on the **next
+tool call** — no PATH placement, symlink, or restart needed. Only the remediation MCP needs one
+`/reload-plugins` (see `references/mcp.md`).
 
 ## Install integrity (`CX_REQUIRE_CHECKSUM`)
 
