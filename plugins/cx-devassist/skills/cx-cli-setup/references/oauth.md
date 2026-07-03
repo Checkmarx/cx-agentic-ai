@@ -9,6 +9,11 @@ step.
 > capability check in Phase 2: `login` listed under `cx auth --help`). If it is not listed, use
 > Path A (API key).
 
+**Never guess or default the URL or tenant** (e.g. do not try an assumed tenant like `checkmarx` or
+a guessed host like `https://iam.checkmarx.net`) — both are org-specific and a wrong guess just
+burns a failed login round-trip. Always ask Question 2 below first, even if a hook's deny message
+already shows the `--base-auth-uri <url> --tenant <tenant>` flags as bare placeholders.
+
 **Question 2 — ask in a plain chat message (NOT `AskUserQuestion`)**: the tenant is org-specific
 free text with no preset options, and one `AskUserQuestion` cannot return two independent free-text
 values. Collect both in a single reply:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # cx-bootstrap.sh — self-install / self-upgrade the Checkmarx One `cx` CLI.
 #
-# This is the ONE command the cx-security gate allows through while it is blocking (see
+# This is the ONE command the cx-devassist gate allows through while it is blocking (see
 # hooks/cx_check.py `_is_bootstrap_command` and hooks/cx_check.sh's shell carve-out). It is
 # whitelisted by its resolved absolute path and accepts at most one argument:
 #
@@ -312,7 +312,7 @@ install_binary_atomically() {
 # (fresh account), CREATE the login file for the user's shell (zsh -> ~/.zprofile, else ~/.profile)
 # so a brand-new account still gets it. Never fails the install.
 ensure_dir_on_path_profile() {
-    local dir="$1" marker="# added by cx-security (cx-bootstrap)" prof wrote=""
+    local dir="$1" marker="# added by cx-devassist (cx-bootstrap)" prof wrote=""
     on_path "$dir" && return 0
     for prof in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.zprofile"; do
         [[ -f "$prof" ]] || continue

@@ -11,7 +11,7 @@ import unittest
 
 # Source under test lives in the plugin's hooks/ (tests live at the repo root, outside the plugin).
 _HOOKS_DIR = os.path.normpath(os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "cx-security", "hooks"))
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "cx-devassist", "hooks"))
 sys.path.insert(0, _HOOKS_DIR)
 import cx_log  # noqa: E402
 
@@ -33,7 +33,7 @@ class _Base(unittest.TestCase):
 
     @property
     def logfile(self):
-        return os.path.join(self.dir, "cx-security.jsonl")
+        return os.path.join(self.dir, "cx-devassist.jsonl")
 
     def raw(self):
         with open(self.logfile, encoding="utf-8") as f:

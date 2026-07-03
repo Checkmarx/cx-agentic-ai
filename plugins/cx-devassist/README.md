@@ -1,4 +1,4 @@
-# cx-security
+# cx-devassist
 
 A **fail-closed security gate** for Claude Code, backed by [Checkmarx CxOne](https://checkmarx.com/).
 
@@ -62,7 +62,7 @@ unauthenticated, the gate denies with a clear, actionable message pointing at `/
 ## Plugin structure
 
 ```
-plugins/cx-security/
+plugins/cx-devassist/
 ├── .claude-plugin/
 │   └── plugin.json              # plugin manifest (name, version, license)
 ├── .mcp.json                    # declares the Checkmarx MCP server (cx mcp bridge); auto-discovered
@@ -79,7 +79,7 @@ plugins/cx-security/
 │   └── cx-min-version           # minimum cx version (numeric floor)
 └── skills/
     ├── cx-cli-setup/            # guided cx install + authentication (router + references/)
-    └── cx-security-asca/        # ASCA remediation guidance
+    └── cx-devassist-asca/       # ASCA remediation guidance
 ```
 
 > Tests live at the **repo root** (`tests/`), outside the shipped plugin, so they aren't distributed.
@@ -119,19 +119,19 @@ numeric floor in `scripts/cx-min-version`; the real capability decision is a run
 
 ```bash
 claude plugin marketplace add /path/to/cxone-scanners
-claude plugin install cx-security@cx-secured-agent
+claude plugin install cx-devassist@cx-devassist-marketplace
 ```
 
 Verify:
 
 ```bash
-claude plugin list      # cx-security@cx-secured-agent  ✔ enabled
+claude plugin list      # cx-devassist@cx-devassist-marketplace  ✔ enabled
 ```
 
 **Direct plugin-dir** (quick local testing):
 
 ```bash
-claude --plugin-dir /path/to/cxone-scanners/plugins/cx-security
+claude --plugin-dir /path/to/cxone-scanners/plugins/cx-devassist
 ```
 
 After updating hook scripts, reload them into the session:
@@ -163,7 +163,7 @@ All optional — sensible defaults apply.
 ## Privacy & logging
 
 The gate writes one redacted JSONL record per decision to
-`~/.checkmarx/agent-logs/<assistant>/cx-security.jsonl`. Logging uses a **redaction allowlist**: each
+`~/.checkmarx/agent-logs/<assistant>/cx-devassist.jsonl`. Logging uses a **redaction allowlist**: each
 event declares the exact keys it may write and a type coercer per key. Anything else — source code,
 secrets, tokens, prompts, free-form strings — is dropped before it can reach disk. The MCP bridge
 sends your credential only in the `Authorization` header, never to chat or logs. Logging never raises

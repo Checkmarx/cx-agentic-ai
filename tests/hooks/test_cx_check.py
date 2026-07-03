@@ -1,4 +1,4 @@
-"""Unit tests for the cx-security PreToolUse gate (cx_check.py).
+"""Unit tests for the cx-devassist PreToolUse gate (cx_check.py).
 
 Run: python3 hooks/test_cx_check.py    (stdlib only — no pytest needed)
 
@@ -20,7 +20,7 @@ from contextlib import redirect_stdout, redirect_stderr
 
 # Source under test lives in the plugin's hooks/ (tests live at the repo root, outside the plugin).
 _HOOKS_DIR = os.path.normpath(os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "cx-security", "hooks"))
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "cx-devassist", "hooks"))
 sys.path.insert(0, _HOOKS_DIR)
 import cx_check  # noqa: E402
 
@@ -1189,7 +1189,7 @@ class TestLoggingWiring(unittest.TestCase):
         decision, code = run(bash("echo hi"), which=None, env={"CX_LOG_DIR": tmp})
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
-        logfile = os.path.join(tmp, "cx-security.jsonl")
+        logfile = os.path.join(tmp, "cx-devassist.jsonl")
         self.assertTrue(os.path.exists(logfile))
         with open(logfile, encoding="utf-8") as fh:
             recs = [json.loads(line) for line in fh if line.strip()]
@@ -1205,7 +1205,7 @@ class TestLoggingWiring(unittest.TestCase):
         decision, code = run(bash("echo hi"), version_state="ok", authed=True,
                              env={"CX_LOG_DIR": tmp})
         self.assertIsNone(decision)
-        with open(os.path.join(tmp, "cx-security.jsonl"), encoding="utf-8") as fh:
+        with open(os.path.join(tmp, "cx-devassist.jsonl"), encoding="utf-8") as fh:
             recs = [json.loads(line) for line in fh if line.strip()]
         self.assertTrue(any(r.get("decision") == "pass" and r.get("reason_code") == "ok"
                             and r.get("version_state") == "ok" for r in recs))

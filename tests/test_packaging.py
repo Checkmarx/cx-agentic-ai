@@ -14,7 +14,7 @@ import re
 import unittest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "cx-security"))
+_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "cx-devassist"))
 _REPO_ROOT = os.path.normpath(os.path.join(_HERE, ".."))
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
@@ -33,7 +33,7 @@ class TestPluginManifest(unittest.TestCase):
         data = _plugin_manifest()
         for key in ("name", "version", "description"):
             self.assertIn(key, data, "plugin.json missing %r" % key)
-        self.assertEqual(data["name"], "cx-security")
+        self.assertEqual(data["name"], "cx-devassist")
         self.assertRegex(data["version"], _SEMVER)
 
     def test_no_redundant_mcpservers_field(self):
@@ -50,8 +50,8 @@ class TestPluginManifest(unittest.TestCase):
 class TestMarketplace(unittest.TestCase):
     def test_references_plugin_with_real_source(self):
         mp = json.loads(_read(_REPO_ROOT, ".claude-plugin", "marketplace.json"))
-        entry = next((p for p in mp.get("plugins", []) if p.get("name") == "cx-security"), None)
-        self.assertIsNotNone(entry, "marketplace.json has no cx-security plugin entry")
+        entry = next((p for p in mp.get("plugins", []) if p.get("name") == "cx-devassist"), None)
+        self.assertIsNotNone(entry, "marketplace.json has no cx-devassist plugin entry")
         src = os.path.normpath(os.path.join(_REPO_ROOT, entry["source"]))
         self.assertTrue(os.path.isdir(src), "marketplace source path missing: %s" % src)
 
@@ -84,7 +84,7 @@ class TestMinVersionSync(unittest.TestCase):
 
 class TestReleaseTag(unittest.TestCase):
     def test_tag_matches_plugin_version(self):
-        # On a tag build CI sets CX_RELEASE_TAG (e.g. cx-security-v1.6.0). Locally it's unset → skip.
+        # On a tag build CI sets CX_RELEASE_TAG (e.g. cx-devassist-v1.6.0). Locally it's unset → skip.
         tag = os.environ.get("CX_RELEASE_TAG", "").strip()
         if not tag:
             self.skipTest("CX_RELEASE_TAG not set (not a tag build)")

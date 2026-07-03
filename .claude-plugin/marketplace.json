@@ -1,16 +1,16 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "cx-secured-agent",
+  "name": "cx-devassist-marketplace",
   "description": "Checkmarx CxOne security scanning plugins for Claude Code",
   "owner": {
     "name": "Checkmarx"
   },
   "plugins": [
     {
-      "name": "cx-security",
+      "name": "cx-devassist",
       "description": "Checkmarx CxOne security scanning plugin for Claude Code",
       "category": "development",
-      "source": "./plugins/cx-security"
+      "source": "./plugins/cx-devassist"
     }
   ]
 }

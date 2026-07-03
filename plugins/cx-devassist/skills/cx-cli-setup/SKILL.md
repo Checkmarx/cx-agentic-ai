@@ -1,6 +1,6 @@
 ---
 name: cx-cli-setup
-description: "Installs, configures, and authenticates the Checkmarx cx CLI (API key or browser OAuth sign-in). Use when the cx CLI is missing, outdated, or not authenticated. Invoke as: cx-security:cx-cli-setup"
+description: "Installs, configures, and authenticates the Checkmarx cx CLI (API key or browser OAuth sign-in). Use when the cx CLI is missing, outdated, or not authenticated. Invoke as: cx-devassist:cx-cli-setup"
 ---
 
 # CX CLI Setup
@@ -51,7 +51,7 @@ Unix). It needs only `bash` (Git Bash on Windows) — no Python.
 > remediation MCP resolves cx by absolute path too, via `cx_run.sh`; it activates after one `/reload-plugins`.)
 
 When a hook blocked an operation, its deny message already contains the exact command by resolved
-absolute path — e.g. `bash "/…/plugins/cx-security/scripts/cx-bootstrap.sh" install`. Use it
+absolute path — e.g. `bash "/…/plugins/cx-devassist/scripts/cx-bootstrap.sh" install`. Use it
 verbatim. **Do not** substitute `${CLAUDE_PLUGIN_ROOT}` — it is injected only into hook execution
 and is empty in the Bash shell, so a path built from it will not resolve.
 

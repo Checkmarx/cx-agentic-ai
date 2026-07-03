@@ -1,6 +1,6 @@
 ---
-name: cx-security-asca
-description: "Runs a Checkmarx ASCA (AI Security Code Assistant) scan on source files to detect SAST vulnerabilities, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan or fix their code, or when SAST vulnerabilities detected by ASCA need to be fixed. Invoke as: cx-security:cx-security-asca"
+name: cx-devassist-asca
+description: "Runs a Checkmarx ASCA (AI Security Code Assistant) scan on source files to detect SAST vulnerabilities, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan or fix their code, or when SAST vulnerabilities detected by ASCA need to be fixed. Invoke as: cx-devassist:cx-devassist-asca"
 ---
 
 # CX Security ASCA
@@ -128,9 +128,10 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
   2. Then tell the user the **one** step only they can perform — Claude Code loads MCP servers at
      startup, so the server can't become live in this running session on its own:
 
-     > "The Checkmarx remediation MCP isn't loaded in this session. Please run `/reload-plugins` (or
-     > restart Claude Code) to load it, then ask me to remediate again. I won't apply a non-Checkmarx
-     > fix in the meantime."
+     > "The Checkmarx remediation MCP isn't connected in this session. Please run `/mcp` and check
+     > whether `Checkmarx` shows Connected. If it's missing or still not connected, run
+     > `/reload-plugins` first, then `/mcp` again to reconnect it (or restart Claude Code) — then ask
+     > me to remediate again. I won't apply a non-Checkmarx fix in the meantime."
 
   Then end the remediation flow without modifying any code.
 

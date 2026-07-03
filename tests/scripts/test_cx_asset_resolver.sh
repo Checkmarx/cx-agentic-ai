@@ -3,7 +3,7 @@
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-source "$DIR/../../plugins/cx-security/scripts/cx-asset-resolver.sh"
+source "$DIR/../../plugins/cx-devassist/scripts/cx-asset-resolver.sh"
 set +e  # cx-asset-resolver.sh sets `set -e`; turn it off so we can assert on failing calls
 
 pass=0; fail=0

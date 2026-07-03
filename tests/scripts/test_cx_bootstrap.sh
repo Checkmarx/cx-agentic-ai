@@ -8,7 +8,7 @@
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-source "$DIR/../../plugins/cx-security/scripts/cx-bootstrap.sh"
+source "$DIR/../../plugins/cx-devassist/scripts/cx-bootstrap.sh"
 set +e  # cx-bootstrap.sh enables `set -e`; turn it off so we can assert on failing calls
 
 pass=0; fail=0
@@ -133,12 +133,12 @@ if [[ $? -eq 0 ]]; then ok "verify_checksum empty tag proceeds under CX_REQUIRE_
 #     resolves in future sessions — B7 (fresh zsh/bash_profile users were silently skipped before).
 ph="$tmp/prof_home"; mkdir -p "$ph"
 ( export HOME="$ph" SHELL="/bin/bash" PATH="/usr/bin:/bin"; ensure_dir_on_path_profile "$ph/.checkmarx/bin" >/dev/null 2>&1 )
-if grep -rqF "cx-security (cx-bootstrap)" "$ph" 2>/dev/null; then ok "ensure_dir_on_path_profile creates a profile on a fresh account"
+if grep -rqF "cx-devassist (cx-bootstrap)" "$ph" 2>/dev/null; then ok "ensure_dir_on_path_profile creates a profile on a fresh account"
 else bad "ensure_dir_on_path_profile wrote no profile on a fresh account"; fi
 
 # 11b. Idempotent — a second call must not duplicate the marker.
 ( export HOME="$ph" SHELL="/bin/bash" PATH="/usr/bin:/bin"; ensure_dir_on_path_profile "$ph/.checkmarx/bin" >/dev/null 2>&1 )
-n="$(grep -rhF "cx-security (cx-bootstrap)" "$ph" 2>/dev/null | wc -l | tr -d ' ')"
+n="$(grep -rhF "cx-devassist (cx-bootstrap)" "$ph" 2>/dev/null | wc -l | tr -d ' ')"
 if [[ "$n" == "1" ]]; then ok "ensure_dir_on_path_profile is idempotent (marker written once)"
 else bad "ensure_dir_on_path_profile duplicated the marker (found $n)"; fi
 

@@ -815,19 +815,27 @@ def cx_check():
             context=(
                 "cx auth validate failed — cx is installed but not authenticated (credentials missing "
                 "or expired, or the backend was unreachable). Invoke the cx-cli-setup skill "
-                "(/cx-cli-setup) for the guided flow. There are two ways to authenticate, and they "
-                "differ in who runs them:\n"
-                "- Browser sign-in (OAuth): you may run this yourself — it opens the developer's "
-                "browser (with MFA) and no secret passes through you. The gate allows this recovery "
+                "(/cx-cli-setup) for the guided flow. ASK THE DEVELOPER WHICH METHOD FIRST — do not "
+                "assume OAuth and do not ask for a URL/tenant before this choice is made. There are two "
+                "ways to authenticate, and they differ in who runs them:\n"
+                "- API key (ask this first / simplest): the DEVELOPER runs this in their own terminal "
+                "(it is a plaintext secret — do not type an API key yourself):\n    "
+                + _cx_recovery_command_str("configure set --prop-name cx_apikey --prop-value <key>")
+                + "\n- Browser sign-in (OAuth) — only if the developer picks this: you may run it "
+                "yourself — it opens the developer's browser (with MFA) and no secret passes through "
+                "you. Only NOW, after OAuth is chosen, ask for the URL/tenant — NEVER guess or default "
+                "the --base-auth-uri or --tenant values (e.g. do not try a guessed 'iam.checkmarx.net' "
+                "or a tenant name of 'checkmarx') — ask the developer, per the cx-cli-setup skill's "
+                "oauth.md Question 2, which gives concrete regional URL examples (EU "
+                "https://eu.ast.checkmarx.net, US https://us.ast.checkmarx.net, ANZ "
+                "https://anz.ast.checkmarx.net, or their on-prem URL) plus where to find their tenant. "
+                "The gate allows this recovery "
                 "command through while it blocks everything else, and it resolves cx by absolute path "
                 "so it works even before cx is on your PATH:\n    "
                 + _cx_recovery_command_str("auth login --base-auth-uri <url> --tenant <tenant>")
                 + "\n  It blocks until the developer finishes (~5 min) — run it with a long timeout or "
                 "in the background.\n"
-                "- API key: the DEVELOPER runs this in their own terminal (it is a plaintext secret — "
-                "do not type an API key yourself):\n    "
-                + _cx_recovery_command_str("configure set --prop-name cx_apikey --prop-value <key>")
-                + "\nOnly `cx auth …` / `cx configure …` recovery commands run until authentication "
+                "Only `cx auth …` / `cx configure …` recovery commands run until authentication "
                 "succeeds."
             ),
             reason_code="unauthenticated",
@@ -856,12 +864,19 @@ def cx_check():
                 "mode (not authenticated)' — the native scanner could not authenticate with the current "
                 "stored credential (stale/expired, or the backend was unreachable) and would silently "
                 "allow everything UNSCANNED. Re-authenticate via the cx-cli-setup skill (/cx-cli-setup). "
-                "For browser sign-in you may run this yourself (opens the developer's browser; no secret "
-                "passes through you; resolves cx by absolute path so it works before cx is on PATH):\n    "
-                + _cx_recovery_command_str("auth login --base-auth-uri <url> --tenant <tenant>")
-                + "\nFor an API key, the DEVELOPER runs this in their own terminal (do not type an API "
-                "key yourself):\n    "
+                "ASK THE DEVELOPER WHICH METHOD FIRST — do not assume OAuth and do not ask for a "
+                "URL/tenant before this choice is made.\n"
+                "- API key (ask this first / simplest): the DEVELOPER runs this in their own terminal "
+                "(do not type an API key yourself):\n    "
                 + _cx_recovery_command_str("configure set --prop-name cx_apikey --prop-value <key>")
+                + "\n- Browser sign-in (OAuth) — only if the developer picks this: you may run it "
+                "yourself (opens the developer's browser; no secret passes through you; resolves cx by "
+                "absolute path so it works before cx is on PATH). Only NOW, after OAuth is chosen, ask "
+                "for the URL/tenant — NEVER guess or default the --base-auth-uri or --tenant values — "
+                "ask the developer, per the cx-cli-setup skill's oauth.md Question 2 (regional URL "
+                "examples: EU https://eu.ast.checkmarx.net, US https://us.ast.checkmarx.net, ANZ "
+                "https://anz.ast.checkmarx.net, or their on-prem URL):\n    "
+                + _cx_recovery_command_str("auth login --base-auth-uri <url> --tenant <tenant>")
                 + "\nOnly `cx auth …` / `cx configure …` commands run until the scanner is authenticated."
             ),
             reason_code="scanner_passthrough",

@@ -5,7 +5,7 @@
 # breaks CI instead of shipping as a silent fail-open. Run: bash tests/scripts/test_cx_resolution_contract.sh
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOOKS="$DIR/../../plugins/cx-security/hooks"
+HOOKS="$DIR/../../plugins/cx-devassist/hooks"
 CXRUN="$HOOKS/cx_run.sh"
 # Pick a Python 3 (mirrors run-tests.sh / cx_check.sh — a python2 `python` would SyntaxError on
 # cx_check.py's Py3-only syntax and spuriously fail every case).

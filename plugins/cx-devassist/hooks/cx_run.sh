@@ -84,7 +84,7 @@ JSON
         exit 0
         ;;
     *)
-        printf 'cx-security: cx CLI not found (looked at CX_BINARY, the canonical store, and PATH). Run /cx-cli-setup to install it.\n' >&2
+        printf 'cx-devassist: cx CLI not found (looked at CX_BINARY, the canonical store, and PATH). Run /cx-cli-setup to install it.\n' >&2
         exit 1
         ;;
 esac

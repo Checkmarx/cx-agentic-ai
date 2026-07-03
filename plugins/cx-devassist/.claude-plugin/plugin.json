@@ -1,5 +1,5 @@
 {
-  "name": "cx-security",
+  "name": "cx-devassist",
   "version": "1.6.0",
   "description": "Checkmarx CxOne security scanning plugin for Claude Code",
   "author": {

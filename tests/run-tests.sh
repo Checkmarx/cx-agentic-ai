@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs every cx-security test suite — Python (hooks) + shell (scripts) — and exits non-zero
+# Runs every cx-devassist test suite — Python (hooks) + shell (scripts) — and exits non-zero
 # if any suite fails. Single entry point for local runs and CI.
 #
 #   bash tests/run-tests.sh
@@ -9,7 +9,7 @@
 set -uo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_ROOT="$(cd "$DIR/../plugins/cx-security" && pwd)"
+PLUGIN_ROOT="$(cd "$DIR/../plugins/cx-devassist" && pwd)"
 
 # --- pick a Python 3 interpreter (mirrors the gate's own Py3 requirement) -------------------
 # PY is an ARRAY so the `py -3` launcher (two words) invokes correctly under `"${PY[@]}"`.
