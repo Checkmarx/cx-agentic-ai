@@ -44,12 +44,14 @@ discarded (see the security note):
 cx auth login --base-auth-uri <your Checkmarx One URL> --tenant <tenant> 1>/dev/null
 ```
 
-**Run this YOURSELF with the Bash tool — do NOT hand it to the developer with the `!` prefix.** The
-security gate's auth-recovery carve-out permits `cx auth …` / `cx configure …` commands through even
-while it is blocking every other action (that is exactly why the carve-out exists), so you never need
-`!` here. The browser opens automatically on the developer's machine; they only complete the login
-there. If an earlier Bash call was denied by the gate, that does NOT mean `cx auth login` will be —
-the recovery commands are allowed; run it.
+**You may run this yourself with the Bash tool** — browser sign-in is safe for you to run: it opens
+the developer's browser to sign in (with MFA), and **no secret is typed or passes through you** (the
+token is written straight to the local cx config). The gate's auth-recovery carve-out permits
+`cx auth login` through even while it blocks other actions, so if an earlier Bash call was denied that
+does *not* mean this one will be. Running it yourself means the browser opens automatically; the
+developer just completes the login there. It blocks until they finish (~5 min), so run it with a long
+timeout or in the background — don't kill it early. (An **API key**, by contrast, is a plaintext
+secret — that one the *developer* sets in their own terminal, never you.)
 
 - The default browser opens automatically. Tell the developer: *"Your browser is opening — complete
   the Checkmarx login and MFA there. You have about 5 minutes."*

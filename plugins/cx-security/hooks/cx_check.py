@@ -832,16 +832,18 @@ def cx_check():
                 "Run /cx-cli-setup to configure and authenticate, then retry."
             ),
             context=(
-                "cx auth validate failed — the CLI could not reach Checkmarx One or credentials are "
-                "expired/missing. You can FIX THIS YOURSELF: the gate allows credential-recovery "
-                "commands (`cx auth …` / `cx configure …` / `cx auth validate`) through the Bash tool "
-                "even while it blocks everything else — so run `cx auth login --base-auth-uri <url> "
-                "--tenant <tenant>` (browser sign-in) or `cx configure set --prop-name cx_apikey "
-                "--prop-value <key>` (API key) DIRECTLY; do NOT hand the command to the developer with "
-                "the `!` prefix. `cx auth login` opens the browser automatically and blocks until login "
-                "finishes (~5 min) — run it with a long timeout or in the background. Invoke the "
-                "cx-cli-setup skill (/cx-cli-setup) for the guided flow. Only those credential-recovery "
-                "commands run until authentication succeeds."
+                "cx auth validate failed — cx is installed but not authenticated (credentials missing "
+                "or expired). Invoke the cx-cli-setup skill (/cx-cli-setup) for the guided flow. There "
+                "are two ways to authenticate, and they differ in who runs them:\n"
+                "- Browser sign-in (OAuth): you may run `cx auth login --base-auth-uri <url> --tenant "
+                "<tenant>` yourself — it opens the developer's browser to sign in (with MFA). No secret "
+                "is typed or passes through you, and the gate allows this command through while other "
+                "actions are blocked. It blocks until the developer finishes (~5 min), so run it with a "
+                "long timeout or in the background.\n"
+                "- API key: the DEVELOPER runs `cx configure set --prop-name cx_apikey --prop-value "
+                "<key>` in their own terminal. Do not type an API key yourself — the secret must stay "
+                "with the developer.\n"
+                "Only `cx auth …` / `cx configure …` commands run until authentication succeeds."
             ),
             reason_code="unauthenticated",
             tool_name=tool,
@@ -866,15 +868,14 @@ def cx_check():
             ),
             context=(
                 "`cx auth validate` passed, but `cx hooks claude-pre-file-write` reports 'pass-through "
-                "mode (not authenticated)' — the native scanner could not authenticate with the "
-                "current stored credential (it may be stale or expired, or the backend was "
-                "unreachable when it tried) and would silently allow everything UNSCANNED. IMMEDIATELY "
-                "invoke the cx-cli-setup skill (via /cx-cli-setup) and RE-AUTHENTICATE — a fresh "
-                "`cx auth login`, or set a valid API key: cx configure set --prop-name cx_apikey "
-                "--prop-value <key>. Run these recovery commands YOURSELF via the Bash tool — the gate "
-                "allows `cx auth …` / `cx configure …` through even while blocking, so do NOT hand them "
-                "to the developer with the `!` prefix (`cx auth login` opens the browser automatically). "
-                "Only those recovery commands run until the scanner itself is authenticated."
+                "mode (not authenticated)' — the native scanner could not authenticate with the current "
+                "stored credential (it may be stale/expired, or the backend was unreachable) and would "
+                "silently allow everything UNSCANNED. Re-authenticate via the cx-cli-setup skill "
+                "(/cx-cli-setup): for browser sign-in you may run `cx auth login` yourself (it opens the "
+                "developer's browser; no secret passes through you); for an API key, the DEVELOPER runs "
+                "`cx configure set --prop-name cx_apikey --prop-value <key>` in their own terminal (do "
+                "not type an API key yourself). Only `cx auth …` / `cx configure …` commands run until "
+                "the scanner is authenticated."
             ),
             reason_code="scanner_passthrough",
             tool_name=tool,

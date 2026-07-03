@@ -242,25 +242,36 @@ class TestScannerPassthrough(unittest.TestCase):
 
 
 class TestRecoveryMessaging(unittest.TestCase):
-    """The deny messages must tell the agent it can run cx auth/configure ITSELF (the carve-out), so
-    it runs `cx auth login` directly (browser auto-opens) instead of punting to the user with `!`."""
+    """The deny messages must split the two auth paths by WHO runs them: browser sign-in (OAuth) is
+    safe for the agent to run itself (no secret passes through it); an API key is a plaintext secret
+    the developer sets. The messages must NOT read like a prompt injection ("do NOT hand … to the
+    developer", "run these YOURSELF") — that phrasing made QA agents correctly refuse the flow."""
 
-    def test_unauthenticated_message_steers_agent_to_run_login(self):
+    def _assert_oauth_apikey_split(self, ctx):
+        # OAuth path: the agent may run `cx auth login` (browser, no secret through the agent).
+        self.assertIn("cx auth login", ctx)
+        self.assertIn("browser", ctx.lower())
+        # API-key path: the DEVELOPER runs `cx configure set` — the agent never types the secret.
+        self.assertIn("cx configure set", ctx)
+        self.assertIn("developer", ctx.lower())
+        # Injection-shaped phrasing must be gone.
+        self.assertNotIn("do NOT hand", ctx)
+        self.assertNotIn("do not hand", ctx)
+        self.assertNotIn("YOURSELF", ctx)
+
+    def test_unauthenticated_message_distinguishes_oauth_from_apikey(self):
         decision, code = run(write("x"), authed=False)
         self.assertEqual(decision, "deny")
         ctx = LAST_OUTPUT["additionalContext"]
-        self.assertIn("cx auth login", ctx)
-        self.assertIn("`!`", ctx)  # explicitly tells the agent NOT to use the ! prefix
+        self._assert_oauth_apikey_split(ctx)
         # The old misleading blanket phrasing must be gone (it made the agent punt).
         self.assertNotIn("All agent actions remain blocked until authentication succeeds", ctx)
 
-    def test_scanner_passthrough_message_steers_agent_to_run_recovery(self):
+    def test_scanner_passthrough_message_distinguishes_oauth_from_apikey(self):
         decision, code = run(write("x"), authed=True, scanner_state=cx_check._SCANNER_PASSTHROUGH)
         self.assertEqual(decision, "deny")
         ctx = LAST_OUTPUT["additionalContext"]
-        self.assertIn("cx auth login", ctx)
-        self.assertIn("YOURSELF", ctx)
-        self.assertIn("`!`", ctx)
+        self._assert_oauth_apikey_split(ctx)
 
 
 class TestLoggingAndIdentity(unittest.TestCase):
