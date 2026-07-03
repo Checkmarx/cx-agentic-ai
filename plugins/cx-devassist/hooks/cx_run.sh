@@ -73,6 +73,19 @@ fi
 # --- cx could not be resolved anywhere: pick a fail mode that never silently opens the scan path. ---
 case "${1:-} ${2:-}" in
     *pre-tool-use* | *pre-file-write*)
+        # Bootstrap carve-out: the sanctioned self-install must pass even though cx is absent — that
+        # is the whole POINT of running it. Stage-1 (cx_check) already allows this exact command; but
+        # every hook in a matcher must allow, so without the SAME carve-out HERE this stage's deny
+        # would override that allow and the documented `bash "<bootstrap>" install` recovery could
+        # never run through the Bash tool (the deadlock). Read stdin ONLY now — safe because cx was
+        # never exec'd (resolution failed above), so nothing downstream consumes it. The shared matcher
+        # (mirroring cx_check.sh / cx_check.py) keeps the two shell stages from drifting.
+        _CXRUN_INPUT=$(cat)
+        _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
+        if [ -n "$_CXRUN_DIR" ] && [ -f "$_CXRUN_DIR/_cx_bootstrap_match.sh" ]; then
+            . "$_CXRUN_DIR/_cx_bootstrap_match.sh"
+            cx_is_bootstrap_command "$_CXRUN_INPUT" "$_CXRUN_DIR" && exit 0
+        fi
         cat <<'JSON'
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.","additionalContext":"Run /cx-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. All agent actions remain blocked until cx is available."}}
 JSON

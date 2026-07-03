@@ -429,8 +429,17 @@ def _is_authenticated(identity=None):
 _SCANNER_SCAN = "scan"                # scanner is authenticated → it will actually scan
 _SCANNER_PASSTHROUGH = "passthrough"  # scanner is unauthenticated → silent allow-everything, NO scan
 _SCANNER_UNKNOWN = "unknown"          # probe inconclusive (spawn error / timeout) → defer to stage 2
-_SCANNER_PASSTHROUGH_MARKER = "pass-through mode (not authenticated)"
+_SCANNER_UNLICENSED = "unlicensed"    # authenticated but NO AI-scan license → cx pass-through, NO scan
+_SCANNER_PASSTHROUGH_MARKER = "pass-through mode (not authenticated)"  # legacy --debug fallback only
+_SCANNER_UNLICENSED_MARKER = "pass-through mode (no AI feature license)"  # legacy --debug fallback only
 _SCANNER_PROBE_TIMEOUT = 8
+
+# Exit codes emitted by `cx hooks check-auth` (the machine-readable readiness probe): 0 = ready
+# (authenticated + AI-licensed → will scan), 1 = authenticated but unlicensed (valid user, no scan),
+# 2 = not authenticated (silent pass-through — the state we fail CLOSED on).
+_CHECK_AUTH_EXIT_READY = 0
+_CHECK_AUTH_EXIT_UNLICENSED = 1
+_CHECK_AUTH_EXIT_UNAUTHENTICATED = 2
 
 _SCANNER_CACHE_FILE = _state_path("cx_scanner_cache")
 _SCANNER_CACHE_TTL = 30 * 60  # 30 minutes
@@ -449,7 +458,44 @@ def _credential_mtime():
 
 
 def _probe_scanner_passthrough():
-    """Run `cx hooks claude-pre-file-write --debug` on a BENIGN in-memory payload and inspect stderr.
+    """Ask the cx CLI whether its scanner is authenticated via the machine-readable
+    `cx hooks check-auth` probe (exit code + JSON on stdout) — no --debug log scraping. Maps
+    not-authenticated → _SCANNER_PASSTHROUGH (block); authenticated-but-unlicensed → _SCANNER_UNLICENSED
+    (block by default — cx runs the scanner in pass-through when unlicensed, so a write would be
+    UNSCANNED); ready → _SCANNER_SCAN (allow); any spawn error/timeout → _SCANNER_UNKNOWN (defer to
+    stage 2). Falls back to the legacy --debug stderr marker on an OLDER cx that predates `check-auth`
+    — detected because the real command always emits a JSON object on stdout and the unknown-subcommand
+    error does not. Never raises."""
+    try:
+        result = subprocess.run(
+            [_cx_exe(), "hooks", "check-auth"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=_SCANNER_PROBE_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, TypeError, ValueError):
+        return _SCANNER_UNKNOWN
+    # Feature-detect: the real command always prints a JSON object; an older cx that lacks the
+    # subcommand prints a cobra "unknown command" error and no JSON, so a parse failure (or a
+    # payload without scannerReady) means "old cx" → fall back to the legacy stderr-marker probe.
+    try:
+        payload = json.loads((result.stdout or b"").decode("utf-8", "replace").strip())
+    except (ValueError, TypeError):
+        return _legacy_probe_scanner_passthrough()
+    if not isinstance(payload, dict) or "scannerReady" not in payload:
+        return _legacy_probe_scanner_passthrough()
+    if result.returncode == _CHECK_AUTH_EXIT_UNAUTHENTICATED or payload.get("authenticated") is False:
+        return _SCANNER_PASSTHROUGH
+    if result.returncode == _CHECK_AUTH_EXIT_UNLICENSED or payload.get("licensed") is False:
+        return _SCANNER_UNLICENSED
+    if payload.get("scannerReady") is True or result.returncode == _CHECK_AUTH_EXIT_READY:
+        return _SCANNER_SCAN
+    return _SCANNER_UNKNOWN
+
+
+def _legacy_probe_scanner_passthrough():
+    """Fallback for a cx that predates `cx hooks check-auth`: run `cx hooks claude-pre-file-write
+    --debug` on a BENIGN in-memory payload and inspect stderr.
     A PreToolUse hook only INSPECTS the proposed content — it never writes the file — and benign
     content yields no finding even when the scanner does run, so the probe has no side effect and
     never blocks on a real vuln. Returns _SCANNER_PASSTHROUGH when the scanner reports it is
@@ -475,6 +521,8 @@ def _probe_scanner_passthrough():
     stderr = (result.stderr or b"").decode("utf-8", "replace")
     if _SCANNER_PASSTHROUGH_MARKER in stderr:
         return _SCANNER_PASSTHROUGH
+    if _SCANNER_UNLICENSED_MARKER in stderr:
+        return _SCANNER_UNLICENSED
     return _SCANNER_SCAN
 
 
@@ -852,7 +900,46 @@ def cx_check():
     #     the real stage-2 scanner — no worse than before — so a flaky probe can't over-block a
     #     genuinely-authenticated user. (Carve-outs in steps 1/2/5 already returned, so the bootstrap,
     #     CX_ALLOW_UNSCANNED, and `cx auth`/`cx configure` recovery commands never reach this probe.)
-    if _scanner_state(identity) == _SCANNER_PASSTHROUGH:
+    scanner = _scanner_state(identity)
+    if scanner == _SCANNER_UNLICENSED:
+        # Authenticated, but the cx account has NO AI-scanning license (Checkmarx One Assist / AI
+        # Protection / Developer Assist). cx then runs the scanner in SILENT pass-through — it will
+        # NOT scan — so allowing the write would be a fail-OPEN (unscanned code reaches disk). Fail
+        # CLOSED by default; an operator who KNOWINGLY accepts running without scanning can opt out
+        # with CX_ALLOW_UNLICENSED=1 (each such run is surfaced as an unscanned-run warning).
+        if os.environ.get("CX_ALLOW_UNLICENSED") == "1":
+            _log("unlicensed_override", tool_name=tool)
+            _allow_with_warning(
+                context=(
+                    "WARNING: cx is authenticated but has NO AI-scanning license, so its scanner runs "
+                    "in pass-through and this operation ran UNSCANNED. Allowed only because "
+                    "CX_ALLOW_UNLICENSED=1. Acquire a Checkmarx AI-scanning license (Checkmarx One "
+                    "Assist / AI Protection / Developer Assist) and unset CX_ALLOW_UNLICENSED to "
+                    "restore scanning."
+                ),
+                reason_code="unlicensed_override",
+                tool_name=tool,
+            )
+        _deny(
+            reason=(
+                "The Checkmarx CLI is authenticated but has NO AI-scanning license, so its security "
+                "SCANNER runs in pass-through (allow everything, NO scan). To avoid writing unscanned "
+                "code, this operation is BLOCKED."
+            ),
+            context=(
+                "`cx hooks check-auth` reports the scanner is authenticated but UNLICENSED — cx holds "
+                "no Checkmarx One Assist / AI Protection / Developer Assist entitlement, so the native "
+                "scanner would silently allow everything UNSCANNED. Acquire the AI-scanning license for "
+                "this account/tenant (contact your Checkmarx administrator). If you understand and "
+                "accept that code will be written WITHOUT scanning, set CX_ALLOW_UNLICENSED=1 to allow "
+                "these operations (each is logged as an unscanned run). All agent actions remain blocked "
+                "fail-closed until one of those is done."
+            ),
+            reason_code="scanner_unlicensed",
+            tool_name=tool,
+            version_state=state,
+        )
+    if scanner == _SCANNER_PASSTHROUGH:
         _deny(
             reason=(
                 "The Checkmarx CLI authenticated, but its security SCANNER could not — it is running "
@@ -860,8 +947,8 @@ def cx_check():
                 "authenticated session from the current credential. This operation is BLOCKED."
             ),
             context=(
-                "`cx auth validate` passed, but `cx hooks claude-pre-file-write` reports 'pass-through "
-                "mode (not authenticated)' — the native scanner could not authenticate with the current "
+                "`cx auth validate` passed, but `cx hooks check-auth` reports the scanner is not "
+                "authenticated — the native scanner could not authenticate with the current "
                 "stored credential (stale/expired, or the backend was unreachable) and would silently "
                 "allow everything UNSCANNED. Re-authenticate via the cx-cli-setup skill (/cx-cli-setup). "
                 "ASK THE DEVELOPER WHICH METHOD FIRST — do not assume OAuth and do not ask for a "

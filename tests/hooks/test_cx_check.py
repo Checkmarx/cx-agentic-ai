@@ -1266,5 +1266,96 @@ class TestCrashGuard(unittest.TestCase):
             self.assertEqual(cm.exception.code, code)
 
 
+class ScannerProbeCheckAuthTests(unittest.TestCase):
+    """C5 machine-readable readiness probe: _probe_scanner_passthrough() consumes
+    `cx hooks check-auth` (exit code + JSON), and falls back to the legacy --debug stderr
+    marker on an older cx that predates the subcommand."""
+
+    def _probe(self, run_stub):
+        orig_run, orig_exe = cx_check.subprocess.run, cx_check._cx_exe
+        cx_check.subprocess.run = run_stub
+        cx_check._cx_exe = lambda: "cx"
+        try:
+            return cx_check._probe_scanner_passthrough()
+        finally:
+            cx_check.subprocess.run = orig_run
+            cx_check._cx_exe = orig_exe
+
+    def test_ready_exit0_scans(self):
+        def stub(cmd, **kw):
+            return _fake_proc(
+                stdout=b'{"scannerReady":true,"authenticated":true,"licensed":true,"state":"ready"}',
+                returncode=0)
+        self.assertEqual(self._probe(stub), cx_check._SCANNER_SCAN)
+
+    def test_unlicensed_exit1_blocks(self):
+        # Authenticated but no AI license → cx runs the scanner in pass-through (NO scan), so the
+        # probe must report UNLICENSED (a blocking state), NOT _SCANNER_SCAN — else the gate fails OPEN.
+        def stub(cmd, **kw):
+            return _fake_proc(
+                stdout=b'{"scannerReady":false,"authenticated":true,"licensed":false,'
+                       b'"state":"unlicensed"}',
+                returncode=1)
+        self.assertEqual(self._probe(stub), cx_check._SCANNER_UNLICENSED)
+
+    def test_unauthenticated_exit2_passthrough(self):
+        def stub(cmd, **kw):
+            return _fake_proc(
+                stdout=b'{"scannerReady":false,"authenticated":false,"licensed":false,'
+                       b'"state":"unauthenticated"}',
+                returncode=2)
+        self.assertEqual(self._probe(stub), cx_check._SCANNER_PASSTHROUGH)
+
+    def test_spawn_error_is_unknown(self):
+        def stub(cmd, **kw):
+            raise FileNotFoundError("no cx")
+        self.assertEqual(self._probe(stub), cx_check._SCANNER_UNKNOWN)
+
+    def test_old_cx_falls_back_to_legacy_passthrough(self):
+        # check-auth: unknown subcommand → no JSON; legacy claude-pre-file-write shows the marker.
+        def stub(cmd, **kw):
+            if "check-auth" in cmd:
+                return _fake_proc(stderr=b'Error: unknown command "check-auth"',
+                                  stdout=b"", returncode=1)
+            return _fake_proc(
+                stderr=b"hooks: running in pass-through mode (not authenticated)\n", returncode=0)
+        self.assertEqual(self._probe(stub), cx_check._SCANNER_PASSTHROUGH)
+
+    def test_old_cx_falls_back_to_legacy_scan(self):
+        def stub(cmd, **kw):
+            if "check-auth" in cmd:
+                return _fake_proc(stderr=b"unknown command", stdout=b"", returncode=1)
+            return _fake_proc(stderr=b"hooks: registering security guardrails\n", returncode=0)
+        self.assertEqual(self._probe(stub), cx_check._SCANNER_SCAN)
+
+    def test_old_cx_falls_back_to_legacy_unlicensed(self):
+        # Old cx (no check-auth): the --debug stderr shows the NO-LICENSE marker → UNLICENSED (block),
+        # not a clean scan — the legacy path must also be fail-closed on the unlicensed pass-through.
+        def stub(cmd, **kw):
+            if "check-auth" in cmd:
+                return _fake_proc(stderr=b"unknown command", stdout=b"", returncode=1)
+            return _fake_proc(
+                stderr=b"hooks: running in pass-through mode (no AI feature license)\n", returncode=0)
+        self.assertEqual(self._probe(stub), cx_check._SCANNER_UNLICENSED)
+
+
+class TestScannerUnlicensedGate(unittest.TestCase):
+    """PL-0 flow: authenticated-but-unlicensed → cx scanner runs in pass-through (NO scan), so the gate
+    BLOCKS by default and only allows (unscanned) under an explicit CX_ALLOW_UNLICENSED=1 opt-out."""
+
+    def test_unlicensed_denies_by_default(self):
+        decision, code = run(write("x"), authed=True,
+                             scanner_state=cx_check._SCANNER_UNLICENSED)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+
+    def test_unlicensed_allows_with_explicit_override(self):
+        decision, code = run(write("x"), authed=True,
+                             scanner_state=cx_check._SCANNER_UNLICENSED,
+                             env={"CX_ALLOW_UNLICENSED": "1", "CX_LOG_DISABLE": "1"})
+        self.assertEqual(decision, "allow")
+        self.assertEqual(code, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

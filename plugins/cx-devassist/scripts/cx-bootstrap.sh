@@ -265,22 +265,12 @@ verify_checksum() {
 # Placement.
 # ---------------------------------------------------------------------------------------
 
-# Apple Silicon: the published cx is x86_64 and needs Rosetta 2 to execute. Fail fast with an
-# actionable hint rather than dying later at `cx version` with a cryptic exec error. No-op on
-# Linux, Windows, and Intel macs.
-ensure_rosetta_if_needed() {
-    [[ "$OS" == "darwin" && "$(uname -m)" == "arm64" ]] || return 0
-    # Modern macOS ships THIN arm64 system binaries (no x86_64 slice), so `arch -x86_64
-    # /usr/bin/true` returns "Bad CPU type" even WHEN Rosetta is installed — a false negative that
-    # would wrongly block the install. Detect the Rosetta runtime on disk (or its daemon) instead.
-    if [[ -f /Library/Apple/usr/libexec/oah/libRosettaRuntime ]] \
-       || [[ -d /Library/Apple/usr/share/rosetta ]] \
-       || /usr/bin/pgrep -q oahd 2>/dev/null; then
-        return 0
-    fi
-    die "Apple Silicon detected and the cx build is x86_64 — it needs Rosetta 2 to run. Install it \
-with:  softwareupdate --install-rosetta --agree-to-license   then retry."
-}
+# NOTE: no Rosetta step is needed. The published macOS asset (ast-cli_<ver>_darwin_x64.tar.gz) is a
+# UNIVERSAL binary — goreleaser lipo-merges the amd64 AND arm64 slices into one file (verified against
+# the 2.3.54 release: the single darwin asset is ~110 MB, vs ~28 MB for a single-arch build) — so it
+# runs NATIVELY on Apple Silicon; Rosetta 2 is NOT required. cx-asset-resolver.sh deliberately maps
+# darwin/arm64 → that darwin_x64 universal asset, which is why the old x86_64-only Rosetta gate that
+# used to live here has been removed.
 
 # Is a directory already on this shell's PATH?
 on_path() {
@@ -452,7 +442,6 @@ main() {
     local min mode
     min="$(load_min_version)"
     detect_os_arch
-    ensure_rosetta_if_needed
 
     if [[ -n "$explicit_mode" ]]; then
         mode="$explicit_mode"

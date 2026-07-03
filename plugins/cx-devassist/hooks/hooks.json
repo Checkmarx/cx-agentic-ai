@@ -53,7 +53,7 @@
         ]
       },
       {
-        "matcher": "mcp__.*",
+        "matcher": "mcp__Checkmarx__.*",
         "hooks": [
           {
             "type": "command",
