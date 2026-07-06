@@ -109,7 +109,7 @@ def write(content):
 
 class TestMissingCx(unittest.TestCase):
     def test_absent_denies_even_offline(self):
-        decision, code = run(bash("echo hi"), which=None)
+        decision, code = run(bash("npm test"), which=None)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
 
@@ -121,7 +121,7 @@ class TestMissingCx(unittest.TestCase):
 
 class TestVersionGate(unittest.TestCase):
     def test_below_min_denies(self):
-        decision, code = run(bash("echo hi"), version_state="below")
+        decision, code = run(bash("npm test"), version_state="below")
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
 
@@ -132,27 +132,27 @@ class TestVersionGate(unittest.TestCase):
         self.assertEqual(code, 2)
 
     def test_unrunnable_denies(self):
-        decision, code = run(bash("echo hi"), version_state="unrunnable")
+        decision, code = run(bash("npm test"), version_state="unrunnable")
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
 
     def test_dev_falls_through_to_auth(self):
-        decision, code = run(bash("echo hi"), version_state="dev", authed=True)
+        decision, code = run(bash("npm test"), version_state="dev", authed=True)
         self.assertIsNone(decision)
         self.assertEqual(code, 0)
 
     def test_dev_unauthenticated_denies(self):
-        decision, code = run(bash("echo hi"), version_state="dev", authed=False)
+        decision, code = run(bash("npm test"), version_state="dev", authed=False)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
 
     def test_ok_authed_passes(self):
-        decision, code = run(bash("echo hi"), version_state="ok", authed=True)
+        decision, code = run(bash("npm test"), version_state="ok", authed=True)
         self.assertIsNone(decision)
         self.assertEqual(code, 0)
 
     def test_ok_unauthed_denies(self):
-        decision, code = run(bash("echo hi"), version_state="ok", authed=False)
+        decision, code = run(bash("npm test"), version_state="ok", authed=False)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
 
@@ -239,7 +239,7 @@ class TestScannerPassthrough(unittest.TestCase):
         self.assertIn("authenticate", LAST_OUTPUT["additionalContext"].lower())
 
     def test_passthrough_blocks_bash_too(self):
-        decision, code = run(bash("echo hi"), authed=True,
+        decision, code = run(bash("npm test"), authed=True,
                              scanner_state=cx_check._SCANNER_PASSTHROUGH)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
@@ -259,7 +259,7 @@ class TestScannerPassthrough(unittest.TestCase):
 
     def test_unauthenticated_message_takes_precedence(self):
         # If validate itself fails, the unauthenticated deny fires before the scanner probe.
-        decision, code = run(bash("echo hi"), authed=False,
+        decision, code = run(bash("npm test"), authed=False,
                              scanner_state=cx_check._SCANNER_PASSTHROUGH)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
@@ -486,7 +486,7 @@ class TestAllowUnscanned(unittest.TestCase):
         orig_audit = cx_check._UNSCANNED_AUDIT_FILE
         cx_check._UNSCANNED_AUDIT_FILE = os.path.join(tempfile.mkdtemp(), "audit.log")
         try:
-            decision, code = run(bash("echo hi"), which=None, env={"CX_ALLOW_UNSCANNED": "1"})
+            decision, code = run(bash("npm test"), which=None, env={"CX_ALLOW_UNSCANNED": "1"})
             self.assertEqual(decision, "allow")
             self.assertEqual(code, 0)
             with open(cx_check._UNSCANNED_AUDIT_FILE) as f:
@@ -500,7 +500,7 @@ class TestAllowUnscanned(unittest.TestCase):
         orig_audit = cx_check._UNSCANNED_AUDIT_FILE
         cx_check._UNSCANNED_AUDIT_FILE = None
         try:
-            decision, code = run(bash("echo hi"), which=None, env={"CX_ALLOW_UNSCANNED": "1"})
+            decision, code = run(bash("npm test"), which=None, env={"CX_ALLOW_UNSCANNED": "1"})
             self.assertEqual(decision, "deny")
             self.assertEqual(code, 2)
         finally:
@@ -590,7 +590,7 @@ class TestCapabilityGate(unittest.TestCase):
     subcommands is 'incapable' and must be blocked exactly like a below-min build."""
 
     def test_incapable_denies(self):
-        decision, code = run(bash("echo hi"), version_state="incapable")
+        decision, code = run(bash("npm test"), version_state="incapable")
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
 
@@ -768,7 +768,7 @@ class TestCxBinaryOverride(unittest.TestCase):
         self.assertEqual(self._with_env({"CX_BINARY": p}, cx_check._cx_exe), p)
 
     def test_invalid_cx_binary_denies_in_gate(self):
-        decision, code = run(bash("echo hi"), env={"CX_BINARY": "relative/cx"})
+        decision, code = run(bash("npm test"), env={"CX_BINARY": "relative/cx"})
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
 
@@ -777,7 +777,7 @@ class TestCxBinaryOverride(unittest.TestCase):
         # CX_BINARY is sufficient even when `cx` is NOT on PATH — the same validated binary scans, so
         # there is no fail-open. (Was a fail-closed deny before absolute-path resolution.)
         p = self._make_exe()
-        decision, code = run(bash("echo hi"), which=None, version_state="ok",
+        decision, code = run(bash("npm test"), which=None, version_state="ok",
                              authed=True, env={"CX_BINARY": p})
         self.assertIsNone(decision)
         self.assertEqual(code, 0)
@@ -786,7 +786,7 @@ class TestCxBinaryOverride(unittest.TestCase):
         # CX_BINARY set AND `cx` on PATH resolves to the SAME file → the gate validated the binary
         # the scanner will actually run → pass-through.
         p = self._make_exe()
-        decision, code = run(bash("echo hi"), which=p, version_state="ok",
+        decision, code = run(bash("npm test"), which=p, version_state="ok",
                              authed=True, env={"CX_BINARY": p})
         self.assertIsNone(decision)
         self.assertEqual(code, 0)
@@ -797,7 +797,7 @@ class TestCxBinaryOverride(unittest.TestCase):
         # simply ignored, not a mismatch deny. (No fail-open: the gate-validated binary is the one that scans.)
         p = self._make_exe()
         q = self._make_exe()
-        decision, code = run(bash("echo hi"), which=q, version_state="ok",
+        decision, code = run(bash("npm test"), which=q, version_state="ok",
                              authed=True, env={"CX_BINARY": p})
         self.assertIsNone(decision)
         self.assertEqual(code, 0)
@@ -838,7 +838,7 @@ class TestCxBinaryOverride(unittest.TestCase):
         orig = cx_check._canonical_cx
         cx_check._canonical_cx = lambda: p
         try:
-            decision, code = run(bash("echo hi"), which=None, version_state="ok", authed=True)
+            decision, code = run(bash("npm test"), which=None, version_state="ok", authed=True)
         finally:
             cx_check._canonical_cx = orig
         self.assertIsNone(decision)
@@ -852,7 +852,7 @@ class TestCxBinaryOverride(unittest.TestCase):
         orig = cx_check._canonical_cx
         cx_check._canonical_cx = lambda: p
         try:
-            decision, code = run(bash("echo hi"), which=None, version_state="incapable")
+            decision, code = run(bash("npm test"), which=None, version_state="incapable")
         finally:
             cx_check._canonical_cx = orig
         self.assertEqual(decision, "deny")
@@ -1186,7 +1186,7 @@ class TestLoggingWiring(unittest.TestCase):
 
     def test_deny_emits_gate_decision(self):
         tmp = tempfile.mkdtemp()
-        decision, code = run(bash("echo hi"), which=None, env={"CX_LOG_DIR": tmp})
+        decision, code = run(bash("npm test"), which=None, env={"CX_LOG_DIR": tmp})
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
         logfile = os.path.join(tmp, "cx-devassist.jsonl")
@@ -1202,7 +1202,7 @@ class TestLoggingWiring(unittest.TestCase):
 
     def test_pass_emits_gate_decision(self):
         tmp = tempfile.mkdtemp()
-        decision, code = run(bash("echo hi"), version_state="ok", authed=True,
+        decision, code = run(bash("npm test"), version_state="ok", authed=True,
                              env={"CX_LOG_DIR": tmp})
         self.assertIsNone(decision)
         with open(os.path.join(tmp, "cx-devassist.jsonl"), encoding="utf-8") as fh:
@@ -1355,6 +1355,75 @@ class TestScannerUnlicensedGate(unittest.TestCase):
                              env={"CX_ALLOW_UNLICENSED": "1", "CX_LOG_DISABLE": "1"})
         self.assertEqual(decision, "allow")
         self.assertEqual(code, 0)
+
+
+class TestReadonlyAllowlist(unittest.TestCase):
+    """Read-only Bash commands skip the gate entirely (even with cx absent), so a plain `ls` isn't
+    blocked during setup — but only as a bare, shape-guarded command, Bash-only, unless opted out."""
+
+    def test_readonly_allowed_even_when_cx_absent(self):
+        decision, code = run(bash("ls -la /tmp"), which=None)
+        self.assertIsNone(decision)  # silent pass — never reached the cx-absent deny
+        self.assertEqual(code, 0)
+
+    def test_readonly_various_commands_allowed(self):
+        for c in ("pwd", "cat file.txt", "grep -r TODO src", "wc -l a.py", "head -n5 x"):
+            decision, code = run(bash(c), which=None)
+            self.assertIsNone(decision, "%r should be allowed read-only" % c)
+            self.assertEqual(code, 0)
+
+    def test_readonly_with_chaining_is_gated(self):
+        # `;` disqualifies the bare-command guard, so it must fall through to the cx-absent deny.
+        decision, code = run(bash("ls; rm -rf /tmp/x"), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+
+    def test_readonly_with_redirect_is_gated(self):
+        decision, code = run(bash("cat secret > /tmp/out"), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+
+    def test_non_readonly_command_still_gated(self):
+        decision, code = run(bash("python app.py"), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+
+    def test_readonly_is_bash_only_powershell_gated(self):
+        decision, code = run({"tool_name": "PowerShell", "tool_input": {"command": "ls"}}, which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+
+    def test_cx_gate_all_commands_disables_allowlist(self):
+        decision, code = run(bash("ls"), which=None, env={"CX_GATE_ALL_COMMANDS": "1"})
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+
+
+class TestFreshCredentialAuthMessage(unittest.TestCase):
+    """A validate failure right after a fresh login gets a distinct 'wait, do NOT re-login' deny
+    (re-running cx auth login revokes the token and restarts the wait — the loop we observed)."""
+
+    def _run_unauthed(self, fresh):
+        orig = cx_check._credential_is_fresh
+        cx_check._credential_is_fresh = lambda within_seconds=180: fresh
+        try:
+            return run(bash("npm test"), authed=False)
+        finally:
+            cx_check._credential_is_fresh = orig
+
+    def test_fresh_credential_says_wait_not_relogin(self):
+        decision, code = self._run_unauthed(fresh=True)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+        reason = LAST_OUTPUT["permissionDecisionReason"]
+        self.assertIn("Do NOT re-run", reason)
+        self.assertIn("REVOKES", reason)
+
+    def test_stale_credential_uses_generic_message(self):
+        decision, code = self._run_unauthed(fresh=False)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+        self.assertNotIn("REVOKES", LAST_OUTPUT["permissionDecisionReason"])
 
 
 if __name__ == "__main__":

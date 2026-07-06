@@ -1,6 +1,6 @@
 {
   "name": "cx-devassist",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "Checkmarx CxOne security scanning plugin for Claude Code",
   "author": {
     "name": "Checkmarx"

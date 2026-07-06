@@ -93,15 +93,13 @@ def _cx_exe():
     return "cx"
 
 
-# Auth validation must SUCCEED against a slow or on-prem/OAuth backend, not just be fast: a first
-# OAuth validate does an IAM refresh-token exchange THEN an AST validate, and a --retry 0 --timeout 5s
-# budget times out on a slow dev/on-prem server even though the credential is valid — reporting a
-# genuinely-authenticated user as "not authenticated" and blocking every gated call. Allow one retry
-# and a 12s network timeout; the outer subprocess kill in _auth_validate_probe bounds the total, and
-# both stay well under the cx_check.sh hook budget (45s). Built per call so it honors a CX_BINARY
-# override.
+# Single-shot auth validate. The gate's OWN retry lives in _auth_probe_with_grace — it retries only in
+# the transient post-login window, which is smarter than cx's --retry (that covers network errors, not
+# the "freshly-issued token not yet accepted" invalid we actually hit right after `cx auth login`).
+# Keep this one attempt bounded and cheap so the grace retry + the scanner probe all fit the
+# cx_check.sh 45s hook budget. Built per call so it honors a CX_BINARY override.
 def _auth_validate_cmd():
-    return [_cx_exe(), "auth", "validate", "--retry", "1", "--timeout", "12s"]
+    return [_cx_exe(), "auth", "validate", "--retry", "0", "--timeout", "10s"]
 
 def _chmod_600(path):
     """Best-effort 0600 on a per-user state file. POSIX only — on Windows the file already
@@ -180,6 +178,19 @@ _SHELL_CHAINING = (";", "|", "&", "`", "$(", "\n")
 # separately (must resolve to the plugin's own bootstrap); the regex pins the shape so no extra
 # arguments or a `-c` payload can ride along.
 _BOOTSTRAP_RE = re.compile(r'^\s*bash\s+"?(?P<path>[^"]+?)"?\s+(?:install|upgrade)\s*$')
+
+# Read-only Bash programs that cannot write code to disk or execute another program — safe to run
+# WITHOUT the cx readiness/auth gate, so a plain `ls`/`cat` works during setup instead of being blocked
+# with "cx not installed". Matched ONLY as a BARE command (via _bare_bash_command: no chaining /
+# substitution / unsafe redirect) whose FIRST token equals one of these. Programs with a write or exec
+# form are deliberately EXCLUDED — find (-exec/-delete), sed (-i), awk (system), sort (-o), tee, env /
+# command / type / xargs (run others), git (push/commit/config …) — so this can never smuggle a write
+# or a command. Bash-tool only (PowerShell stays fully gated). Disable with CX_GATE_ALL_COMMANDS=1.
+_READONLY_COMMANDS = frozenset({
+    "ls", "pwd", "cat", "head", "tail", "echo", "whoami", "id", "date", "hostname", "uname",
+    "wc", "which", "stat", "file", "basename", "dirname", "realpath", "readlink", "tree",
+    "df", "du", "ps", "grep", "rg", "cut", "uniq", "cmp", "cksum", "md5sum", "sha256sum",
+})
 
 
 def _normalize_path(p):
@@ -403,14 +414,28 @@ def _auth_validate_probe():
     """True iff `cx auth validate` succeeds (the gate's notion of authenticated; accepts an OAuth
     refresh token). Never raises — any spawn/timeout error is a non-authenticated result."""
     try:
-        # Outer kill must exceed inner (--timeout 12s) x (--retry 1 → 2 attempts) plus spawn overhead,
-        # while staying under the 45s cx_check.sh hook budget (shared with the cached version/scanner
-        # probes). 28s gives the two attempts room without risking the hook timeout.
+        # Outer kill just needs to exceed the single inner attempt (--timeout 10s) + spawn overhead.
+        # The retry is one level up (_auth_probe_with_grace), so two full probes + the scanner probe
+        # still fit the 45s cx_check.sh hook budget.
         result = subprocess.run(_auth_validate_cmd(), stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, timeout=28)
+                                stderr=subprocess.PIPE, timeout=13)
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError, TypeError):
         return False
+
+
+def _auth_probe_with_grace():
+    """`cx auth validate`, with ONE short retry when the credential was JUST written (fresh login). A
+    freshly-issued token has a brief window where validate returns invalid before the backend accepts
+    it, so the gate can deny a genuinely-authenticated session right after login. cx's own --retry
+    covers network errors, not this post-login invalid, so retry once after a short sleep — bounded to
+    stay within the hook budget. Only True is ever cached, so a transient failure is never memoized."""
+    if _auth_validate_probe():
+        return True
+    if _credential_is_fresh():
+        time.sleep(3)
+        return _auth_validate_probe()
+    return False
 
 
 def _is_authenticated(identity=None):
@@ -420,7 +445,7 @@ def _is_authenticated(identity=None):
     differently (see _scanner_state)."""
     cx, mtime = identity if identity is not None else _binary_identity()
     return _cached_probe(_AUTH_CACHE_FILE, _AUTH_CACHE_TTL, {"cx": cx, "mtime": mtime},
-                         _auth_validate_probe, lambda ok: ok is True)
+                         _auth_probe_with_grace, lambda ok: ok is True)
 
 
 # --- Scanner readiness: detect the native scanner's SILENT pass-through (the OAuth fail-open) -------
@@ -465,6 +490,20 @@ def _credential_mtime():
             os.path.join(os.path.expanduser("~"), ".checkmarx", "checkmarxcli.yaml"))
     except OSError:
         return None
+
+
+def _credential_is_fresh(within_seconds=180):
+    """True if the cx credential file was written within the last `within_seconds` — i.e. the user
+    just ran `cx auth login` / `cx configure`. Drives (a) a grace-retry of a validate that fails in the
+    brief post-login window before the backend accepts the freshly-issued token, and (b) a
+    "wait, don't re-login" deny message instead of generic re-auth guidance."""
+    mtime = _credential_mtime()
+    if mtime is None:
+        return False
+    try:
+        return (time.time() - mtime) < within_seconds
+    except (TypeError, ValueError):
+        return False
 
 
 def _probe_scanner_passthrough():
@@ -691,6 +730,20 @@ def _is_bootstrap_command(hook_input):
     return candidate is not None and candidate == expected
 
 
+def _is_readonly_command(hook_input, tool):
+    """True for a BARE Bash command whose first token is a known read-only program (_READONLY_COMMANDS)
+    — safe to run without the cx gate. Reuses the same shape-guard the auth/bootstrap carve-outs use, so
+    `ls; rm -rf x`, `cat $(evil)`, `> file` redirects, etc. are NOT matched. Bash-tool only; opt out
+    with CX_GATE_ALL_COMMANDS=1. A path form (e.g. /bin/rm) is not matched — only a plain program name."""
+    if tool != "Bash" or os.environ.get("CX_GATE_ALL_COMMANDS") == "1":
+        return False
+    command = _bare_bash_command(hook_input)
+    if not command:
+        return False
+    parts = command.split()
+    return bool(parts) and parts[0] in _READONLY_COMMANDS
+
+
 def cx_check():
     hook_input = _read_hook_input()
     tool = hook_input.get("tool_name")
@@ -739,6 +792,14 @@ def cx_check():
             reason_code="unscanned_override",
             tool_name=tool,
         )
+
+    # 2b. Read-only Bash commands (ls, cat, grep, …) can't write code to disk or run another program,
+    #     so there is nothing to scan — allow them WITHOUT requiring cx to be installed/authed. Removes
+    #     the friction of gating a plain `ls` during setup. Allowlisted + shape-guarded so it can't be
+    #     used to smuggle a write/exec (`ls; rm …`, `cat $(…)`, `> file` are all rejected).
+    if _is_readonly_command(hook_input, tool):
+        _log("gate_decision", decision="allow", reason_code="read_only", tool_name=tool)
+        return
 
     # 2.5 CX_BINARY override: validate before trusting it. A set-but-invalid value fails CLOSED
     #     (never silently use a different binary). When valid, every gate probe below uses it,
@@ -865,6 +926,32 @@ def cx_check():
 
     # 6. Authenticated? (the gate's notion: `cx auth validate`, which accepts an OAuth token.)
     if not _is_authenticated(identity):
+        # Fresh-login window: the credential was just written but `cx auth validate` is still returning
+        # invalid — a transient backend-propagation lag, NOT a real auth failure. The critical guidance
+        # is DON'T re-run `cx auth login`: it revokes the token and reissues a new one, resetting the
+        # wait (the loop we observed). Tell the agent to wait and retry the SAME operation instead.
+        if _credential_is_fresh():
+            _deny(
+                reason=(
+                    "You just authenticated, but Checkmarx has not finished accepting the new token yet "
+                    "(this can take up to ~1–2 minutes on some backends). Do NOT re-run `cx auth login` — "
+                    "each login REVOKES the current token and RESTARTS the wait. Wait ~30–60s and retry "
+                    "this SAME operation."
+                ),
+                context=(
+                    "The cx credential file was written moments ago (a fresh `cx auth login`/`configure`), "
+                    "but `cx auth validate` still reports not-authenticated — a transient post-login "
+                    "window while the backend finalizes the freshly-issued token, NOT a bad credential. "
+                    "RE-RUNNING `cx auth login` makes it WORSE: it revokes the token server-side and "
+                    "issues a new one, resetting this wait — that is the loop to avoid. Wait ~30–60s, "
+                    "then retry the ORIGINAL operation. You may confirm readiness once with:\n    "
+                    + _cx_recovery_command_str("auth validate")
+                    + "\nAll agent actions remain blocked fail-closed until validate succeeds."
+                ),
+                reason_code="auth_pending_fresh_login",
+                tool_name=tool,
+                version_state=state,
+            )
         _deny(
             reason=(
                 "The Checkmarx CLI (cx) could not authenticate to Checkmarx One. If you JUST signed in, "
