@@ -93,10 +93,15 @@ def _cx_exe():
     return "cx"
 
 
-# Keep auth validation fast: no retries, short network timeout. Built per call so it honors a
-# CX_BINARY override.
+# Auth validation must SUCCEED against a slow or on-prem/OAuth backend, not just be fast: a first
+# OAuth validate does an IAM refresh-token exchange THEN an AST validate, and a --retry 0 --timeout 5s
+# budget times out on a slow dev/on-prem server even though the credential is valid — reporting a
+# genuinely-authenticated user as "not authenticated" and blocking every gated call. Allow one retry
+# and a 12s network timeout; the outer subprocess kill in _auth_validate_probe bounds the total, and
+# both stay well under the cx_check.sh hook budget (45s). Built per call so it honors a CX_BINARY
+# override.
 def _auth_validate_cmd():
-    return [_cx_exe(), "auth", "validate", "--retry", "0", "--timeout", "5s"]
+    return [_cx_exe(), "auth", "validate", "--retry", "1", "--timeout", "12s"]
 
 def _chmod_600(path):
     """Best-effort 0600 on a per-user state file. POSIX only — on Windows the file already
@@ -398,8 +403,11 @@ def _auth_validate_probe():
     """True iff `cx auth validate` succeeds (the gate's notion of authenticated; accepts an OAuth
     refresh token). Never raises — any spawn/timeout error is a non-authenticated result."""
     try:
+        # Outer kill must exceed inner (--timeout 12s) x (--retry 1 → 2 attempts) plus spawn overhead,
+        # while staying under the 45s cx_check.sh hook budget (shared with the cached version/scanner
+        # probes). 28s gives the two attempts room without risking the hook timeout.
         result = subprocess.run(_auth_validate_cmd(), stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, timeout=6)
+                                stderr=subprocess.PIPE, timeout=28)
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError, TypeError):
         return False
@@ -432,7 +440,9 @@ _SCANNER_UNKNOWN = "unknown"          # probe inconclusive (spawn error / timeou
 _SCANNER_UNLICENSED = "unlicensed"    # authenticated but NO AI-scan license → cx pass-through, NO scan
 _SCANNER_PASSTHROUGH_MARKER = "pass-through mode (not authenticated)"  # legacy --debug fallback only
 _SCANNER_UNLICENSED_MARKER = "pass-through mode (no AI feature license)"  # legacy --debug fallback only
-_SCANNER_PROBE_TIMEOUT = 8
+# `cx hooks check-auth` does the same token exchange as auth validate, so give it comparable room on a
+# slow/on-prem backend (a too-tight budget → UNKNOWN → defers, silently skipping the readiness check).
+_SCANNER_PROBE_TIMEOUT = 12
 
 # Exit codes emitted by `cx hooks check-auth` (the machine-readable readiness probe): 0 = ready
 # (authenticated + AI-licensed → will scan), 1 = authenticated but unlicensed (valid user, no scan),
@@ -857,12 +867,15 @@ def cx_check():
     if not _is_authenticated(identity):
         _deny(
             reason=(
-                "The Checkmarx CLI (cx) is installed but not authenticated. "
-                "Run /cx-cli-setup to configure and authenticate, then retry."
+                "The Checkmarx CLI (cx) could not authenticate to Checkmarx One. If you JUST signed in, "
+                "the backend may have been slow — retry the operation once. Otherwise run /cx-cli-setup "
+                "to (re)authenticate, then retry."
             ),
             context=(
-                "cx auth validate failed — cx is installed but not authenticated (credentials missing "
-                "or expired, or the backend was unreachable). Invoke the cx-cli-setup skill "
+                "cx auth validate did not succeed within the gate's timeout — cx is either not "
+                "authenticated (credentials missing or expired) OR the backend was slow/unreachable, so "
+                "a valid session that simply timed out looks the same here. Retry once; if it persists, "
+                "invoke the cx-cli-setup skill "
                 "(/cx-cli-setup) for the guided flow. ASK THE DEVELOPER WHICH METHOD FIRST — do not "
                 "assume OAuth and do not ask for a URL/tenant before this choice is made. There are two "
                 "ways to authenticate, and they differ in who runs them:\n"

@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
@@ -49,6 +49,23 @@
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks claude-pre-file-write",
             "timeout": 60,
             "statusMessage": "Checking file edit against security policy..."
+          }
+        ]
+      },
+      {
+        "matcher": "MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+            "timeout": 45,
+            "statusMessage": "Checking cx CLI is available..."
+          },
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks claude-pre-file-write",
+            "timeout": 60,
+            "statusMessage": "Checking file write against security policy..."
           }
         ]
       },
