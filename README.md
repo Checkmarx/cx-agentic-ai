@@ -60,3 +60,4 @@ cxone-scanners/
 ## License
 
 MIT — see [plugins/cx-devassist/LICENSE](./plugins/cx-devassist/LICENSE).
+
