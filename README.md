@@ -64,17 +64,18 @@ Multi-protocol support to facilitate secure and efficient communication between 
 
 The server uses **API Key** and **OAuth2** authentication.
 
-### API Key Authentication
-
-1. Clients authenticate to Checkmarx One and get an API key.
-2. This API key will be used during MCP client configuration, include the API Key in the `Authorization` header as mentioned in the [MCP Client Configuration](#mcp-client-configuration) section.
-
 ### OAuth2 Authentication (Recommended)
 Checkmarx MCP supports Dynamic Client Registration (DCR) flow allows an AI client (such as Cursor or Claude Desktop) to connect securely.
 1. User only needs to configure the MCP client as mentioned in the [MCP Client Configuration](#mcp-client-configuration) section.
 2. When the client attempts to connect to the MCP server, it will be redirected to Checkmarx One login page for authentication.
 3. Once authentication is successful with valid Checkmarx credentials, the MCP client can use the tools provided by the MCP server.
- 
+
+### API Key Authentication
+
+1. Clients authenticate to Checkmarx One and get an API key.
+2. This API key will be used during MCP client configuration, include the API Key in the `Authorization` header as mentioned in the [MCP Client Configuration](#mcp-client-configuration) section.
+
+
 **Note:** You required valid Checkmarx credentials to get the API Key or connect to the MCP server.
 
 Refer [Authentication](/docs/authentication.md) for detailed authentication instructions and troubleshooting.
@@ -98,7 +99,7 @@ Below are examples to add the server to your MCP client configuration. See the [
 {
   "mcpServers": {
     "Checkmarx": {
-      "serverUrl": "https://{api_host}/api/security-mcp/mcp/{tenant}",
+      "url": "https://{api_host}/api/security-mcp/mcp/{tenant}",
       "headers": {
         "cx-origin": "Cursor",
         "Authorization": "API_KEY"
@@ -114,7 +115,7 @@ Below are examples to add the server to your MCP client configuration. See the [
 {
   "mcpServers": {
     "Checkmarx": {
-      "serverUrl": "https://{api_host}/api/security-mcp/mcp/{tenant}"
+      "url": "https://{api_host}/api/security-mcp/mcp/{tenant}"
     }
   }
 }
