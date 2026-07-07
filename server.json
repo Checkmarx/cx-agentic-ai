@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "com.checkmarx/security-mcp",
+  "name": "com.checkmarx/Checkmarx",
   "description": "Official Checkmarx MCP Server",
   "repository": {
     "url": "https://github.com/Checkmarx/cx-agentic-ai",
