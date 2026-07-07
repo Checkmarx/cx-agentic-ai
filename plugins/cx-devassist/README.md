@@ -1,6 +1,7 @@
 # cx-devassist
 
-A **fail-closed security gate** for Claude Code, backed by [Checkmarx CxOne](https://checkmarx.com/).
+A **fail-closed security gate** for **Claude Code** and **GitHub Copilot CLI**, backed by
+[Checkmarx CxOne](https://checkmarx.com/).
 
 Before Claude writes code, edits a file, runs a shell command, or calls an MCP tool, the plugin asks
 the Checkmarx `cx` CLI to scan the proposed action. If a real vulnerability or policy violation is
@@ -19,16 +20,29 @@ Every gated tool call runs a **two-stage PreToolUse chain**:
 2. **The scanner** — a native `cx hooks claude-*` subcommand that performs the actual analysis and
    decides whether to allow or block the action.
 
+**Claude Code** (`hooks/hooks.json`):
+
 | Tool event | Gate | Native scanner | What it checks |
 |---|---|---|---|
-| `Write` / `Edit` | `cx_check` | `cx hooks claude-pre-file-write` | Static analysis (ASCA / SAST) of the proposed file content |
-| `Bash` | `cx_check` | `cx hooks claude-pre-tool-use` | Command & dependency policy — open-source / SCA checks on installs and manifest edits |
-| MCP tool calls (`mcp__*`) | `cx_check` | `cx hooks claude-pre-tool-use` | Policy check before the MCP call is allowed |
+| `Write` / `Edit` / `MultiEdit` / `NotebookEdit` | `cx_check` | `cx hooks claude-pre-file-write` | Static analysis (ASCA / SAST) of the proposed file content |
+| `Bash` / `PowerShell` | `cx_check` | `cx hooks claude-pre-tool-use` | Command & dependency policy — open-source / SCA checks on installs and manifest edits |
+| MCP calls (`mcp__Checkmarx__*`) | `cx_check` | `cx hooks claude-pre-tool-use` | Policy check before the MCP call is allowed |
 | Session stop | — | `cx hooks claude-stop` | Session-end hook |
 
-The scanning logic itself lives in the `cx` CLI (maintained centrally by Checkmarx); this plugin is a
-thin, hardened wrapper that **guarantees cx is ready, installs it when missing, and wires the
-remediation MCP** — nothing more.
+**GitHub Copilot CLI** (`hooks/hooks-copilot-cli.json`, manifest `.plugin/plugin.json`) — the same
+`cx_check` gate and `cx` scanner, wired to Copilot's tool names:
+
+| Tool event | Native scanner |
+|---|---|
+| `create` / `edit` | `cx hooks copilot-cli-pre-file-write` |
+| `bash` / `powershell` | `cx hooks copilot-cli-pre-tool-use` |
+| prompt submit | `cx hooks copilot-cli-user-prompt-submit` |
+| stop | `cx hooks copilot-cli-stop` |
+
+Both assistants share the same gate, scanner wrapper (`cx_run.sh`), skills, scripts, and `cx` CLI —
+only the per-tool hook wiring and manifest differ. The scanning logic itself lives in the `cx` CLI
+(maintained centrally by Checkmarx); this plugin is a thin, hardened wrapper that **guarantees cx is
+ready, installs it when missing, and wires the remediation MCP** — nothing more.
 
 ### Remediation (MCP)
 
@@ -64,13 +78,17 @@ unauthenticated, the gate denies with a clear, actionable message pointing at `/
 ```
 plugins/cx-devassist/
 ├── .claude-plugin/
-│   └── plugin.json              # plugin manifest (name, version, license)
+│   └── plugin.json              # Claude Code manifest (name, version, license)
+├── .plugin/
+│   └── plugin.json              # GitHub Copilot CLI manifest
 ├── .mcp.json                    # declares the Checkmarx MCP server (cx mcp bridge); auto-discovered
 ├── README.md
 ├── hooks/
-│   ├── hooks.json               # PreToolUse / Stop wiring
+│   ├── hooks.json               # Claude Code PreToolUse / Stop wiring
+│   ├── hooks-copilot-cli.json   # GitHub Copilot CLI hook wiring
 │   ├── cx_check.sh              # POSIX launcher — resolves Git Bash + Python 3, then runs the gate
 │   ├── cx_check.py              # the fail-closed gate (present → recent → capable → authenticated)
+│   ├── cx_run.sh                # resolves cx by absolute path; runs the native scanner + MCP bridge
 │   └── cx_log.py                # structured, redacted JSONL logging
 ├── scripts/
 │   ├── cx-bootstrap.sh          # download + checksum-verify + install the cx CLI (self-install)

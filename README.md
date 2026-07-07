@@ -1,6 +1,7 @@
 # cxone-scanners
 
-A Claude Code plugin marketplace (`cx-devassist-marketplace`) for **Checkmarx CxOne** security scanning.
+A plugin marketplace (`cx-devassist-marketplace`) for **Checkmarx CxOne** security scanning, for both
+**Claude Code** and **GitHub Copilot CLI**.
 
 ## Plugins
 
@@ -18,10 +19,13 @@ Each gated tool call runs a **two-stage PreToolUse chain**:
 
 | Tool event | Scans for |
 |---|---|
-| `Write` / `Edit` | Vulnerabilities in the file content (SAST / ASCA) |
-| `Bash` | Risky commands & vulnerable dependencies (SCA) |
+| `Write` / `Edit` / `MultiEdit` / `NotebookEdit` | Vulnerabilities in the file content (SAST / ASCA) |
+| `Bash` / `PowerShell` | Risky commands & vulnerable dependencies (SCA) |
 | MCP tool calls | Policy violations before the call runs |
-| Prompt submit / session stop | Sensitive-content & lifecycle checks |
+| Session stop | Lifecycle checks |
+
+The same gate protects **GitHub Copilot CLI**, wired to its equivalent tools (`bash`, `powershell`,
+`create`, `edit`, prompt-submit, stop) via `hooks/hooks-copilot-cli.json`.
 
 Only an explicit `exit 2` (deny) blocks — everything else is non-blocking — so the gate is
 **fail-closed**: anything it can't prove safe is blocked rather than let through. Remediation runs
