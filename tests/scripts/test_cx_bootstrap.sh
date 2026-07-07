@@ -142,5 +142,24 @@ n="$(grep -rhF "cx-devassist (cx-bootstrap)" "$ph" 2>/dev/null | wc -l | tr -d '
 if [[ "$n" == "1" ]]; then ok "ensure_dir_on_path_profile is idempotent (marker written once)"
 else bad "ensure_dir_on_path_profile duplicated the marker (found $n)"; fi
 
+# 12. apply_proxy: CX_HTTP_PROXY wins and is exported as http_proxy AND https_proxy (HTTPS needs it).
+( unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; export CX_HTTP_PROXY="http://proxy.test:3128"
+  apply_proxy >/dev/null 2>&1
+  [[ "$http_proxy" == "http://proxy.test:3128" && "$https_proxy" == "http://proxy.test:3128" ]] )
+if [[ $? -eq 0 ]]; then ok "apply_proxy honors CX_HTTP_PROXY (env), exports http+https"; else bad "apply_proxy env failed"; fi
+
+# 12b. apply_proxy falls back to the http_proxy: key in checkmarxcli.yaml.
+ph2="$tmp/proxyaml"; mkdir -p "$ph2/.checkmarx"
+printf 'cx_apikey: x\nhttp_proxy: http://yaml.proxy:8080\n' > "$ph2/.checkmarx/checkmarxcli.yaml"
+( unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY CX_HTTP_PROXY; export HOME="$ph2"
+  apply_proxy >/dev/null 2>&1; [[ "$https_proxy" == "http://yaml.proxy:8080" ]] )
+if [[ $? -eq 0 ]]; then ok "apply_proxy reads http_proxy from checkmarxcli.yaml"; else bad "apply_proxy yaml fallback failed"; fi
+
+# 12c. No proxy anywhere → no-op (does not set https_proxy).
+ph3="$tmp/noproxy"; mkdir -p "$ph3"
+( unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY CX_HTTP_PROXY; export HOME="$ph3"
+  apply_proxy >/dev/null 2>&1; [[ -z "${https_proxy:-}" ]] )
+if [[ $? -eq 0 ]]; then ok "apply_proxy is a no-op when no proxy is configured"; else bad "apply_proxy should no-op"; fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

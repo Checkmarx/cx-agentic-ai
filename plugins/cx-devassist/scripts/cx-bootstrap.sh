@@ -48,6 +48,22 @@ VERSION_CACHE_FILE="$AGENT_LOG_DIR/cx_version_cache"
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
+# Route downloads through the SAME proxy cx uses — no new plugin variable. Precedence mirrors cx's own
+# binding: CX_HTTP_PROXY, then HTTP_PROXY/http_proxy, then the persisted `http_proxy:` key in
+# ~/.checkmarx/checkmarxcli.yaml (so `cx configure set --prop-name http_proxy` covers the download too).
+# Exported as http_proxy/https_proxy (both cases) so curl AND wget honor it natively — including HTTPS
+# (GitHub), which needs https_proxy, not just http_proxy. The value may carry credentials → never logged.
+apply_proxy() {
+    local p="${CX_HTTP_PROXY:-${HTTP_PROXY:-${http_proxy:-}}}"
+    if [[ -z "$p" ]]; then
+        local cfg="$HOME/.checkmarx/checkmarxcli.yaml"
+        [[ -r "$cfg" ]] && p="$(sed -n 's/^[[:space:]]*http_proxy:[[:space:]]*//p' "$cfg" 2>/dev/null | head -1 | tr -d "[:space:]\"'")"
+    fi
+    [[ -z "$p" ]] && return 0
+    export http_proxy="$p" https_proxy="$p" HTTP_PROXY="$p" HTTPS_PROXY="$p"
+    log "Routing downloads through the configured HTTP proxy."
+}
+
 # ---------------------------------------------------------------------------------------
 # Minimum version (single source of truth: scripts/cx-min-version; first non-comment line).
 # ---------------------------------------------------------------------------------------
@@ -442,6 +458,7 @@ main() {
     local min mode
     min="$(load_min_version)"
     detect_os_arch
+    apply_proxy   # route downloads through cx's proxy (env or checkmarxcli.yaml http_proxy) if configured
 
     if [[ -n "$explicit_mode" ]]; then
         mode="$explicit_mode"
