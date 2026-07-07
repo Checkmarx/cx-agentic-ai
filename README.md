@@ -99,7 +99,7 @@ Below are examples to add the server to your MCP client configuration. See the [
 {
   "mcpServers": {
     "Checkmarx": {
-      "url": "https://{api_host}/api/security-mcp/mcp/{tenant}",
+      "url": "https://{cxone_base_url}/api/security-mcp/mcp/{tenant}",
       "headers": {
         "cx-origin": "Cursor",
         "Authorization": "API_KEY"
@@ -115,7 +115,7 @@ Below are examples to add the server to your MCP client configuration. See the [
 {
   "mcpServers": {
     "Checkmarx": {
-      "url": "https://{api_host}/api/security-mcp/mcp/{tenant}"
+      "url": "https://{cxone_base_url}/api/security-mcp/mcp/{tenant}"
     }
   }
 }
@@ -130,7 +130,7 @@ Below are examples to add the server to your MCP client configuration. See the [
   "mcpServers": {
     "Checkmarx": {
       "type": "http",
-      "url": "https://{api_host}/api/security-mcp/mcp/{tenant}",
+      "url": "https://{cxone_base_url}/api/security-mcp/mcp/{tenant}",
       "headers": {
         "Authorization": "<API_KEY>"
       }

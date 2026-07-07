@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "Checkmarx": {
-      "url": "https://<api_host>/api/security-mcp/mcp/<tenant_id>",
+      "url": "https://<cxone_base_url>/api/security-mcp/mcp/<tenant_id>",
     }
   }
 }
