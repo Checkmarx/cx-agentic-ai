@@ -121,7 +121,7 @@ def _agent_log_dir():
     this never raises into the gate."""
     override = os.environ.get("CX_LOG_DIR")
     target = override or os.path.join(
-        os.path.expanduser("~"), ".checkmarx", "agent-logs", "claude"
+        os.path.expanduser("~"), ".checkmarx", "agent-logs"
     )
     try:
         os.makedirs(target, exist_ok=True)
@@ -306,6 +306,7 @@ _CAPABILITY_PROBES = (
     ("hooks", "claude-pre-tool-use", "--help"),
     ("hooks", "claude-pre-file-write", "--help"),
     ("hooks", "claude-stop", "--help"),
+    ("hooks", "copilot-cli-pre-file-write", "--help"),
 )
 
 

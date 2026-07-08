@@ -53,7 +53,7 @@ run_py() {
 run_sh() {
     local f="$1"
     printf '\n========== shell: %s ==========\n' "${f#"$PLUGIN_ROOT/"}"
-    bash "$f" || fail=1
+    sh "$f" || fail=1
 }
 
 run_py "$DIR/hooks/test_cx_check.py"

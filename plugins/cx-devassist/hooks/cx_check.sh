@@ -1,7 +1,8 @@
 #!/bin/sh
 # Cross-platform launcher for cx_check.py — fail-closed. POSIX sh (no bashisms).
 #
-# Invoked by hooks.json as:  sh "${CLAUDE_PLUGIN_ROOT}/hooks/cx_check.sh"
+# Invoked by hooks.json as:              sh "${CLAUDE_PLUGIN_ROOT}/hooks/cx_check.sh"
+# Invoked by hooks-copilot-cli.json as:  sh "${COPILOT_CLI_PLUGIN_ROOT}/hooks/cx_check.sh"
 #
 # Why `sh` and not `bash`: on Windows a bare `bash` resolves to the System32 WSL
 # launcher (C:\Windows\System32\bash.exe), which is handed a Windows file path it

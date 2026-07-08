@@ -3,16 +3,39 @@
   "hooks": {
     "preToolUse": [
       {
+        "matcher": "command",
+        "type": "command",
+        "command": "sh \"${COPILOT_CLI_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+        "timeoutSec": 45,
+        "statusMessage": "Checking cx CLI is available..."
+      },
+      {
         "matcher": "create",
         "type": "command",
-        "command": "cx hooks copilot-cli-pre-file-write",
-        "timeoutSec": 60
+        "command": "sh \"${COPILOT_CLI_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+        "timeoutSec": 45,
+        "statusMessage": "Checking cx CLI is available..."
+      },
+      {
+        "matcher": "create",
+        "type": "command",
+        "command": "sh \"${COPILOT_CLI_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks copilot-cli-pre-file-write",
+        "timeoutSec": 60,
+        "statusMessage": "Checking file write against security policy..."
       },
       {
         "matcher": "edit",
         "type": "command",
-        "command": "cx hooks copilot-cli-pre-file-write",
-        "timeoutSec": 60
+        "command": "sh \"${COPILOT_CLI_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+        "timeoutSec": 45,
+        "statusMessage": "Checking cx CLI is available..."
+      },
+      {
+        "matcher": "edit",
+        "type": "command",
+        "command": "sh \"${COPILOT_CLI_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks copilot-cli-pre-file-write",
+        "timeoutSec": 60,
+        "statusMessage": "Checking file edit against security policy..."
       }
     ]
   }
