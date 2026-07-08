@@ -1,6 +1,7 @@
-# cx-security
+# cx-devassist
 
-A **fail-closed security gate** for Claude Code, backed by [Checkmarx CxOne](https://checkmarx.com/).
+A **fail-closed security gate** for **Claude Code** and **GitHub Copilot CLI**, backed by
+[Checkmarx CxOne](https://checkmarx.com/).
 
 Before Claude writes code, edits a file, runs a shell command, or calls an MCP tool, the plugin asks
 the Checkmarx `cx` CLI to scan the proposed action. If a real vulnerability or policy violation is
@@ -19,16 +20,29 @@ Every gated tool call runs a **two-stage PreToolUse chain**:
 2. **The scanner** — a native `cx hooks claude-*` subcommand that performs the actual analysis and
    decides whether to allow or block the action.
 
+**Claude Code** (`hooks/hooks.json`):
+
 | Tool event | Gate | Native scanner | What it checks |
 |---|---|---|---|
-| `Write` / `Edit` | `cx_check` | `cx hooks claude-pre-file-write` | Static analysis (ASCA / SAST) of the proposed file content |
-| `Bash` | `cx_check` | `cx hooks claude-pre-tool-use` | Command & dependency policy — open-source / SCA checks on installs and manifest edits |
-| MCP tool calls (`mcp__*`) | `cx_check` | `cx hooks claude-pre-tool-use` | Policy check before the MCP call is allowed |
+| `Write` / `Edit` / `MultiEdit` / `NotebookEdit` | `cx_check` | `cx hooks claude-pre-file-write` | Static analysis (ASCA / SAST) of the proposed file content |
+| `Bash` / `PowerShell` | `cx_check` | `cx hooks claude-pre-tool-use` | Command & dependency policy — open-source / SCA checks on installs and manifest edits |
+| MCP calls (`mcp__Checkmarx__*`) | `cx_check` | `cx hooks claude-pre-tool-use` | Policy check before the MCP call is allowed |
 | Session stop | — | `cx hooks claude-stop` | Session-end hook |
 
-The scanning logic itself lives in the `cx` CLI (maintained centrally by Checkmarx); this plugin is a
-thin, hardened wrapper that **guarantees cx is ready, installs it when missing, and wires the
-remediation MCP** — nothing more.
+**GitHub Copilot CLI** (`hooks/hooks-copilot-cli.json`, manifest `.plugin/plugin.json`) — the same
+`cx_check` gate and `cx` scanner, wired to Copilot's tool names:
+
+| Tool event | Native scanner |
+|---|---|
+| `create` / `edit` | `cx hooks copilot-cli-pre-file-write` |
+| `bash` / `powershell` | `cx hooks copilot-cli-pre-tool-use` |
+| prompt submit | `cx hooks copilot-cli-user-prompt-submit` |
+| stop | `cx hooks copilot-cli-stop` |
+
+Both assistants share the same gate, scanner wrapper (`cx_run.sh`), skills, scripts, and `cx` CLI —
+only the per-tool hook wiring and manifest differ. The scanning logic itself lives in the `cx` CLI
+(maintained centrally by Checkmarx); this plugin is a thin, hardened wrapper that **guarantees cx is
+ready, installs it when missing, and wires the remediation MCP** — nothing more.
 
 ### Remediation (MCP)
 
@@ -62,15 +76,19 @@ unauthenticated, the gate denies with a clear, actionable message pointing at `/
 ## Plugin structure
 
 ```
-plugins/cx-security/
+plugins/cx-devassist/
 ├── .claude-plugin/
-│   └── plugin.json              # plugin manifest (name, version, license)
+│   └── plugin.json              # Claude Code manifest (name, version, license)
+├── .plugin/
+│   └── plugin.json              # GitHub Copilot CLI manifest
 ├── .mcp.json                    # declares the Checkmarx MCP server (cx mcp bridge); auto-discovered
 ├── README.md
 ├── hooks/
-│   ├── hooks.json               # PreToolUse / Stop wiring
+│   ├── hooks.json               # Claude Code PreToolUse / Stop wiring
+│   ├── hooks-copilot-cli.json   # GitHub Copilot CLI hook wiring
 │   ├── cx_check.sh              # POSIX launcher — resolves Git Bash + Python 3, then runs the gate
 │   ├── cx_check.py              # the fail-closed gate (present → recent → capable → authenticated)
+│   ├── cx_run.sh                # resolves cx by absolute path; runs the native scanner + MCP bridge
 │   └── cx_log.py                # structured, redacted JSONL logging
 ├── scripts/
 │   ├── cx-bootstrap.sh          # download + checksum-verify + install the cx CLI (self-install)
@@ -79,7 +97,7 @@ plugins/cx-security/
 │   └── cx-min-version           # minimum cx version (numeric floor)
 └── skills/
     ├── cx-cli-setup/            # guided cx install + authentication (router + references/)
-    └── cx-security-asca/        # ASCA remediation guidance
+    └── cx-devassist-asca/       # ASCA remediation guidance
 ```
 
 > Tests live at the **repo root** (`tests/`), outside the shipped plugin, so they aren't distributed.
@@ -97,9 +115,14 @@ provide these first, or the gate can't run:
 | **Python 3** (gate logic) | install from python.org (**not** the Microsoft Store stub) | `xcode-select --install` or `brew install python3` | `apt`/`dnf`/`apk install python3` |
 | **`curl` or `wget`** (bootstrap download) | bundled with Git for Windows | built-in `curl` | usually present; minimal images may need it |
 
-If **Python 3** or **a downloader** is missing, the gate **fails closed** — it blocks the action with
-an install hint (safe). On **Windows specifically**, if **Git for Windows** is absent the hook cannot
-spawn at all, so it is a hard requirement.
+If **Python 3** is missing, the gate **fails closed** — it blocks the action with an install hint
+(safe). But if the **POSIX shell** (`sh`) is missing — the default on Windows without Git for Windows
+— the hook cannot spawn at all and **fails OPEN**: Claude Code treats an un-spawnable hook as a
+non-blocking error, so the action proceeds **UNSCANNED**. Claude Code offers no way to fail-close a
+missing-shell hook (a hook needs a shell to run, and hook entries cannot be scoped to a single OS), so
+**Git for Windows is a hard prerequisite** — install and verify it *before* relying on the gate.
+Without it, Claude Code's own Bash tool does not work either, so this is already part of a supported
+Windows setup.
 
 Then the **`cx` CLI** itself, which the bundled **`cx-cli-setup`** skill installs (with download
 checksum verification), puts on PATH, and authenticates (API key or OAuth). The minimum version is a
@@ -114,19 +137,19 @@ numeric floor in `scripts/cx-min-version`; the real capability decision is a run
 
 ```bash
 claude plugin marketplace add /path/to/cxone-scanners
-claude plugin install cx-security@cx-secured-agent
+claude plugin install cx-devassist@cx-devassist-marketplace
 ```
 
 Verify:
 
 ```bash
-claude plugin list      # cx-security@cx-secured-agent  ✔ enabled
+claude plugin list      # cx-devassist@cx-devassist-marketplace  ✔ enabled
 ```
 
 **Direct plugin-dir** (quick local testing):
 
 ```bash
-claude --plugin-dir /path/to/cxone-scanners/plugins/cx-security
+claude --plugin-dir /path/to/cxone-scanners/plugins/cx-devassist
 ```
 
 After updating hook scripts, reload them into the session:
@@ -158,7 +181,7 @@ All optional — sensible defaults apply.
 ## Privacy & logging
 
 The gate writes one redacted JSONL record per decision to
-`~/.checkmarx/agent-logs/<assistant>/cx-security.jsonl`. Logging uses a **redaction allowlist**: each
+`~/.checkmarx/agent-logs/<assistant>/cx-devassist.jsonl`. Logging uses a **redaction allowlist**: each
 event declares the exact keys it may write and a type coercer per key. Anything else — source code,
 secrets, tokens, prompts, free-form strings — is dropped before it can reach disk. The MCP bridge
 sends your credential only in the `Authorization` header, never to chat or logs. Logging never raises

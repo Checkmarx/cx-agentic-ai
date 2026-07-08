@@ -1,4 +1,4 @@
-"""cx_log — structured, redacted JSONL logging for the cx-security gate.
+"""cx_log — structured, redacted JSONL logging for the cx-devassist gate.
 
 A deep module with a tiny surface: `log_event(event, **fields)`. Two guarantees make it safe to
 call from inside the fail-closed gate:
@@ -10,7 +10,7 @@ call from inside the fail-closed gate:
      that does not coerce to a safe type is omitted. No secret, token, source code, prompt, or
      free-form string can reach the log — even if a caller passes one by mistake.
 
-Records are written to `<CX_LOG_DIR or ~/.checkmarx/agent-logs/<assistant>>/cx-security.jsonl`,
+Records are written to `<CX_LOG_DIR or ~/.checkmarx/agent-logs/<assistant>>/cx-devassist.jsonl`,
 size-rotated, dir 0700 / file 0600. Set `CX_LOG_DISABLE=1` to turn logging off entirely.
 """
 
@@ -20,9 +20,9 @@ import platform
 import re
 import time
 
-_LOG_FILE_NAME = "cx-security.jsonl"
+_LOG_FILE_NAME = "cx-devassist.jsonl"
 _MAX_BYTES = 1_000_000  # rotate at ~1 MB
-_ROTATE_KEEP = 3        # keep cx-security.jsonl.1 .. .3
+_ROTATE_KEEP = 3        # keep cx-devassist.jsonl.1 .. .3
 _SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_.:\-]{1,64}$")
 
 

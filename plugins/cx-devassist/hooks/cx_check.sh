@@ -41,12 +41,12 @@ export PYTHONUTF8=1
 # fallback). On a hang the probe is killed and reported as a failure → that candidate is rejected.
 probe_python() {
     if command -v timeout >/dev/null 2>&1; then
-        timeout 5 "$@"
+        timeout 3 "$@"
         return
     fi
     "$@" &
     _probe_pid=$!
-    ( sleep 5; kill "$_probe_pid" 2>/dev/null ) &
+    ( sleep 3; kill "$_probe_pid" 2>/dev/null ) &
     _probe_killer=$!
     wait "$_probe_pid" 2>/dev/null
     _probe_status=$?
@@ -55,8 +55,16 @@ probe_python() {
     return "$_probe_status"
 }
 
+# Bound the TOTAL probe phase (not just each probe): several present-but-wedged interpreters could
+# each burn a full per-probe timeout and, summed, exceed Claude Code's 45s hook budget — a KILLED
+# hook is non-2 = fail OPEN. If the budget is spent, stop probing and fall through to the no-Python
+# deny (exit 2) below. (date-less hosts skip the deadline; each probe is still individually bounded.)
+_probe_start="$(date +%s 2>/dev/null || echo 0)"
 PYTHON_BIN=""
-for candidate in python3.13 python3.12 python3.11 python3.10 python3.9 python3.8 python3 python; do
+# Try the canonical names FIRST (usually the one working interpreter), so a few wedged versioned
+# binaries early in the list can't burn the whole probe budget before python3/python are reached.
+for candidate in python3 python python3.13 python3.12 python3.11 python3.10 python3.9 python3.8; do
+    [ "$(( $(date +%s 2>/dev/null || echo "$_probe_start") - _probe_start ))" -ge 12 ] && break
     if command -v "$candidate" >/dev/null 2>&1 && \
        probe_python "$candidate" -c "import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)" >/dev/null 2>&1; then
         PYTHON_BIN="$candidate"
@@ -71,58 +79,16 @@ if [ -z "$PYTHON_BIN" ] && command -v py >/dev/null 2>&1 && \
 fi
 
 if [ -z "$PYTHON_BIN" ]; then
-    # NO-PYTHON CARVE-OUT: the bootstrap installs cx and itself needs NO Python, so it alone may
-    # run even here. Tightened (review F-CR2): the command must reference the plugin's OWN bundled
-    # bootstrap by its resolved ABSOLUTE path — a bare filename like `bash /tmp/cx-bootstrap.sh` no
-    # longer qualifies. Still gated by: Bash tool, no shell chaining / substitution / redirects,
-    # and a `bash "<bundled>" [install|upgrade]` shape. Coarse on purpose; the AUTHORITATIVE matcher
-    # is cx_check.py's _is_bootstrap_command (run whenever Python 3 is present). Anything that does
-    # not match here falls through to the deny below (fail CLOSED).
-    BOOT_DIR=$(cd "$SCRIPT_DIR/../scripts" 2>/dev/null && pwd)
-    # Collapse JSON-escaped separators to plain '/': `\\` (a Windows path separator, doubled by
-    # JSON) and `\"` (an escaped quote) both reduce to '/' under `tr -s`, so paths compare uniformly.
-    # Only Windows paths carry backslashes, so if `tr` is unavailable we keep the raw INPUT — a
-    # POSIX (forward-slash) bootstrap path still matches, and a Windows one simply fails CLOSED.
-    if command -v tr >/dev/null 2>&1; then
-        NORM=$(printf '%s' "$INPUT" | tr -s '\\' '/')
-    else
-        NORM=$INPUT
+    # NO-PYTHON CARVE-OUT: the bootstrap installs cx and itself needs NO Python, so it alone may run
+    # even here. Delegated to the shared matcher (hooks/_cx_bootstrap_match.sh) that cx_run.sh's
+    # cx-absent branch also uses, so the two shell stages can't drift into disagreeing about the
+    # bootstrap shape. Coarse on purpose; the AUTHORITATIVE matcher is cx_check.py's
+    # _is_bootstrap_command (run whenever Python 3 is present). A non-match falls through to the deny
+    # below (fail CLOSED); a missing/unsourceable helper also falls through → deny (safe).
+    if [ -f "$SCRIPT_DIR/_cx_bootstrap_match.sh" ]; then
+        . "$SCRIPT_DIR/_cx_bootstrap_match.sh"
+        cx_is_bootstrap_command "$INPUT" "$SCRIPT_DIR" && exit 0
     fi
-    BOOT_POSIX=""
-    BOOT_WIN=""
-    if [ -n "$BOOT_DIR" ]; then
-        BOOT_POSIX="$BOOT_DIR/cx-bootstrap.sh"
-        # On Git Bash $BOOT_DIR is a POSIX path (/c/...) but the agent's command carries a Windows
-        # path (C:/...); cygpath -m yields the matching mixed form so the Windows case matches too.
-        if command -v cygpath >/dev/null 2>&1; then
-            _bw=$(cygpath -m "$BOOT_DIR" 2>/dev/null)
-            [ -n "$_bw" ] && BOOT_WIN="$_bw/cx-bootstrap.sh"
-        fi
-    fi
-    case "$NORM" in
-        *'"tool_name":"Bash"'* | *'"tool_name": "Bash"'*)
-            case "$NORM" in
-                *';'* | *'|'* | *'&'* | *'`'* | *'$('* | *'<'* | *'>'*) ;;  # chaining → deny
-                *)
-                    for _bp in "$BOOT_POSIX" "$BOOT_WIN"; do
-                        [ -n "$_bp" ] || continue
-                        # Exact sanctioned shape ONLY: the command value is precisely
-                        # `bash "<bundled-bootstrap>" install` (or upgrade) and nothing else. The
-                        # `bash /"` prefix (a JSON `bash \"`) rejects `bash -c …`; the bundled
-                        # ABSOLUTE path rejects foreign scripts; the trailing mode + closing quote
-                        # reject extra arguments and a missing mode.
-                        case "$NORM" in
-                            *'"command":"bash /"'"$_bp"'/" install"'*  | \
-                            *'"command": "bash /"'"$_bp"'/" install"'* | \
-                            *'"command":"bash /"'"$_bp"'/" upgrade"'*  | \
-                            *'"command": "bash /"'"$_bp"'/" upgrade"'*)
-                                exit 0 ;;
-                        esac
-                    done
-                    ;;
-            esac
-            ;;
-    esac
     # No working Python 3 ⇒ the gate cannot evaluate ⇒ fail CLOSED (deny + exit 2). A plain
     # exit 1 would be treated as non-blocking by Claude Code and silently fail OPEN.
     cat <<'JSON'

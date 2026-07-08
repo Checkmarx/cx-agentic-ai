@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "Checkmarx": {
-      "command": "cx",
-      "args": ["mcp", "bridge"]
-    }
-  }
-}

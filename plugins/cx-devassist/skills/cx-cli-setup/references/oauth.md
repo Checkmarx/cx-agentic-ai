@@ -9,6 +9,11 @@ step.
 > capability check in Phase 2: `login` listed under `cx auth --help`). If it is not listed, use
 > Path A (API key).
 
+**Never guess or default the URL or tenant** (e.g. do not try an assumed tenant like `checkmarx` or
+a guessed host like `https://iam.checkmarx.net`) — both are org-specific and a wrong guess just
+burns a failed login round-trip. Always ask Question 2 below first, even if a hook's deny message
+already shows the `--base-auth-uri <url> --tenant <tenant>` flags as bare placeholders.
+
 **Question 2 — ask in a plain chat message (NOT `AskUserQuestion`)**: the tenant is org-specific
 free text with no preset options, and one `AskUserQuestion` cannot return two independent free-text
 values. Collect both in a single reply:
@@ -38,20 +43,27 @@ value or no URL token, re-show the same combined prompt once. If `cx auth login`
 **Run the login command (both flags required on every login).** The CLI does not persist these and
 (by design) ignores the realm embedded in any stored token, so omitting `--base-auth-uri` fails with
 a "missing URI" error and omitting `--tenant` fails with "please provide tenant". Run it with stdout
-discarded (see the security note):
+discarded (see the security note).
+
+**Invoke cx exactly as the gate's deny message spells it out — do not type a doc-static `cx auth
+login`.** On a first-install session `cx` is **not on PATH**, so a **bare** `cx auth login` exits 127
+(`command not found`). The auth deny message **embeds the resolved recovery command with cx's absolute
+path** (the canonical store — `~/.checkmarx/bin/cx` on Unix, `%LOCALAPPDATA%\Checkmarx\cx\cx.exe` on
+Windows — while cx isn't yet on PATH). Take that exact cx invocation and append the two login flags:
 
 ```bash
-cx auth login --base-auth-uri <your Checkmarx One URL> --tenant <tenant> 1>/dev/null
+# Use the resolved cx path from the deny message (bare `cx` works only once it is on PATH):
+"$HOME/.checkmarx/bin/cx" auth login --base-auth-uri <your Checkmarx One URL> --tenant <tenant> 1>/dev/null
 ```
 
-**You may run this yourself with the Bash tool** — browser sign-in is safe for you to run: it opens
-the developer's browser to sign in (with MFA), and **no secret is typed or passes through you** (the
-token is written straight to the local cx config). The gate's auth-recovery carve-out permits
-`cx auth login` through even while it blocks other actions, so if an earlier Bash call was denied that
-does *not* mean this one will be. Running it yourself means the browser opens automatically; the
-developer just completes the login there. It blocks until they finish (~5 min), so run it with a long
-timeout or in the background — don't kill it early. (An **API key**, by contrast, is a plaintext
-secret — that one the *developer* sets in their own terminal, never you.)
+**Run this YOURSELF with the Bash tool — do NOT hand it to the developer with the `!` prefix.** This
+is the OAuth path: the agent runs the resolved login command itself (unlike an API key, which the
+*developer* sets because it is a plaintext secret). The security gate's auth-recovery carve-out admits
+`cx auth …` / `cx configure …` commands — including the resolved absolute-path form the deny message
+hands you — through even while it is blocking every other action (that is exactly why the carve-out
+exists), so you never need `!` here. The browser opens automatically on the developer's machine; they
+only complete the login there. If an earlier Bash call was denied by the gate, that does NOT mean the
+resolved `cx auth login` will be — the recovery commands are allowed; run it.
 
 - The default browser opens automatically. Tell the developer: *"Your browser is opening — complete
   the Checkmarx login and MFA there. You have about 5 minutes."*
@@ -86,5 +98,6 @@ macOS/Linux) and exclude it from backups and version control.
 
 When credentials expired and the developer originally used browser sign-in, re-run the **same**
 `cx auth login --base-auth-uri <URL> --tenant <tenant>` command (both flags every time; stdout
-discarded; never capture the token). No MCP action is needed — the bundled remediation MCP re-reads
-the credential from cx config on its next call.
+discarded; never capture the token). If a gate deny message triggered the re-auth, use the resolved
+cx invocation it embeds (absolute path while cx isn't on PATH) rather than a bare `cx`. No MCP action
+is needed — the bundled remediation MCP re-reads the credential from cx config on its next call.

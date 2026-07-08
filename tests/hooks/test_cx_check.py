@@ -1,4 +1,4 @@
-"""Unit tests for the cx-security PreToolUse gate (cx_check.py).
+"""Unit tests for the cx-devassist PreToolUse gate (cx_check.py).
 
 Run: python3 hooks/test_cx_check.py    (stdlib only — no pytest needed)
 
@@ -20,7 +20,7 @@ from contextlib import redirect_stdout, redirect_stderr
 
 # Source under test lives in the plugin's hooks/ (tests live at the repo root, outside the plugin).
 _HOOKS_DIR = os.path.normpath(os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "cx-security", "hooks"))
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "cx-devassist", "hooks"))
 sys.path.insert(0, _HOOKS_DIR)
 import cx_check  # noqa: E402
 
@@ -109,7 +109,7 @@ def write(content):
 
 class TestMissingCx(unittest.TestCase):
     def test_absent_denies_even_offline(self):
-        decision, code = run(bash("echo hi"), which=None)
+        decision, code = run(bash("npm test"), which=None)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
 
@@ -121,7 +121,7 @@ class TestMissingCx(unittest.TestCase):
 
 class TestVersionGate(unittest.TestCase):
     def test_below_min_denies(self):
-        decision, code = run(bash("echo hi"), version_state="below")
+        decision, code = run(bash("npm test"), version_state="below")
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
 
@@ -132,27 +132,27 @@ class TestVersionGate(unittest.TestCase):
         self.assertEqual(code, 2)
 
     def test_unrunnable_denies(self):
-        decision, code = run(bash("echo hi"), version_state="unrunnable")
+        decision, code = run(bash("npm test"), version_state="unrunnable")
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
 
     def test_dev_falls_through_to_auth(self):
-        decision, code = run(bash("echo hi"), version_state="dev", authed=True)
+        decision, code = run(bash("npm test"), version_state="dev", authed=True)
         self.assertIsNone(decision)
         self.assertEqual(code, 0)
 
     def test_dev_unauthenticated_denies(self):
-        decision, code = run(bash("echo hi"), version_state="dev", authed=False)
+        decision, code = run(bash("npm test"), version_state="dev", authed=False)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
 
     def test_ok_authed_passes(self):
-        decision, code = run(bash("echo hi"), version_state="ok", authed=True)
+        decision, code = run(bash("npm test"), version_state="ok", authed=True)
         self.assertIsNone(decision)
         self.assertEqual(code, 0)
 
     def test_ok_unauthed_denies(self):
-        decision, code = run(bash("echo hi"), version_state="ok", authed=False)
+        decision, code = run(bash("npm test"), version_state="ok", authed=False)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
 
@@ -169,6 +169,61 @@ class TestAuthRecovery(unittest.TestCase):
         self.assertIsNone(decision)
         self.assertEqual(code, 0)
 
+    def test_null_sink_redirect_still_allowed(self):
+        # The oauth.md-mandated stdout suppression (bash /dev/null) must stay admitted.
+        for c in ("cx auth login 1>/dev/null", "cx auth login >/dev/null", "cx auth login 1>>/dev/null"):
+            decision, code = run(bash(c), version_state="ok", authed=False)
+            self.assertIsNone(decision, "should allow: %s" % c)
+
+    def test_redirect_to_file_denied(self):
+        # Security Finding 1: `cx auth login > /file` would exfiltrate the live token — it must NOT be
+        # carved out; it falls through to the fail-closed unauthenticated deny.
+        for c in ("cx auth login > /tmp/steal", "cx auth login 1>/tmp/steal",
+                  "cx configure set --prop-value k 2>/tmp/x", "cx auth login < /etc/passwd"):
+            decision, code = run(bash(c), version_state="ok", authed=False)
+            self.assertEqual(decision, "deny", "should deny (redirect to file): %s" % c)
+            self.assertEqual(code, 2)
+
+    def test_redirect_hardening_applies_to_absolute_cx_form(self):
+        p = r"C:\CxStore\cx\cx.exe" if os.name == "nt" else "/opt/cxstore/cx"
+        orig = cx_check._canonical_cx
+        cx_check._canonical_cx = lambda: p
+        try:
+            fwd = p.replace("\\", "/")
+            self.assertTrue(cx_check._is_auth_recovery_command(bash('"%s" auth login 1>/dev/null' % fwd)))
+            self.assertFalse(cx_check._is_auth_recovery_command(bash('"%s" auth login > /tmp/x' % fwd)))
+        finally:
+            cx_check._canonical_cx = orig
+
+
+class TestBareCommandGuard(unittest.TestCase):
+    """The shared carve-out guard (_bare_bash_command / _has_unsafe_redirect) — the one audited place
+    that rejects shell chaining AND redirects to a real file (Security Finding 1), so a benign prefix
+    can neither smuggle a command nor exfiltrate stdout past the gate."""
+
+    def test_null_sinks_are_safe(self):
+        # Only bash's /dev/null is a null device in the agent's shell; NUL/$null are real files there.
+        for c in ("cx auth login 1>/dev/null", "cx auth login >/dev/null", "cx auth login 2>/dev/null",
+                  "cx auth login 1>>/dev/null"):
+            self.assertFalse(cx_check._has_unsafe_redirect(c), "null sink must be safe: %s" % c)
+
+    def test_real_file_redirects_are_unsafe(self):
+        for c in ("cx auth login > /tmp/x", "cx auth login 1>/tmp/x", "cx auth login 2>/tmp/x",
+                  "cx auth login >> /tmp/x", "cx auth login < /etc/passwd", "cx auth login >nulfile",
+                  "cx auth login 1>/dev/null.bak", "cx auth login 1>/dev/nullX", "cx auth login 1>nul",
+                  "cx auth login 1>NUL", "cx auth login 1>$null"):
+            self.assertTrue(cx_check._has_unsafe_redirect(c), "real-file redirect must be unsafe: %s" % c)
+
+    def test_bare_command_rejects_chaining_and_unsafe_redirect(self):
+        def B(c):
+            return {"tool_name": "Bash", "tool_input": {"command": c}}
+        self.assertEqual(cx_check._bare_bash_command(B("cx auth login 1>/dev/null")),
+                         "cx auth login 1>/dev/null")
+        for bad in ("cx auth login; rm -rf /", "cx auth login && x", "cx auth login | x",
+                    "cx auth login `x`", "cx auth login $(x)", "cx auth login > /tmp/x"):
+            self.assertIsNone(cx_check._bare_bash_command(B(bad)), "must reject: %s" % bad)
+        self.assertIsNone(cx_check._bare_bash_command({"tool_name": "Write", "tool_input": {}}))
+
 
 class TestScannerPassthrough(unittest.TestCase):
     """The OAuth fail-open fix: when `cx auth validate` passes but the native scanner would run in
@@ -184,7 +239,7 @@ class TestScannerPassthrough(unittest.TestCase):
         self.assertIn("authenticate", LAST_OUTPUT["additionalContext"].lower())
 
     def test_passthrough_blocks_bash_too(self):
-        decision, code = run(bash("echo hi"), authed=True,
+        decision, code = run(bash("npm test"), authed=True,
                              scanner_state=cx_check._SCANNER_PASSTHROUGH)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
@@ -204,7 +259,7 @@ class TestScannerPassthrough(unittest.TestCase):
 
     def test_unauthenticated_message_takes_precedence(self):
         # If validate itself fails, the unauthenticated deny fires before the scanner probe.
-        decision, code = run(bash("echo hi"), authed=False,
+        decision, code = run(bash("npm test"), authed=False,
                              scanner_state=cx_check._SCANNER_PASSTHROUGH)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
@@ -242,36 +297,59 @@ class TestScannerPassthrough(unittest.TestCase):
 
 
 class TestRecoveryMessaging(unittest.TestCase):
-    """The deny messages must split the two auth paths by WHO runs them: browser sign-in (OAuth) is
-    safe for the agent to run itself (no secret passes through it); an API key is a plaintext secret
-    the developer sets. The messages must NOT read like a prompt injection ("do NOT hand … to the
-    developer", "run these YOURSELF") — that phrasing made QA agents correctly refuse the flow."""
+    """The deny messages must split the two auth paths by WHO runs them (OAuth = agent may run it, no
+    secret; API key = developer, plaintext secret), must NOT read like a prompt injection, and must
+    reference cx by its RESOLVED path so the recovery command works on a first-install session before
+    cx is on PATH."""
 
     def _assert_oauth_apikey_split(self, ctx):
-        # OAuth path: the agent may run `cx auth login` (browser, no secret through the agent).
-        self.assertIn("cx auth login", ctx)
+        self.assertIn("auth login", ctx)
         self.assertIn("browser", ctx.lower())
-        # API-key path: the DEVELOPER runs `cx configure set` — the agent never types the secret.
-        self.assertIn("cx configure set", ctx)
+        self.assertIn("configure set", ctx)
         self.assertIn("developer", ctx.lower())
         # Injection-shaped phrasing must be gone.
-        self.assertNotIn("do NOT hand", ctx)
-        self.assertNotIn("do not hand", ctx)
         self.assertNotIn("YOURSELF", ctx)
+        self.assertNotIn("do NOT hand", ctx)
+        self.assertNotIn("`!`", ctx)
 
     def test_unauthenticated_message_distinguishes_oauth_from_apikey(self):
         decision, code = run(write("x"), authed=False)
         self.assertEqual(decision, "deny")
-        ctx = LAST_OUTPUT["additionalContext"]
-        self._assert_oauth_apikey_split(ctx)
-        # The old misleading blanket phrasing must be gone (it made the agent punt).
-        self.assertNotIn("All agent actions remain blocked until authentication succeeds", ctx)
+        self._assert_oauth_apikey_split(LAST_OUTPUT["additionalContext"])
 
     def test_scanner_passthrough_message_distinguishes_oauth_from_apikey(self):
         decision, code = run(write("x"), authed=True, scanner_state=cx_check._SCANNER_PASSTHROUGH)
         self.assertEqual(decision, "deny")
-        ctx = LAST_OUTPUT["additionalContext"]
-        self._assert_oauth_apikey_split(ctx)
+        self._assert_oauth_apikey_split(LAST_OUTPUT["additionalContext"])
+
+    def test_recovery_command_uses_resolved_absolute_path_first_session(self):
+        # When cx resolves to a canonical absolute path (first-install session, not yet on PATH), the
+        # recovery command must embed that ABSOLUTE path (fwd-slash, quoted) — a bare `cx` would 127.
+        p = r"C:\CxStore\cx\cx.exe" if os.name == "nt" else "/opt/cxstore/cx"
+        orig = cx_check._canonical_cx
+        cx_check._canonical_cx = lambda: p
+        try:
+            run(write("x"), authed=False)
+            self.assertIn('"' + p.replace("\\", "/") + '" auth login',
+                          LAST_OUTPUT["additionalContext"])
+        finally:
+            cx_check._canonical_cx = orig
+
+    def test_carveout_accepts_resolved_absolute_cx_auth(self):
+        # The carve-out must admit the resolved-absolute-path form the deny message emits (so a
+        # first-install agent can authenticate), pinned to _cx_exe() — and still reject foreign paths
+        # and shell chaining.
+        p = r"C:\CxStore\cx\cx.exe" if os.name == "nt" else "/opt/cxstore/cx"
+        orig = cx_check._canonical_cx
+        cx_check._canonical_cx = lambda: p
+        try:
+            fwd = p.replace("\\", "/")
+            self.assertTrue(cx_check._is_auth_recovery_command(
+                bash('"' + fwd + '" auth login --base-auth-uri https://x --tenant t')))
+            self.assertFalse(cx_check._is_auth_recovery_command(bash('"/some/other/cx" auth login')))
+            self.assertFalse(cx_check._is_auth_recovery_command(bash('"' + fwd + '" auth login; rm -rf /')))
+        finally:
+            cx_check._canonical_cx = orig
 
 
 class TestLoggingAndIdentity(unittest.TestCase):
@@ -337,7 +415,8 @@ class TestScannerProbe(unittest.TestCase):
 
 
 class TestScannerCache(unittest.TestCase):
-    """Only a positive 'will-scan' result is cached, keyed to binary identity AND credential mtime."""
+    """The scanner call-site (_scanner_state): only a positive 'will-scan' is cached, keyed to binary
+    identity AND credential mtime; pass-through / unknown always re-probe (never masked)."""
 
     def setUp(self):
         self._dir = tempfile.mkdtemp()
@@ -348,6 +427,7 @@ class TestScannerCache(unittest.TestCase):
         }
         cx_check._SCANNER_CACHE_FILE = os.path.join(self._dir, "cx_scanner_cache")
         cx_check._credential_mtime = lambda: 1234.0
+        self.calls = 0
         self.addCleanup(self._restore)
 
     def _restore(self):
@@ -355,35 +435,48 @@ class TestScannerCache(unittest.TestCase):
         cx_check._credential_mtime = self._saved["cred"]
         cx_check._probe_scanner_passthrough = self._saved["probe"]
 
+    def _probe(self, result):
+        # (re)install a counting probe; resets the counter so a test can measure re-probes.
+        self.calls = 0
+
+        def p():
+            self.calls += 1
+            return result
+        cx_check._probe_scanner_passthrough = p
+
     def test_positive_cached_skips_reprobe(self):
-        ident = ("/path/cx", 999.0)
-        cx_check._write_scanner_cache(ident)
-        cx_check._probe_scanner_passthrough = lambda: self.fail("probe must not run on a cache hit")
-        self.assertEqual(cx_check._scanner_state(ident), cx_check._SCANNER_SCAN)
+        self._probe(cx_check._SCANNER_SCAN)
+        self.assertEqual(cx_check._scanner_state(("/path/cx", 999.0)), cx_check._SCANNER_SCAN)
+        self._probe(cx_check._SCANNER_SCAN)
+        self.assertEqual(cx_check._scanner_state(("/path/cx", 999.0)), cx_check._SCANNER_SCAN)
+        self.assertEqual(self.calls, 0)  # served from cache
 
-    def test_binary_change_invalidates(self):
-        cx_check._write_scanner_cache(("/path/cx", 999.0))
-        self.assertFalse(cx_check._scanner_cache_valid(("/path/cx", 1000.0)))
-
-    def test_credential_change_invalidates(self):
-        cx_check._write_scanner_cache(("/path/cx", 999.0))
+    def test_credential_change_reprobes(self):
+        self._probe(cx_check._SCANNER_SCAN)
+        cx_check._scanner_state(("/path/cx", 999.0))
         cx_check._credential_mtime = lambda: 5678.0
-        self.assertFalse(cx_check._scanner_cache_valid(("/path/cx", 999.0)))
+        self._probe(cx_check._SCANNER_SCAN)
+        cx_check._scanner_state(("/path/cx", 999.0))
+        self.assertEqual(self.calls, 1)  # cred changed → re-probe
 
     def test_passthrough_is_never_cached(self):
-        cx_check._probe_scanner_passthrough = lambda: cx_check._SCANNER_PASSTHROUGH
+        self._probe(cx_check._SCANNER_PASSTHROUGH)
         self.assertEqual(cx_check._scanner_state(("/p", 1.0)), cx_check._SCANNER_PASSTHROUGH)
-        self.assertFalse(cx_check._scanner_cache_valid(("/p", 1.0)))
+        self._probe(cx_check._SCANNER_PASSTHROUGH)
+        cx_check._scanner_state(("/p", 1.0))
+        self.assertEqual(self.calls, 1)  # not cached → re-probed
 
     def test_unknown_is_never_cached(self):
-        cx_check._probe_scanner_passthrough = lambda: cx_check._SCANNER_UNKNOWN
+        self._probe(cx_check._SCANNER_UNKNOWN)
         self.assertEqual(cx_check._scanner_state(("/p", 1.0)), cx_check._SCANNER_UNKNOWN)
-        self.assertFalse(cx_check._scanner_cache_valid(("/p", 1.0)))
+        self._probe(cx_check._SCANNER_UNKNOWN)
+        cx_check._scanner_state(("/p", 1.0))
+        self.assertEqual(self.calls, 1)
 
     def test_none_file_never_cached_no_crash(self):
         cx_check._SCANNER_CACHE_FILE = None
-        self.assertFalse(cx_check._scanner_cache_valid(("/p", 1.0)))
-        cx_check._write_scanner_cache(("/p", 1.0))  # must not raise
+        self._probe(cx_check._SCANNER_SCAN)
+        self.assertEqual(cx_check._scanner_state(("/p", 1.0)), cx_check._SCANNER_SCAN)  # must not raise
 
 
 class TestAllowUnscanned(unittest.TestCase):
@@ -393,7 +486,7 @@ class TestAllowUnscanned(unittest.TestCase):
         orig_audit = cx_check._UNSCANNED_AUDIT_FILE
         cx_check._UNSCANNED_AUDIT_FILE = os.path.join(tempfile.mkdtemp(), "audit.log")
         try:
-            decision, code = run(bash("echo hi"), which=None, env={"CX_ALLOW_UNSCANNED": "1"})
+            decision, code = run(bash("npm test"), which=None, env={"CX_ALLOW_UNSCANNED": "1"})
             self.assertEqual(decision, "allow")
             self.assertEqual(code, 0)
             with open(cx_check._UNSCANNED_AUDIT_FILE) as f:
@@ -407,7 +500,7 @@ class TestAllowUnscanned(unittest.TestCase):
         orig_audit = cx_check._UNSCANNED_AUDIT_FILE
         cx_check._UNSCANNED_AUDIT_FILE = None
         try:
-            decision, code = run(bash("echo hi"), which=None, env={"CX_ALLOW_UNSCANNED": "1"})
+            decision, code = run(bash("npm test"), which=None, env={"CX_ALLOW_UNSCANNED": "1"})
             self.assertEqual(decision, "deny")
             self.assertEqual(code, 2)
         finally:
@@ -497,7 +590,7 @@ class TestCapabilityGate(unittest.TestCase):
     subcommands is 'incapable' and must be blocked exactly like a below-min build."""
 
     def test_incapable_denies(self):
-        decision, code = run(bash("echo hi"), version_state="incapable")
+        decision, code = run(bash("npm test"), version_state="incapable")
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
 
@@ -675,37 +768,103 @@ class TestCxBinaryOverride(unittest.TestCase):
         self.assertEqual(self._with_env({"CX_BINARY": p}, cx_check._cx_exe), p)
 
     def test_invalid_cx_binary_denies_in_gate(self):
-        decision, code = run(bash("echo hi"), env={"CX_BINARY": "relative/cx"})
+        decision, code = run(bash("npm test"), env={"CX_BINARY": "relative/cx"})
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
 
-    def test_valid_cx_binary_but_not_on_path_denies(self):
-        # The native scanner + MCP run bare `cx` from PATH, so a valid CX_BINARY that is NOT also
-        # on PATH must FAIL CLOSED — otherwise the gate passes while the scanner can't run.
+    def test_valid_cx_binary_not_on_path_now_passes(self):
+        # NEW clean-flow: the gate AND stage-2 (hooks/cx_run.sh) both resolve CX_BINARY, so a valid
+        # CX_BINARY is sufficient even when `cx` is NOT on PATH — the same validated binary scans, so
+        # there is no fail-open. (Was a fail-closed deny before absolute-path resolution.)
         p = self._make_exe()
-        decision, code = run(bash("echo hi"), which=None, version_state="ok",
+        decision, code = run(bash("npm test"), which=None, version_state="ok",
                              authed=True, env={"CX_BINARY": p})
-        self.assertEqual(decision, "deny")
-        self.assertEqual(code, 2)
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
 
     def test_valid_cx_binary_matching_path_cx_passes(self):
         # CX_BINARY set AND `cx` on PATH resolves to the SAME file → the gate validated the binary
         # the scanner will actually run → pass-through.
         p = self._make_exe()
-        decision, code = run(bash("echo hi"), which=p, version_state="ok",
+        decision, code = run(bash("npm test"), which=p, version_state="ok",
                              authed=True, env={"CX_BINARY": p})
         self.assertIsNone(decision)
         self.assertEqual(code, 0)
 
-    def test_cx_binary_differs_from_path_cx_denies(self):
-        # CX_BINARY and PATH cx are DIFFERENT files → the scanner would run an unvalidated binary →
-        # fail-closed mismatch deny (closes the fail-open the gate would otherwise hide).
+    def test_cx_binary_takes_precedence_over_different_path_cx(self):
+        # NEW clean-flow: CX_BINARY wins over PATH cx (precedence CX_BINARY -> canonical -> PATH), and
+        # stage-2 (cx_run.sh) uses the same precedence — so a PATH cx that differs from CX_BINARY is
+        # simply ignored, not a mismatch deny. (No fail-open: the gate-validated binary is the one that scans.)
         p = self._make_exe()
         q = self._make_exe()
-        decision, code = run(bash("echo hi"), which=q, version_state="ok",
+        decision, code = run(bash("npm test"), which=q, version_state="ok",
                              authed=True, env={"CX_BINARY": p})
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
+
+    def test_cx_exe_precedence_canonical_over_path(self):
+        # No CX_BINARY: _cx_exe() returns the canonical store path (absolute) over bare 'cx' (PATH).
+        p = self._make_exe()
+        orig = cx_check._canonical_cx
+        cx_check._canonical_cx = lambda: p
+        try:
+            self.assertEqual(cx_check._cx_exe(), p)
+        finally:
+            cx_check._canonical_cx = orig
+
+    def test_cx_exe_precedence_cx_binary_over_canonical(self):
+        # CX_BINARY (explicit pin) wins over the canonical store.
+        p = self._make_exe()   # CX_BINARY
+        q = self._make_exe()   # canonical store
+        orig = cx_check._canonical_cx
+        cx_check._canonical_cx = lambda: q
+        try:
+            self.assertEqual(self._with_env({"CX_BINARY": p}, cx_check._cx_exe), p)
+        finally:
+            cx_check._canonical_cx = orig
+
+    def test_cx_exe_falls_back_to_path_when_no_binary_no_canonical(self):
+        orig = cx_check._canonical_cx
+        cx_check._canonical_cx = lambda: None
+        try:
+            self.assertEqual(cx_check._cx_exe(), "cx")
+        finally:
+            cx_check._canonical_cx = orig
+
+    def test_canonical_store_resolves_when_not_on_path(self):
+        # cx ONLY in the canonical store (not on PATH), capable + authed → the gate passes with no
+        # restart. This is the core clean-flow property: resolve by absolute path, no PATH dependency.
+        p = self._make_exe()
+        orig = cx_check._canonical_cx
+        cx_check._canonical_cx = lambda: p
+        try:
+            decision, code = run(bash("npm test"), which=None, version_state="ok", authed=True)
+        finally:
+            cx_check._canonical_cx = orig
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
+
+    def test_incapable_in_canonical_store_off_path_is_capability_not_absent(self):
+        # A freshly-installed INCAPABLE cx in the canonical store, not yet on PATH, must classify as
+        # the TERMINAL capability_missing deny — NOT the misleading "cx is not installed" (the exact
+        # QA-transcript regression: PATH-based resolution mis-reported an installed cx as absent).
+        p = self._make_exe()
+        orig = cx_check._canonical_cx
+        cx_check._canonical_cx = lambda: p
+        try:
+            decision, code = run(bash("npm test"), which=None, version_state="incapable")
+        finally:
+            cx_check._canonical_cx = orig
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
+        reason = LAST_OUTPUT["permissionDecisionReason"]
+        ctx = LAST_OUTPUT["additionalContext"]
+        self.assertIn("MISSING the security-scanner subcommands", reason)
+        self.assertNotIn("not installed", reason)
+        # Terminal STOP wording: forbid the hand-place / cache-clear workaround, and don't loop.
+        self.assertIn("TERMINAL", ctx)
+        self.assertIn("hand-place", ctx)
+        self.assertNotIn("/cx-cli-setup (Upgrade)", ctx)
 
     def test_gate_probes_use_cx_binary(self):
         # _cx_version, _capabilities_present, _is_authenticated must all invoke CX_BINARY.
@@ -739,101 +898,164 @@ class TestCxBinaryOverride(unittest.TestCase):
             cx_check._AUTH_CACHE_FILE = old_cache
 
 
-class TestVersionCacheKeying(unittest.TestCase):
-    """The version cache is keyed to the resolved cx binary + mtime + min-version. A cached 'ok'
-    must NOT be reused after any of those change within the TTL — otherwise a cx swapped for an
-    older/incapable build would ride a stale pass = fail open (review F-CR4)."""
+class TestCachedProbe(unittest.TestCase):
+    """The one deep caching module (_cached_probe) that version/auth/scanner share: memoize a probe
+    keyed on an identity dict, honor a TTL, cache ONLY should_cache() results (so a fail-open stale
+    positive can't happen), invalidate on any key change, and never trust a legacy/corrupt file, a
+    non-numeric/bool `ts`, or a None cache path (fail-safe → re-probe)."""
 
     def setUp(self):
-        self._orig = {
-            "cache": cx_check._VERSION_CACHE_FILE,
-            "which": cx_check.shutil.which,
-            "uncached": cx_check._version_state_uncached,
-            "environ": cx_check.os.environ,
-        }
+        self._dir = tempfile.mkdtemp()
+        self.file = os.path.join(self._dir, "cache")
+        self.calls = 0
+
+    def _probe(self, value="ok"):
+        def p():
+            self.calls += 1
+            return value
+        return p
+
+    def _cp(self, key, probe, should_cache=lambda r: True, ttl=1000, file=-1):
+        return cx_check._cached_probe(self.file if file == -1 else file, ttl, key, probe, should_cache)
+
+    def test_miss_then_hit_skips_reprobe(self):
+        k = {"cx": "/p/cx", "mtime": 1.0}
+        self.assertEqual(self._cp(k, self._probe("ok")), "ok")
+        self.assertEqual(self._cp(k, self._probe("DIFFERENT")), "ok")  # served from cache
+        self.assertEqual(self.calls, 1)
+
+    def test_key_change_invalidates(self):
+        self.assertEqual(self._cp({"cx": "/p/cx", "mtime": 1.0}, self._probe("ok")), "ok")
+        self.assertEqual(self._cp({"cx": "/p/cx", "mtime": 2.0}, self._probe("new")), "new")
+        self.assertEqual(self.calls, 2)
+
+    def test_ttl_expiry_reprobes(self):
+        k = {"cx": "/p/cx", "mtime": 1.0}
+        self.assertEqual(self._cp(k, self._probe("ok"), ttl=1000), "ok")
+        self.assertEqual(self._cp(k, self._probe("fresh"), ttl=-1), "fresh")  # already expired
+        self.assertEqual(self.calls, 2)
+
+    def test_only_should_cache_results_are_written(self):
+        k = {"cx": "/p/cx", "mtime": 1.0}
+        sc = lambda r: r == "ok"
+        self.assertEqual(self._cp(k, self._probe("bad"), should_cache=sc), "bad")
+        self.assertEqual(self._cp(k, self._probe("bad2"), should_cache=sc), "bad2")  # not cached
+        self.assertEqual(self.calls, 2)
+        self.assertFalse(os.path.exists(self.file))
+
+    def test_none_file_disables_cache_and_never_raises(self):
+        k = {"cx": "/p/cx", "mtime": 1.0}
+        self.assertEqual(self._cp(k, self._probe("ok"), file=None), "ok")
+        self.assertEqual(self._cp(k, self._probe("again"), file=None), "again")  # not cached
+        self.assertEqual(self.calls, 2)
+
+    def test_legacy_or_corrupt_file_is_ignored(self):
+        for content in ("ok", "1700000000.0", "{not json", "[]"):
+            self.calls = 0
+            with open(self.file, "w", encoding="utf-8") as f:
+                f.write(content)
+            self.assertEqual(self._cp({"cx": "/p/cx", "mtime": 1.0}, self._probe("reprobed")), "reprobed")
+            self.assertEqual(self.calls, 1)
+
+    def test_non_numeric_or_bool_ts_is_ignored(self):
+        for ts in ("not-a-number", True):
+            self.calls = 0
+            rec = {"value": "ok", "ts": ts, "cx": "/p/cx", "mtime": 1.0}
+            with open(self.file, "w", encoding="utf-8") as f:
+                f.write(json.dumps(rec))
+            self.assertEqual(self._cp({"cx": "/p/cx", "mtime": 1.0}, self._probe("reprobed")), "reprobed")
+            self.assertEqual(self.calls, 1)
+
+
+class TestVersionCache(unittest.TestCase):
+    """_version_state wiring: caches only 'ok'/'dev', keyed on binary + min-version; a swapped binary
+    (stale key) re-probes and a failing state is never written (no stale 'ok' = fail open)."""
+
+    def setUp(self):
+        self._orig = {"cache": cx_check._VERSION_CACHE_FILE, "which": cx_check.shutil.which,
+                      "uncached": cx_check._version_state_uncached, "environ": cx_check.os.environ}
         self._tmp = tempfile.mkdtemp()
         cx_check._VERSION_CACHE_FILE = os.path.join(self._tmp, "vcache")
-        cx_check.os.environ = {}  # no CX_BINARY → _cx_exe() == "cx"
-        # A real file so _version_cache_key()'s getmtime succeeds; which('cx') resolves to it.
+        cx_check.os.environ = {}
         self._cx = os.path.join(self._tmp, "cx")
         with open(self._cx, "w") as f:
             f.write("#!/bin/sh\n")
         cx_check.shutil.which = lambda name: self._cx
+        self.addCleanup(self._restore)
 
-    def tearDown(self):
+    def _restore(self):
         cx_check._VERSION_CACHE_FILE = self._orig["cache"]
         cx_check.shutil.which = self._orig["which"]
         cx_check._version_state_uncached = self._orig["uncached"]
         cx_check.os.environ = self._orig["environ"]
 
-    def test_matching_key_is_a_cache_hit(self):
-        rec = {"state": "ok"}
-        rec.update(cx_check._version_cache_key())
-        with open(cx_check._VERSION_CACHE_FILE, "w", encoding="utf-8") as f:
-            f.write(json.dumps(rec))
-        cx_check._version_state_uncached = lambda: "below"  # would differ if re-probed
+    def test_ok_is_cached(self):
+        cx_check._version_state_uncached = lambda: "ok"
+        self.assertEqual(cx_check._version_state(), "ok")
+        cx_check._version_state_uncached = lambda: self.fail("must not re-probe a cached 'ok'")
         self.assertEqual(cx_check._version_state(), "ok")
 
-    def test_stale_binary_key_forces_reprobe(self):
-        stale = {"state": "ok", "cx": "/some/other/cx", "mtime": 1.0, "min": "0.0.0"}
+    def test_failing_state_not_cached(self):
+        cx_check._version_state_uncached = lambda: "below"
+        self.assertEqual(cx_check._version_state(), "below")
+        self.assertFalse(os.path.exists(cx_check._VERSION_CACHE_FILE))
+
+    def test_stale_binary_reprobes(self):
+        stale = {"value": "ok", "ts": cx_check.time.time(), "cx": "/other/cx", "mtime": 1.0, "min": "0.0.0"}
         with open(cx_check._VERSION_CACHE_FILE, "w", encoding="utf-8") as f:
             f.write(json.dumps(stale))
         cx_check._version_state_uncached = lambda: "incapable"
         self.assertEqual(cx_check._version_state(), "incapable")
 
-    def test_legacy_bare_string_cache_is_ignored(self):
-        # Pre-keying format (a bare 'ok' string) is not valid JSON → must re-probe, not be trusted.
-        with open(cx_check._VERSION_CACHE_FILE, "w", encoding="utf-8") as f:
-            f.write("ok")
-        cx_check._version_state_uncached = lambda: "below"
-        self.assertEqual(cx_check._version_state(), "below")
 
-
-class TestAuthCacheKeying(unittest.TestCase):
-    """The auth cache is keyed to the resolved cx binary identity — a swapped binary re-validates
-    instead of riding a stale auth pass; the legacy bare-timestamp format is not trusted; and a
-    None path (no private state dir) is never valid and never raises (review F-CR backlog #1/#3)."""
+class TestAuthCache(unittest.TestCase):
+    """_is_authenticated wiring: caches only a True result, keyed on the resolved binary; a swapped
+    binary re-validates (never rides a stale auth pass); a False is never cached."""
 
     def setUp(self):
-        self._orig = {
-            "cache": cx_check._AUTH_CACHE_FILE,
-            "which": cx_check.shutil.which,
-            "environ": cx_check.os.environ,
-        }
+        self._orig = {"cache": cx_check._AUTH_CACHE_FILE, "which": cx_check.shutil.which,
+                      "probe": cx_check._auth_validate_probe, "environ": cx_check.os.environ}
         self._tmp = tempfile.mkdtemp()
         cx_check._AUTH_CACHE_FILE = os.path.join(self._tmp, "acache")
-        cx_check.os.environ = {}  # no CX_BINARY → _cx_exe() == "cx"
+        cx_check.os.environ = {}
         self._cx = os.path.join(self._tmp, "cx")
         with open(self._cx, "w") as f:
             f.write("#!/bin/sh\n")
         cx_check.shutil.which = lambda name: self._cx
+        self.addCleanup(self._restore)
 
-    def tearDown(self):
+    def _restore(self):
         cx_check._AUTH_CACHE_FILE = self._orig["cache"]
         cx_check.shutil.which = self._orig["which"]
+        cx_check._auth_validate_probe = self._orig["probe"]
         cx_check.os.environ = self._orig["environ"]
 
-    def test_fresh_same_binary_is_valid(self):
-        cx_check._write_auth_cache()
-        self.assertTrue(cx_check._auth_cache_valid())
+    def test_true_is_cached(self):
+        cx_check._auth_validate_probe = lambda: True
+        self.assertTrue(cx_check._is_authenticated())
+        cx_check._auth_validate_probe = lambda: self.fail("must not re-validate a cached True")
+        self.assertTrue(cx_check._is_authenticated())
 
-    def test_swapped_binary_invalidates(self):
-        cx_check._write_auth_cache()
+    def test_false_not_cached(self):
+        cx_check._auth_validate_probe = lambda: False
+        self.assertFalse(cx_check._is_authenticated())
+        self.assertFalse(os.path.exists(cx_check._AUTH_CACHE_FILE))
+
+    def test_swapped_binary_revalidates(self):
+        cx_check._auth_validate_probe = lambda: True
+        self.assertTrue(cx_check._is_authenticated())
         other = os.path.join(self._tmp, "cx2")
         with open(other, "w") as f:
             f.write("#!/bin/sh\n")
-        cx_check.shutil.which = lambda name: other  # different file → identity mismatch
-        self.assertFalse(cx_check._auth_cache_valid())
+        cx_check.shutil.which = lambda name: other
+        self.calls = 0
 
-    def test_legacy_bare_timestamp_ignored(self):
-        with open(cx_check._AUTH_CACHE_FILE, "w") as f:
-            f.write("1700000000.0")  # old format: a bare timestamp, not the keyed JSON record
-        self.assertFalse(cx_check._auth_cache_valid())
-
-    def test_none_path_never_valid_and_never_raises(self):
-        cx_check._AUTH_CACHE_FILE = None
-        self.assertFalse(cx_check._auth_cache_valid())
-        cx_check._write_auth_cache()  # must be a no-op, never raise
+        def counting():
+            self.calls += 1
+            return True
+        cx_check._auth_validate_probe = counting
+        self.assertTrue(cx_check._is_authenticated())
+        self.assertEqual(self.calls, 1)  # different binary → re-validated
 
 
 class TestStatePathFallback(unittest.TestCase):
@@ -904,15 +1126,70 @@ class TestShellCarveOutIsolation(unittest.TestCase):
         self.assertEqual(self._run_isolated(payload), 2)
 
 
+class TestDenyVerdictSchema(unittest.TestCase):
+    """One fail-closed verdict SCHEMA, four emitters across two languages. The two shell heredocs run
+    BECAUSE Python/cx is absent, so they cannot share the Python emitter's code — this contract test
+    pins all four to the same JSON shape + exit 2, so a schema change can't silently diverge (the A2
+    hand-copied-JSON risk)."""
+
+    def _assert_schema(self, obj):
+        self.assertIsInstance(obj, dict)
+        hso = obj.get("hookSpecificOutput")
+        self.assertIsInstance(hso, dict, "missing hookSpecificOutput")
+        self.assertEqual(hso.get("hookEventName"), "PreToolUse")
+        self.assertEqual(hso.get("permissionDecision"), "deny")
+        self.assertTrue(hso.get("permissionDecisionReason"), "reason must be non-empty")
+        self.assertTrue(hso.get("additionalContext"), "context must be non-empty")
+
+    def test_python_deny_emitter(self):
+        decision, code = run(write("x"), which=None)  # cx absent → _deny(cx_absent)
+        self.assertEqual((decision, code), ("deny", 2))
+        self._assert_schema({"hookSpecificOutput": LAST_OUTPUT})
+
+    def test_python_crash_emitter(self):
+        # _fail_closed_on_crash prints the deny verdict; main() is what maps it to exit 2.
+        out = io.StringIO()
+        with redirect_stdout(out):
+            cx_check._fail_closed_on_crash()
+        self._assert_schema(json.loads(out.getvalue()))
+
+    def _run_sh(self, argv, stdin, extra_env=None):
+        bindir = tempfile.mkdtemp()
+        for tool in ("sh", "cat", "dirname", "tr"):
+            src = shutil.which(tool)
+            if not src:
+                self.skipTest("missing %s on PATH" % tool)
+            os.symlink(src, os.path.join(bindir, tool))
+        env = {"PATH": bindir, "PYTHONUTF8": "1", "HOME": "/nonexistent"}
+        if extra_env:
+            env.update(extra_env)
+        proc = subprocess.run([os.path.join(bindir, "sh")] + argv, input=stdin,
+                              capture_output=True, timeout=30, env=env)
+        return proc.returncode, proc.stdout.decode("utf-8", "replace")
+
+    @unittest.skipUnless(SH and os.name != "nt", "needs POSIX sh + symlinks (Windows → manual)")
+    def test_shell_no_python_emitter(self):
+        code, out = self._run_sh([CX_CHECK_SH], json.dumps({"tool_name": "Write"}).encode())
+        self.assertEqual(code, 2)
+        self._assert_schema(json.loads(out))
+
+    @unittest.skipUnless(SH and os.name != "nt", "needs POSIX sh + symlinks (Windows → manual)")
+    def test_shell_no_cx_emitter(self):
+        cxrun = os.path.join(_HOOKS_DIR, "cx_run.sh")
+        code, out = self._run_sh([cxrun, "hooks", "claude-pre-file-write"], b"", {"CX_BINARY": ""})
+        self.assertEqual(code, 2)
+        self._assert_schema(json.loads(out))
+
+
 class TestLoggingWiring(unittest.TestCase):
     """The gate emits redacted gate_decision events; logging must not change the decision."""
 
     def test_deny_emits_gate_decision(self):
         tmp = tempfile.mkdtemp()
-        decision, code = run(bash("echo hi"), which=None, env={"CX_LOG_DIR": tmp})
+        decision, code = run(bash("npm test"), which=None, env={"CX_LOG_DIR": tmp})
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
-        logfile = os.path.join(tmp, "cx-security.jsonl")
+        logfile = os.path.join(tmp, "cx-devassist.jsonl")
         self.assertTrue(os.path.exists(logfile))
         with open(logfile, encoding="utf-8") as fh:
             recs = [json.loads(line) for line in fh if line.strip()]
@@ -925,10 +1202,10 @@ class TestLoggingWiring(unittest.TestCase):
 
     def test_pass_emits_gate_decision(self):
         tmp = tempfile.mkdtemp()
-        decision, code = run(bash("echo hi"), version_state="ok", authed=True,
+        decision, code = run(bash("npm test"), version_state="ok", authed=True,
                              env={"CX_LOG_DIR": tmp})
         self.assertIsNone(decision)
-        with open(os.path.join(tmp, "cx-security.jsonl"), encoding="utf-8") as fh:
+        with open(os.path.join(tmp, "cx-devassist.jsonl"), encoding="utf-8") as fh:
             recs = [json.loads(line) for line in fh if line.strip()]
         self.assertTrue(any(r.get("decision") == "pass" and r.get("reason_code") == "ok"
                             and r.get("version_state") == "ok" for r in recs))
@@ -987,6 +1264,166 @@ class TestCrashGuard(unittest.TestCase):
             finally:
                 cx_check.cx_check = orig
             self.assertEqual(cm.exception.code, code)
+
+
+class ScannerProbeCheckAuthTests(unittest.TestCase):
+    """C5 machine-readable readiness probe: _probe_scanner_passthrough() consumes
+    `cx hooks check-auth` (exit code + JSON), and falls back to the legacy --debug stderr
+    marker on an older cx that predates the subcommand."""
+
+    def _probe(self, run_stub):
+        orig_run, orig_exe = cx_check.subprocess.run, cx_check._cx_exe
+        cx_check.subprocess.run = run_stub
+        cx_check._cx_exe = lambda: "cx"
+        try:
+            return cx_check._probe_scanner_passthrough()
+        finally:
+            cx_check.subprocess.run = orig_run
+            cx_check._cx_exe = orig_exe
+
+    def test_ready_exit0_scans(self):
+        def stub(cmd, **kw):
+            return _fake_proc(
+                stdout=b'{"scannerReady":true,"authenticated":true,"licensed":true,"state":"ready"}',
+                returncode=0)
+        self.assertEqual(self._probe(stub), cx_check._SCANNER_SCAN)
+
+    def test_unlicensed_exit1_blocks(self):
+        # Authenticated but no AI license → cx runs the scanner in pass-through (NO scan), so the
+        # probe must report UNLICENSED (a blocking state), NOT _SCANNER_SCAN — else the gate fails OPEN.
+        def stub(cmd, **kw):
+            return _fake_proc(
+                stdout=b'{"scannerReady":false,"authenticated":true,"licensed":false,'
+                       b'"state":"unlicensed"}',
+                returncode=1)
+        self.assertEqual(self._probe(stub), cx_check._SCANNER_UNLICENSED)
+
+    def test_unauthenticated_exit2_passthrough(self):
+        def stub(cmd, **kw):
+            return _fake_proc(
+                stdout=b'{"scannerReady":false,"authenticated":false,"licensed":false,'
+                       b'"state":"unauthenticated"}',
+                returncode=2)
+        self.assertEqual(self._probe(stub), cx_check._SCANNER_PASSTHROUGH)
+
+    def test_spawn_error_is_unknown(self):
+        def stub(cmd, **kw):
+            raise FileNotFoundError("no cx")
+        self.assertEqual(self._probe(stub), cx_check._SCANNER_UNKNOWN)
+
+    def test_old_cx_falls_back_to_legacy_passthrough(self):
+        # check-auth: unknown subcommand → no JSON; legacy claude-pre-file-write shows the marker.
+        def stub(cmd, **kw):
+            if "check-auth" in cmd:
+                return _fake_proc(stderr=b'Error: unknown command "check-auth"',
+                                  stdout=b"", returncode=1)
+            return _fake_proc(
+                stderr=b"hooks: running in pass-through mode (not authenticated)\n", returncode=0)
+        self.assertEqual(self._probe(stub), cx_check._SCANNER_PASSTHROUGH)
+
+    def test_old_cx_falls_back_to_legacy_scan(self):
+        def stub(cmd, **kw):
+            if "check-auth" in cmd:
+                return _fake_proc(stderr=b"unknown command", stdout=b"", returncode=1)
+            return _fake_proc(stderr=b"hooks: registering security guardrails\n", returncode=0)
+        self.assertEqual(self._probe(stub), cx_check._SCANNER_SCAN)
+
+    def test_old_cx_falls_back_to_legacy_unlicensed(self):
+        # Old cx (no check-auth): the --debug stderr shows the NO-LICENSE marker → UNLICENSED (block),
+        # not a clean scan — the legacy path must also be fail-closed on the unlicensed pass-through.
+        def stub(cmd, **kw):
+            if "check-auth" in cmd:
+                return _fake_proc(stderr=b"unknown command", stdout=b"", returncode=1)
+            return _fake_proc(
+                stderr=b"hooks: running in pass-through mode (no AI feature license)\n", returncode=0)
+        self.assertEqual(self._probe(stub), cx_check._SCANNER_UNLICENSED)
+
+
+class TestScannerUnlicensedGate(unittest.TestCase):
+    """PL-0 flow: authenticated-but-unlicensed → cx scanner runs in pass-through (NO scan), so the gate
+    BLOCKS by default and only allows (unscanned) under an explicit CX_ALLOW_UNLICENSED=1 opt-out."""
+
+    def test_unlicensed_denies_by_default(self):
+        decision, code = run(write("x"), authed=True,
+                             scanner_state=cx_check._SCANNER_UNLICENSED)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+
+    def test_unlicensed_allows_with_explicit_override(self):
+        decision, code = run(write("x"), authed=True,
+                             scanner_state=cx_check._SCANNER_UNLICENSED,
+                             env={"CX_ALLOW_UNLICENSED": "1", "CX_LOG_DISABLE": "1"})
+        self.assertEqual(decision, "allow")
+        self.assertEqual(code, 0)
+
+
+class TestReadonlyAllowlist(unittest.TestCase):
+    """Read-only Bash commands skip the gate entirely (even with cx absent), so a plain `ls` isn't
+    blocked during setup — but only as a bare, shape-guarded command, Bash-only, unless opted out."""
+
+    def test_readonly_allowed_even_when_cx_absent(self):
+        decision, code = run(bash("ls -la /tmp"), which=None)
+        self.assertIsNone(decision)  # silent pass — never reached the cx-absent deny
+        self.assertEqual(code, 0)
+
+    def test_readonly_various_commands_allowed(self):
+        for c in ("pwd", "cat file.txt", "grep -r TODO src", "wc -l a.py", "head -n5 x"):
+            decision, code = run(bash(c), which=None)
+            self.assertIsNone(decision, "%r should be allowed read-only" % c)
+            self.assertEqual(code, 0)
+
+    def test_readonly_with_chaining_is_gated(self):
+        # `;` disqualifies the bare-command guard, so it must fall through to the cx-absent deny.
+        decision, code = run(bash("ls; rm -rf /tmp/x"), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+
+    def test_readonly_with_redirect_is_gated(self):
+        decision, code = run(bash("cat secret > /tmp/out"), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+
+    def test_non_readonly_command_still_gated(self):
+        decision, code = run(bash("python app.py"), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+
+    def test_readonly_is_bash_only_powershell_gated(self):
+        decision, code = run({"tool_name": "PowerShell", "tool_input": {"command": "ls"}}, which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+
+    def test_cx_gate_all_commands_disables_allowlist(self):
+        decision, code = run(bash("ls"), which=None, env={"CX_GATE_ALL_COMMANDS": "1"})
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+
+
+class TestFreshCredentialAuthMessage(unittest.TestCase):
+    """A validate failure right after a fresh login gets a distinct 'wait, do NOT re-login' deny
+    (re-running cx auth login revokes the token and restarts the wait — the loop we observed)."""
+
+    def _run_unauthed(self, fresh):
+        orig = cx_check._credential_is_fresh
+        cx_check._credential_is_fresh = lambda within_seconds=180: fresh
+        try:
+            return run(bash("npm test"), authed=False)
+        finally:
+            cx_check._credential_is_fresh = orig
+
+    def test_fresh_credential_says_wait_not_relogin(self):
+        decision, code = self._run_unauthed(fresh=True)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+        reason = LAST_OUTPUT["permissionDecisionReason"]
+        self.assertIn("Do NOT re-run", reason)
+        self.assertIn("REVOKES", reason)
+
+    def test_stale_credential_uses_generic_message(self):
+        decision, code = self._run_unauthed(fresh=False)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+        self.assertNotIn("REVOKES", LAST_OUTPUT["permissionDecisionReason"])
 
 
 if __name__ == "__main__":

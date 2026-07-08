@@ -1,5 +1,5 @@
 {
-  "name": "cx-secured-agent",
+  "name": "cx-devassist-marketplace",
   "owner": {
     "name": "Checkmarx"
   },
@@ -9,10 +9,10 @@
   },
   "plugins": [
     {
-      "name": "cx-security",
+      "name": "cx-devassist",
       "description": "Checkmarx CxOne security scanning plugin for GitHub Copilot CLI",
       "version": "1.3.2",
-      "source": "./plugins/cx-security"
+      "source": "./plugins/cx-devassist"
     }
   ]
 }

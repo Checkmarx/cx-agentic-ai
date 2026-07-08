@@ -14,7 +14,7 @@ import re
 import unittest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "cx-security"))
+_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "cx-devassist"))
 _REPO_ROOT = os.path.normpath(os.path.join(_HERE, ".."))
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
@@ -33,7 +33,7 @@ class TestPluginManifest(unittest.TestCase):
         data = _plugin_manifest()
         for key in ("name", "version", "description"):
             self.assertIn(key, data, "plugin.json missing %r" % key)
-        self.assertEqual(data["name"], "cx-security")
+        self.assertEqual(data["name"], "cx-devassist")
         self.assertRegex(data["version"], _SEMVER)
 
     def test_no_redundant_mcpservers_field(self):
@@ -50,8 +50,8 @@ class TestPluginManifest(unittest.TestCase):
 class TestMarketplace(unittest.TestCase):
     def test_references_plugin_with_real_source(self):
         mp = json.loads(_read(_REPO_ROOT, ".claude-plugin", "marketplace.json"))
-        entry = next((p for p in mp.get("plugins", []) if p.get("name") == "cx-security"), None)
-        self.assertIsNotNone(entry, "marketplace.json has no cx-security plugin entry")
+        entry = next((p for p in mp.get("plugins", []) if p.get("name") == "cx-devassist"), None)
+        self.assertIsNotNone(entry, "marketplace.json has no cx-devassist plugin entry")
         src = os.path.normpath(os.path.join(_REPO_ROOT, entry["source"]))
         self.assertTrue(os.path.isdir(src), "marketplace source path missing: %s" % src)
 
@@ -84,7 +84,7 @@ class TestMinVersionSync(unittest.TestCase):
 
 class TestReleaseTag(unittest.TestCase):
     def test_tag_matches_plugin_version(self):
-        # On a tag build CI sets CX_RELEASE_TAG (e.g. cx-security-v1.6.0). Locally it's unset → skip.
+        # On a tag build CI sets CX_RELEASE_TAG (e.g. cx-devassist-v1.6.0). Locally it's unset → skip.
         tag = os.environ.get("CX_RELEASE_TAG", "").strip()
         if not tag:
             self.skipTest("CX_RELEASE_TAG not set (not a tag build)")
@@ -106,6 +106,7 @@ class TestShippedBytes(unittest.TestCase):
         ("scripts", "cx-min-version"),
         ("hooks", "cx_check.sh"),
         ("hooks", "cx_check.py"),
+        ("hooks", "cx_run.sh"),
         ("hooks", "cx_log.py"),
     ]
 
@@ -123,6 +124,61 @@ class TestShippedBytes(unittest.TestCase):
             self._bytes("scripts", "cx-min-version").decode("ascii")
         except UnicodeDecodeError as e:
             self.fail("cx-min-version is not pure ASCII (would crash the gate under LANG=C): %s" % e)
+
+
+class TestHookWiring(unittest.TestCase):
+    """Stage-2 scanning must run through cx_run.sh (canonical-path resolution, no PATH dependency),
+    and the remediation MCP must stay a single `cx` server (activates after one /reload-plugins)."""
+
+    def test_stage2_routes_through_cx_run(self):
+        hooks = json.loads(_read(_PLUGIN_ROOT, "hooks", "hooks.json"))
+        cmds = [h["command"] for entry in hooks["hooks"]["PreToolUse"]
+                for h in entry["hooks"] if h.get("type") == "command"]
+        scanner_cmds = [c for c in cmds if "hooks claude-pre" in c]
+        self.assertTrue(scanner_cmds, "no stage-2 scanner commands found in hooks.json")
+        for c in scanner_cmds:
+            self.assertIn("cx_run.sh", c, "stage-2 must resolve cx via cx_run.sh, got: %s" % c)
+            self.assertFalse(c.startswith("cx hooks"), "stage-2 must not call bare cx: %s" % c)
+
+    def test_cx_run_wrapper_present(self):
+        self.assertTrue(os.path.isfile(os.path.join(_PLUGIN_ROOT, "hooks", "cx_run.sh")))
+
+    def test_no_bare_cx_in_hook_commands(self):
+        # Every cx invocation in the hook configs must route through cx_run.sh (absolute-path
+        # resolution). A bare `cx …` fails on a locked-down / first-install machine and (for the
+        # scanners) fails OPEN. Regression guard for the clean-flow contract, incl. Stop + Copilot.
+        for cfg in ("hooks.json", "hooks-copilot-cli.json"):
+            data = json.loads(_read(_PLUGIN_ROOT, "hooks", cfg))
+            cmds = []
+
+            def _walk(o):
+                if isinstance(o, dict):
+                    if o.get("type") == "command" and isinstance(o.get("command"), str):
+                        cmds.append(o["command"])
+                    for v in o.values():
+                        _walk(v)
+                elif isinstance(o, list):
+                    for v in o:
+                        _walk(v)
+
+            _walk(data)
+            for c in cmds:
+                self.assertNotRegex(
+                    c, r'(^|[\s"])cx\s+hooks\b',
+                    "%s has a bare `cx hooks` command (must route via cx_run.sh): %s" % (cfg, c))
+
+    def test_mcp_resolves_cx_via_cx_run(self):
+        # The remediation MCP must resolve cx by absolute path (canonical store) through cx_run.sh —
+        # NOT bare `cx` — so it can start on a locked-down / first-install machine after one
+        # /reload-plugins, with no restart.
+        mcp = json.loads(_read(_PLUGIN_ROOT, ".mcp.json"))
+        servers = mcp.get("mcpServers", {})
+        self.assertEqual(list(servers), ["Checkmarx"])
+        srv = servers["Checkmarx"]
+        self.assertEqual(srv["command"], "sh")
+        self.assertTrue(any("cx_run.sh" in a for a in srv["args"]),
+                        "MCP must invoke cx_run.sh, got args: %s" % srv["args"])
+        self.assertIn("bridge", srv["args"])
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # The Checkmarx Remediation MCP (bundled)
 
-The `cx-security-asca` skill remediates findings via the **Checkmarx Security MCP**
+The `cx-devassist-asca` skill remediates findings via the **Checkmarx Security MCP**
 (`mcp__Checkmarx__codeRemediation`). The plugin declares this server in `.mcp.json`, so Claude Code
 starts it **automatically** whenever the plugin is enabled — there is **no registration step and no
 `claude mcp add`**. The server command is the native **`cx mcp bridge`** subcommand, which reads the
@@ -17,9 +17,9 @@ plugin or authenticating in the same session, the bridge must be (re-)spawned to
 **`/reload-plugins` re-spawns the bridge** against the current `cx` and credential — no full restart.
 Everywhere else in this skill that says "reload the MCP" means run `/reload-plugins`.
 
-> "The Checkmarx MCP is bundled with the plugin. Run `/reload-plugins` (or restart Claude Code) to
-> load it into this session. After that it connects automatically on every launch — no registration
-> and no re-auth."
+> "The Checkmarx MCP is bundled with the plugin. Run `/reload-plugins` to re-spawn it, then run
+> `/mcp` to reconnect and confirm — reload alone doesn't always reconnect a session's existing MCP
+> connection. After that it connects automatically on every launch — no registration and no re-auth."
 
 ## Verify
 
@@ -30,12 +30,14 @@ Everywhere else in this skill that says "reload the MCP" means run `/reload-plug
 - **`Checkmarx` shows Connected** → remediation is ready.
 - **Not connected?** The bridge needs a valid credential to derive the URL and authenticate. Confirm
   `cx auth validate` passes (Phases 2–3) and `cx mcp bridge --help` works, then run `/reload-plugins`
-  (or restart). For dev/on-prem hosts whose `iam`→`ast` mapping doesn't hold, pass the full URL via
+  **followed by `/mcp`** (running `/reload-plugins` alone may not reconnect the MCP in an already-open
+  session — `/mcp` is what re-establishes the connection). If still not connected after a restart, for
+  dev/on-prem hosts whose `iam`→`ast` mapping doesn't hold, pass the full URL via
   the `--mcp-url` flag in `.mcp.json` args (Claude passes args, not the `env` block). The bridge's
   stderr is captured in the client MCP log under the Claude Code Node-CLI cache directory for the OS:
-  - **Windows:** `%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project>\mcp-logs-plugin-cx-security-Checkmarx\*.jsonl`
-  - **macOS:** `~/Library/Caches/claude-cli-nodejs/<project>/mcp-logs-plugin-cx-security-Checkmarx/*.jsonl`
-  - **Linux:** `~/.cache/claude-cli-nodejs/<project>/mcp-logs-plugin-cx-security-Checkmarx/*.jsonl`
+  - **Windows:** `%LOCALAPPDATA%\claude-cli-nodejs\Cache\<project>\mcp-logs-plugin-cx-devassist-Checkmarx\*.jsonl`
+  - **macOS:** `~/Library/Caches/claude-cli-nodejs/<project>/mcp-logs-plugin-cx-devassist-Checkmarx/*.jsonl`
+  - **Linux:** `~/.cache/claude-cli-nodejs/<project>/mcp-logs-plugin-cx-devassist-Checkmarx/*.jsonl`
 
 > The bridge reads the credential from the cx config and sends it **only** in the `Authorization`
 > header — never printed to chat or logs. The server accepts the raw credential (it exchanges it

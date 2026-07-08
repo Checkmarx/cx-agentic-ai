@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # cx-bootstrap.sh — self-install / self-upgrade the Checkmarx One `cx` CLI.
 #
-# This is the ONE command the cx-security gate allows through while it is blocking (see
+# This is the ONE command the cx-devassist gate allows through while it is blocking (see
 # hooks/cx_check.py `_is_bootstrap_command` and hooks/cx_check.sh's shell carve-out). It is
 # whitelisted by its resolved absolute path and accepts at most one argument:
 #
@@ -47,6 +47,22 @@ VERSION_CACHE_FILE="$AGENT_LOG_DIR/cx_version_cache"
 
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+# Route downloads through the SAME proxy cx uses — no new plugin variable. Precedence mirrors cx's own
+# binding: CX_HTTP_PROXY, then HTTP_PROXY/http_proxy, then the persisted `http_proxy:` key in
+# ~/.checkmarx/checkmarxcli.yaml (so `cx configure set --prop-name http_proxy` covers the download too).
+# Exported as http_proxy/https_proxy (both cases) so curl AND wget honor it natively — including HTTPS
+# (GitHub), which needs https_proxy, not just http_proxy. The value may carry credentials → never logged.
+apply_proxy() {
+    local p="${CX_HTTP_PROXY:-${HTTP_PROXY:-${http_proxy:-}}}"
+    if [[ -z "$p" ]]; then
+        local cfg="$HOME/.checkmarx/checkmarxcli.yaml"
+        [[ -r "$cfg" ]] && p="$(sed -n 's/^[[:space:]]*http_proxy:[[:space:]]*//p' "$cfg" 2>/dev/null | head -1 | tr -d "[:space:]\"'")"
+    fi
+    [[ -z "$p" ]] && return 0
+    export http_proxy="$p" https_proxy="$p" HTTP_PROXY="$p" HTTPS_PROXY="$p"
+    log "Routing downloads through the configured HTTP proxy."
+}
 
 # ---------------------------------------------------------------------------------------
 # Minimum version (single source of truth: scripts/cx-min-version; first non-comment line).
@@ -112,12 +128,13 @@ download_and_extract() {
     else
         url="$GITHUB_LATEST/$ASSET"
     fi
-    staging="$(mktemp -d "${TMP_BASE%/}/cx-bootstrap.XXXXXX")"
+    staging="$_CX_STAGING"   # created by main() BEFORE the EXIT trap, so cleanup actually reaches it
     archive="$staging/$ASSET"
 
     log "Downloading $url"
     if command -v curl &>/dev/null; then
-        curl -fsSL "$url" -o "$archive" || die "download failed (curl) from $url"
+        curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused "$url" -o "$archive" \
+            || die "download failed (curl) from $url"
     elif command -v wget &>/dev/null; then
         wget -qO "$archive" "$url" || die "download failed (wget) from $url"
     else
@@ -199,25 +216,36 @@ binary that does not match the published checksum (possible corruption or tamper
 }
 
 # Resolve the tag the `latest` release points at (e.g. 2.3.54), via the redirect of the
-# releases/latest URL. Needs curl; returns 1 if it can't be resolved.
+# releases/latest URL. Uses curl OR wget (so a no-curl machine still resolves); returns 1 otherwise.
 resolve_latest_tag() {
-    command -v curl >/dev/null 2>&1 || return 1
-    local eff
-    eff="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
-           "https://github.com/Checkmarx/ast-cli/releases/latest" 2>/dev/null)" || return 1
+    local url="https://github.com/Checkmarx/ast-cli/releases/latest" eff
+    if command -v curl >/dev/null 2>&1; then
+        eff="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$url" 2>/dev/null)" || return 1
+    elif command -v wget >/dev/null 2>&1; then
+        # wget can't print the effective URL, so read the redirect Location header without following
+        # it. GitHub 302-redirects /releases/latest -> /releases/tag/<tag>; awk drops the trailing
+        # " [following]" wget appends.
+        eff="$(wget --max-redirect=0 -S -O /dev/null "$url" 2>&1 | tr -d '\r' \
+               | sed -n 's/^[[:space:]]*[Ll]ocation:[[:space:]]*//p' | tail -1 | awk '{print $1}')"
+    else
+        return 1
+    fi
     eff="${eff%/}"
     [[ -n "$eff" && "$eff" != *"/releases/latest" ]] || return 1
     printf '%s' "${eff##*/}"
 }
 
-# Warn-and-proceed when verification can't be performed — unless CX_REQUIRE_CHECKSUM=1, which
-# makes any inability to verify FATAL (fail-closed for high-assurance environments).
+# cx becomes the trusted scanner binary, so checksum verification is REQUIRED by default: any
+# inability to verify (no tag / no curl / no checksums file / no entry / no hashing tool) is FATAL
+# (fail-closed). Set CX_REQUIRE_CHECKSUM=0 to explicitly downgrade to warn-and-proceed (e.g. an
+# air-gapped mirror with no published checksums) — NOT recommended for a security tool. A real hash
+# MISMATCH always dies inside verify_checksum_against regardless of this setting.
 _checksum_unavailable() {
     local why="$1"
-    if [[ "${CX_REQUIRE_CHECKSUM:-0}" == "1" ]]; then
-        die "checksum verification is required (CX_REQUIRE_CHECKSUM=1) but $why."
+    if [[ "${CX_REQUIRE_CHECKSUM:-1}" != "0" ]]; then
+        die "checksum verification is required but $why. (Set CX_REQUIRE_CHECKSUM=0 to override — NOT recommended for a security tool.)"
     fi
-    log "WARNING: proceeding WITHOUT checksum verification ($why). Set CX_REQUIRE_CHECKSUM=1 to make this fatal."
+    log "WARNING: proceeding WITHOUT checksum verification ($why) because CX_REQUIRE_CHECKSUM=0."
     return 0
 }
 
@@ -229,11 +257,16 @@ verify_checksum() {
     local archive="$1" tag="${2:-}" ver sums tag_url
     [[ -n "$tag" ]] || { _checksum_unavailable "could not resolve the latest release tag"; return $?; }
     ver="${tag#v}"
-    command -v curl >/dev/null 2>&1 || { _checksum_unavailable "curl is unavailable to fetch checksums"; return $?; }
     sums="$(mktemp "${TMP_BASE%/}/cx-sums.XXXXXX")" || { _checksum_unavailable "could not create a temp file"; return $?; }
     tag_url="https://github.com/Checkmarx/ast-cli/releases/download/${tag}/ast-cli_${ver}_checksums.txt"
-    if ! curl -fsSL "$tag_url" -o "$sums" 2>/dev/null; then
-        rm -f "$sums"; _checksum_unavailable "could not download the checksums file"; return $?
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused "$tag_url" -o "$sums" 2>/dev/null \
+            || { rm -f "$sums"; _checksum_unavailable "could not download the checksums file"; return $?; }
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q --tries=3 -O "$sums" "$tag_url" 2>/dev/null \
+            || { rm -f "$sums"; _checksum_unavailable "could not download the checksums file"; return $?; }
+    else
+        rm -f "$sums"; _checksum_unavailable "neither curl nor wget is available to fetch checksums"; return $?
     fi
     if verify_checksum_against "$archive" "$ASSET" "$sums"; then
         rm -f "$sums"; return 0
@@ -248,22 +281,12 @@ verify_checksum() {
 # Placement.
 # ---------------------------------------------------------------------------------------
 
-# Apple Silicon: the published cx is x86_64 and needs Rosetta 2 to execute. Fail fast with an
-# actionable hint rather than dying later at `cx version` with a cryptic exec error. No-op on
-# Linux, Windows, and Intel macs.
-ensure_rosetta_if_needed() {
-    [[ "$OS" == "darwin" && "$(uname -m)" == "arm64" ]] || return 0
-    # Modern macOS ships THIN arm64 system binaries (no x86_64 slice), so `arch -x86_64
-    # /usr/bin/true` returns "Bad CPU type" even WHEN Rosetta is installed — a false negative that
-    # would wrongly block the install. Detect the Rosetta runtime on disk (or its daemon) instead.
-    if [[ -f /Library/Apple/usr/libexec/oah/libRosettaRuntime ]] \
-       || [[ -d /Library/Apple/usr/share/rosetta ]] \
-       || /usr/bin/pgrep -q oahd 2>/dev/null; then
-        return 0
-    fi
-    die "Apple Silicon detected and the cx build is x86_64 — it needs Rosetta 2 to run. Install it \
-with:  softwareupdate --install-rosetta --agree-to-license   then retry."
-}
+# NOTE: no Rosetta step is needed. The published macOS asset (ast-cli_<ver>_darwin_x64.tar.gz) is a
+# UNIVERSAL binary — goreleaser lipo-merges the amd64 AND arm64 slices into one file (verified against
+# the 2.3.54 release: the single darwin asset is ~110 MB, vs ~28 MB for a single-arch build) — so it
+# runs NATIVELY on Apple Silicon; Rosetta 2 is NOT required. cx-asset-resolver.sh deliberately maps
+# darwin/arm64 → that darwin_x64 universal asset, which is why the old x86_64-only Rosetta gate that
+# used to live here has been removed.
 
 # Is a directory already on this shell's PATH?
 on_path() {
@@ -288,87 +311,95 @@ install_binary_atomically() {
     chmod +x "$dest" 2>/dev/null || true
 }
 
-install_unix() {
-    local staged="$1" dest="" cand writable
-    # Prefer a canonical, persistent dir that is BOTH on PATH and writable, so cx is usable in
-    # THIS session and lives somewhere sensible. /opt/homebrew/bin covers Apple Silicon Homebrew;
-    # ~/.local/bin and ~/bin are created on demand. Then fall back to ANY writable on-PATH dir.
-    for cand in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin" "$HOME/bin"; do
-        on_path "$cand" || continue
-        case "$cand" in
-            "$HOME/.local/bin"|"$HOME/bin") mkdir -p "$cand" 2>/dev/null || true ;;
-        esac
-        if [[ -d "$cand" && -w "$cand" ]]; then dest="$cand/cx"; break; fi
+# Ensure $1 is on PATH for FUTURE login shells (so bare `cx` resolves in new terminals) by appending
+# an idempotent, marked export line to the user's shell profile(s). Best-effort: the GATE does NOT
+# need this (it resolves the canonical store by absolute path), and after B2 neither does the MCP
+# (it runs via cx_run.sh) — this is purely developer convenience. If NO existing profile is found
+# (fresh account), CREATE the login file for the user's shell (zsh -> ~/.zprofile, else ~/.profile)
+# so a brand-new account still gets it. Never fails the install.
+ensure_dir_on_path_profile() {
+    local dir="$1" marker="# added by cx-devassist (cx-bootstrap)" prof wrote=""
+    on_path "$dir" && return 0
+    for prof in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.zprofile"; do
+        [[ -f "$prof" ]] || continue
+        if grep -qF "$marker" "$prof" 2>/dev/null; then wrote=1; continue; fi
+        printf '\n%s\nexport PATH="%s:$PATH"\n' "$marker" "$dir" >> "$prof" 2>/dev/null && wrote=1
     done
-    if [[ -z "$dest" ]] && writable="$(first_writable_path_dir "$PATH")"; then
-        dest="$writable/cx"
+    if [[ -z "$wrote" ]]; then
+        case "${SHELL:-}" in
+            *zsh) prof="$HOME/.zprofile" ;;
+            *)    prof="$HOME/.profile" ;;
+        esac
+        printf '\n%s\nexport PATH="%s:$PATH"\n' "$marker" "$dir" >> "$prof" 2>/dev/null || true
     fi
-    [[ -n "$dest" ]] || die "no writable directory found on PATH. Create ~/.local/bin and add it to \
-PATH (e.g. add 'export PATH=\"\$HOME/.local/bin:\$PATH\"' to your shell profile), then retry."
+    return 0
+}
+
+# Unix/macOS: install cx to the ONE canonical store (~/.checkmarx/bin/cx). The GATE resolves it by
+# absolute path (usable in THIS session), and the dir is added to PATH via the profile for the
+# remediation MCP / future sessions. Echoes the canonical path.
+install_unix() {
+    local staged="$1" dir="$HOME/.checkmarx/bin" dest
+    dest="$dir/cx"
+    mkdir -p "$dir" || die "could not create $dir"
     install_binary_atomically "$staged" "$dest"
+    ensure_dir_on_path_profile "$dir"
     log "Installed cx -> $dest"
     printf '%s' "$dest"
 }
 
+# Placement is canonical-store-based, so upgrade == install (overwrite the canonical cx).
 upgrade_unix() {
-    local staged="$1" target
-    target="$(command -v cx)" || die "upgrade mode but cx not found on PATH"
-    [[ -w "$target" || -w "$(dirname "$target")" ]] || die "cannot overwrite $target (not writable)"
-    install_binary_atomically "$staged" "$target"
-    log "Upgraded cx -> $target"
-    printf '%s' "$target"
+    install_unix "$1"
 }
 
-# Windows: place cx.exe into the first writable folder already on PATH (so THIS session's
-# hooks pick it up without a restart), keep a canonical copy, and persist for future
-# sessions. On upgrade, rename the running exe aside first (the live `cx mcp bridge` holds a
-# handle; the old bridge keeps old code until /reload-plugins). Echoes the resolved cx path.
+# Windows: install cx.exe to the ONE canonical store (%LOCALAPPDATA%\Checkmarx\cx\cx.exe) and add
+# that dir to the USER PATH for future sessions + the remediation MCP. No second "scatter" copy: the
+# GATE resolves the canonical store by absolute path (hooks/cx_run.sh + cx_check.py), so it works in
+# THIS session immediately without needing a writable on-PATH dir. If a running `cx mcp bridge` holds
+# a handle on the existing canonical cx.exe, rename it aside first so the copy can't fail on a lock.
+# Echoes the resolved (canonical) cx path.
 place_windows() {
-    local staged="$1" mode="$2" staged_w
+    local staged="$1" staged_w
     staged_w="$(cygpath -w "$staged")"; staged_w=${staged_w//\'/\'\'}
     powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
 \$ErrorActionPreference = 'Stop'
 \$staged = '$staged_w'
-\$mode   = '$mode'
 \$store  = Join-Path \$env:LOCALAPPDATA 'Checkmarx\\cx'
+\$dest   = Join-Path \$store 'cx.exe'
 New-Item -ItemType Directory -Force -Path \$store | Out-Null
-Copy-Item \$staged (Join-Path \$store 'cx.exe') -Force
 
-if (\$mode -eq 'upgrade') {
-    \$existing = (Get-Command cx -ErrorAction SilentlyContinue).Source
-    if (\$existing) {
-        \$old = \$existing + '.old'
+# Copy into the canonical store; if a running bridge locks the old exe, rename it aside then copy.
+if (Test-Path \$dest) {
+    try { Copy-Item \$staged \$dest -Force }
+    catch {
+        \$old = \$dest + '.old'
         if (Test-Path \$old) { Remove-Item \$old -Force -ErrorAction SilentlyContinue }
-        Rename-Item \$existing \$old -Force -ErrorAction SilentlyContinue
-        Copy-Item \$staged \$existing -Force
-        Write-Output \$existing
-        exit 0
+        Rename-Item \$dest \$old -Force
+        Copy-Item \$staged \$dest -Force
     }
+} else {
+    Copy-Item \$staged \$dest -Force
 }
 
-# install (or upgrade with no resolvable existing path): drop into first writable on-PATH dir.
-\$target = \$env:PATH -split ';' |
-  Where-Object { \$_ -and (Test-Path \$_) -and (\$_ -notlike '*\\WindowsApps') } |
-  Where-Object {
-    try { \$p = Join-Path \$_ ('.cxw_' + [guid]::NewGuid()); New-Item \$p -ItemType File -Force -EA Stop | Out-Null; Remove-Item \$p -Force; \$true } catch { \$false }
-  } | Select-Object -First 1
-# Persist the canonical store on the USER PATH for FUTURE sessions (idempotent; does not
-# affect THIS session, which already captured its PATH). Read AND write the User scope ONLY
-# via the .NET API — never \$env:PATH (the merged System+User+session copy) with setx, which
-# truncates at 1024 chars and permanently folds System entries into the User PATH.
-\$userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
-if (-not \$userPath) { \$userPath = '' }
-if ((\$userPath -split ';' | Where-Object { \$_ }) -notcontains \$store) {
-    \$newPath = (\$userPath.TrimEnd(';') + ';' + \$store).Trim(';')
-    [Environment]::SetEnvironmentVariable('PATH', \$newPath, 'User')
+# Persist the canonical store on the USER PATH for FUTURE sessions + the MCP (idempotent; does not
+# affect THIS session, whose PATH is frozen — the gate does not need it). Read AND write the User
+# scope ONLY via the .NET API — never \$env:PATH (the merged System+User+session copy) with setx,
+# which truncates at 1024 chars and permanently folds System entries into the User PATH.
+# Best-effort: on WDAC / AppLocker / policy-locked machines the User-PATH write can be blocked. cx is
+# already placed and the GATE resolves it by absolute path regardless, so a blocked PATH write must
+# NOT abort the install — warn and continue (matches the Unix profile write, which is best-effort too).
+try {
+    \$userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+    if (-not \$userPath) { \$userPath = '' }
+    if ((\$userPath -split ';' | Where-Object { \$_ }) -notcontains \$store) {
+        \$newPath = (\$userPath.TrimEnd(';') + ';' + \$store).Trim(';')
+        [Environment]::SetEnvironmentVariable('PATH', \$newPath, 'User')
+    }
+} catch {
+    Write-Warning ('Could not persist the canonical store on your User PATH: ' + \$_.Exception.Message + '. cx is installed and the security gate resolves it by absolute path regardless; only bare `cx` in a new terminal is affected (add ' + \$store + ' to PATH manually if you want it).')
 }
-if (\$target) {
-    Copy-Item \$staged (Join-Path \$target 'cx.exe') -Force
-    Write-Output (Join-Path \$target 'cx.exe')
-} else {
-    # No writable on-PATH dir: report the canonical store copy (now on the User PATH).
-    Write-Output (Join-Path \$store 'cx.exe')
-}
+Write-Output \$dest
 " | tr -d '\r'
 }
 
@@ -408,6 +439,12 @@ security scanner. A capability-complete cx release is required."
 }
 
 main() {
+    # Clean up the download staging dir on ANY exit (success or die()), so repeated installs/upgrades
+    # don't leak the full binary into TMPDIR/%TEMP% (matters on quota'd temp volumes). _CX_STAGING is
+    # created below in THIS scope (NOT inside the download_and_extract command-substitution subshell,
+    # whose assignment would never reach this trap); the checksums temp is removed inside verify_checksum.
+    trap 'rm -rf "${_CX_STAGING:-}" 2>/dev/null || true' EXIT
+
     # Argument allowlist — the ONLY values this script accepts (must match the carve-outs).
     local explicit_mode=""
     if [[ $# -gt 1 ]]; then die "too many arguments; usage: cx-bootstrap.sh [install|upgrade]"; fi
@@ -421,7 +458,7 @@ main() {
     local min mode
     min="$(load_min_version)"
     detect_os_arch
-    ensure_rosetta_if_needed
+    apply_proxy   # route downloads through cx's proxy (env or checkmarxcli.yaml http_proxy) if configured
 
     if [[ -n "$explicit_mode" ]]; then
         mode="$explicit_mode"
@@ -441,13 +478,21 @@ main() {
     fi
     log "Mode: $mode  |  asset: $ASSET  |  min version: $min"
 
-    # Resolve the release tag ONCE and thread it through download + checksum (TOCTOU-safe).
+    # Create the staging dir HERE (in main's scope, so the EXIT trap actually sees it — an assignment
+    # inside the download_and_extract command-substitution subshell would not), then thread the
+    # resolved release tag through download + checksum (TOCTOU-safe).
+    _CX_STAGING="$(mktemp -d "${TMP_BASE%/}/cx-bootstrap.XXXXXX")" || die "could not create a staging directory"
     local staged resolved="" tag
     tag="$(resolve_latest_tag)" || tag=""
     staged="$(download_and_extract "$tag")"
 
+    # Verify the STAGED binary (version + capability) BEFORE placing it or touching PATH, so a
+    # below-min / incapable / unrunnable build never lands on disk or on the User PATH — a failed
+    # verify die()s here with nothing to roll back.
+    verify "$staged" "$min"
+
     if [[ "$OS" == "windows" ]]; then
-        resolved="$(place_windows "$staged" "$mode")"
+        resolved="$(place_windows "$staged")"
     elif [[ "$mode" == "upgrade" ]]; then
         resolved="$(upgrade_unix "$staged")"
     else
@@ -455,22 +500,23 @@ main() {
     fi
 
     invalidate_version_cache
-    verify "$resolved" "$min"
+
+    # Post-placement sanity: capability was already proven on the STAGED binary above, but confirm the
+    # binary actually ON DISK still runs — catches a corrupt/partial/locked copy so we never report
+    # "installed" over a broken cx that the runtime gate would then deny.
+    if [[ -n "$resolved" && "$resolved" != "cx" ]]; then
+        "$resolved" version >/dev/null 2>&1 \
+            || die "cx was placed at $resolved but does not run (the copy may be corrupt or locked) — re-run install."
+    fi
 
     log ""
-    log "Done. cx is in place at: ${resolved:-<on PATH>}"
+    log "Done. cx is installed at: ${resolved}"
     log "Activation:"
-    if command -v cx >/dev/null 2>&1; then
-        log "  - The security hooks re-resolve cx on their next run — your next tool call is gated live."
-        log "  - For the Checkmarx remediation MCP, run /reload-plugins (re-spawns the cx mcp bridge)."
-    else
-        log "  - cx was placed on your USER PATH but THIS running session cannot see it yet."
-        log "    FULLY RESTART Claude Code (close and reopen) to activate the gate and the MCP —"
-        log "    /reload-plugins alone will NOT pick it up until the new PATH is in the environment."
-    fi
-    if [[ "$OS" == "windows" ]]; then
-        log "  - A canonical copy was saved to %LOCALAPPDATA%\\Checkmarx\\cx and added to PATH for future sessions."
-    fi
+    log "  - The security GATE resolves this canonical cx by ABSOLUTE path, so your NEXT tool call is"
+    log "    gated live — no restart needed, even though this session's PATH has not changed."
+    log "  - The Checkmarx remediation MCP also resolves cx by absolute path (via cx_run.sh), so it"
+    log "    activates after ONE /reload-plugins — no restart needed. (cx was also added to your PATH"
+    log "    for convenience in new terminals.)"
 }
 
 # Run only when executed directly — not when sourced (e.g. by scripts/test_cx_bootstrap.sh).

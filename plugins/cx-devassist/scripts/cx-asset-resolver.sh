@@ -6,8 +6,9 @@
 #   - RUN it directly to print the asset for THIS machine (handy for the manual-install docs).
 #
 # Asset names are pinned to what the ast-cli releases actually publish (verified against the
-# release): linux x64/arm64/armv6, darwin x64 only (Apple Silicon runs it under Rosetta 2),
-# windows x64. An unsupported OS/arch is signalled explicitly (stderr + non-zero), never guessed.
+# release): linux x64/arm64/armv6, a single darwin asset (ast-cli_..._darwin_x64 — a UNIVERSAL
+# amd64+arm64 binary that runs NATIVELY on Apple Silicon, no Rosetta), windows x64. An unsupported
+# OS/arch is signalled explicitly (stderr + non-zero), never guessed.
 set -euo pipefail
 
 # resolve_cx_asset <uname_s> <uname_m>
@@ -27,10 +28,10 @@ resolve_cx_asset() {
         armv6*|armv7*)   arch="armv6" ;;
         *) printf 'unsupported: architecture %s\n' "$uname_m" >&2; return 1 ;;
     esac
-    # Checkmarx publishes darwin x64 and windows x64 only (no arm64 asset for either). Apple
-    # Silicon runs the x64 build via Rosetta 2, and Windows-on-ARM runs it via built-in x64
-    # emulation — so remap arm64 → x64 on BOTH rather than build a URL for a non-existent
-    # ast-cli_<os>_arm64 asset.
+    # The darwin asset (ast-cli_..._darwin_x64) is a UNIVERSAL amd64+arm64 binary, so Apple Silicon
+    # runs it NATIVELY (no Rosetta); Windows-on-ARM runs the x64 build via built-in x64 emulation.
+    # Neither ships a separate ast-cli_<os>_arm64 asset, so remap arm64 → x64 on BOTH (which selects
+    # the darwin universal / the windows x64 build) rather than build a URL for a non-existent asset.
     case "$os" in
         darwin)  arch="x64" ;;
         windows) [ "$arch" = "arm64" ] && arch="x64" ;;
