@@ -1,68 +1,17 @@
 {
   "version": 1,
   "hooks": {
-    "Stop": [
-      {
-        "type": "command",
-        "command": "sh ./hooks/cx_run.sh hooks copilot-cli-stop",
-        "timeoutSec": 60
-      }
-    ],
     "preToolUse": [
       {
-        "matcher": "bash",
-        "type": "command",
-        "command": "sh ./hooks/cx_check.sh",
-        "timeoutSec": 60
-      },
-      {
-        "matcher": "bash",
-        "type": "command",
-        "command": "sh ./hooks/cx_run.sh hooks copilot-cli-pre-tool-use",
-        "timeoutSec": 60
-      },
-      {
-        "matcher": "powershell",
-        "type": "command",
-        "command": "sh ./hooks/cx_check.sh",
-        "timeoutSec": 60
-      },
-      {
-        "matcher": "powershell",
-        "type": "command",
-        "command": "sh ./hooks/cx_run.sh hooks copilot-cli-pre-tool-use",
-        "timeoutSec": 60
-      },
-      {
         "matcher": "create",
         "type": "command",
-        "command": "sh ./hooks/cx_check.sh",
-        "timeoutSec": 60
-      },
-      {
-        "matcher": "create",
-        "type": "command",
-        "command": "sh ./hooks/cx_run.sh hooks copilot-cli-pre-file-write",
+        "command": "cx hooks copilot-cli-pre-file-write",
         "timeoutSec": 60
       },
       {
         "matcher": "edit",
         "type": "command",
-        "command": "sh ./hooks/cx_check.sh",
-        "timeoutSec": 60
-      },
-      {
-        "matcher": "edit",
-        "type": "command",
-        "command": "sh ./hooks/cx_run.sh hooks copilot-cli-pre-file-write",
-        "timeoutSec": 60
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": ".*",
-        "type": "command",
-        "command": "sh ./hooks/cx_run.sh hooks copilot-cli-user-prompt-submit",
+        "command": "cx hooks copilot-cli-pre-file-write",
         "timeoutSec": 60
       }
     ]

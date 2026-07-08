@@ -5,11 +5,18 @@
 #
 # Why `sh` and not `bash`: on Windows a bare `bash` resolves to the System32 WSL
 # launcher (C:\Windows\System32\bash.exe), which is handed a Windows file path it
-# cannot open and exits 127. A non-2 exit is treated by Claude Code as a NON-blocking
-# hook error, so the whole fail-closed gate silently FAILS OPEN. `sh` has no System32
-# / WSL variant — it resolves only to Git Bash's sh.exe — so the gate actually runs.
-# Requires Git for Windows with its Unix tools on PATH. On macOS/Linux `sh` is the
-# system shell; this script is POSIX so it runs under dash/ash too (not just bash).
+# cannot open and exits 127. `sh` has no System32 / WSL variant — it resolves only to
+# Git Bash's sh.exe — so the gate actually runs. Requires Git for Windows with its Unix
+# tools on PATH. On macOS/Linux `sh` is the system shell; this script is POSIX so it
+# runs under dash/ash too (not just bash).
+#
+# Exit-code contract (both Claude Code AND Copilot CLI): a PreToolUse "deny" is signaled
+# by EXIT 0 with a `hookSpecificOutput.permissionDecision:"deny"` JSON body on stdout —
+# NOT exit 2. Both clients discard stdout on a non-zero exit (Claude Code feeds stderr
+# text back as a generic error; Copilot CLI reports a generic "hook errored" with no
+# reason), so a real deny reason only ever reaches the agent via exit 0 + JSON. A crash
+# / no-Python condition still can't produce that JSON, so it exits 1 (a genuine hook
+# error) — every DECIDABLE outcome (allow or deny) uses exit 0.
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PY_SCRIPT="$SCRIPT_DIR/cx_check.py"
@@ -30,13 +37,13 @@ fi
 export PYTHONUTF8=1
 
 # Probe a candidate interpreter. It MUST be Python 3: a Python-2 `python` would pass a
-# naive no-op probe but then crash cx_check.py on its Python-3-only syntax and exit 1 —
-# a non-2 exit that fails OPEN. Requiring version_info[0] >= 3 rejects Py2 so the
-# no-Python deny (fail CLOSED) fires instead. The probe also runs the interpreter, which
-# detects and skips the Microsoft Store python3 stub (it exits non-zero in non-TTY use).
-# Bound each interpreter probe: a wedged python must NOT hang the hook to Claude Code's kill
-# timeout (a killed hook is non-blocking = fail OPEN). Prefer coreutils `timeout`; where it is
-# absent — stock macOS ships NO `timeout`, and minimal containers may not either — fall back to a
+# naive no-op probe but then crash cx_check.py on its Python-3-only syntax — rejecting it
+# here (version_info[0] >= 3) routes to the no-Python deny JSON below instead of a bare
+# crash. The probe also runs the interpreter, which detects and skips the Microsoft Store
+# python3 stub (it exits non-zero in non-TTY use). Bound each interpreter probe: a wedged
+# python must NOT hang the hook past the client's kill timeout (a killed hook can't emit
+# JSON, so it degrades to a generic error). Prefer coreutils `timeout`; where it is absent —
+# stock macOS ships NO `timeout`, and minimal containers may not either — fall back to a
 # portable background watchdog so the probe is STILL bounded rather than unbounded (the old
 # fallback). On a hang the probe is killed and reported as a failure → that candidate is rejected.
 probe_python() {
@@ -56,9 +63,9 @@ probe_python() {
 }
 
 # Bound the TOTAL probe phase (not just each probe): several present-but-wedged interpreters could
-# each burn a full per-probe timeout and, summed, exceed Claude Code's 45s hook budget — a KILLED
-# hook is non-2 = fail OPEN. If the budget is spent, stop probing and fall through to the no-Python
-# deny (exit 2) below. (date-less hosts skip the deadline; each probe is still individually bounded.)
+# each burn a full per-probe timeout and, summed, exceed the client's hook budget — a killed hook
+# can't emit JSON. If the budget is spent, stop probing and fall through to the no-Python deny
+# below. (date-less hosts skip the deadline; each probe is still individually bounded.)
 _probe_start="$(date +%s 2>/dev/null || echo 0)"
 PYTHON_BIN=""
 # Try the canonical names FIRST (usually the one working interpreter), so a few wedged versioned
@@ -89,13 +96,16 @@ if [ -z "$PYTHON_BIN" ]; then
         . "$SCRIPT_DIR/_cx_bootstrap_match.sh"
         cx_is_bootstrap_command "$INPUT" "$SCRIPT_DIR" && exit 0
     fi
-    # No working Python 3 ⇒ the gate cannot evaluate ⇒ fail CLOSED (deny + exit 2). A plain
-    # exit 1 would be treated as non-blocking by Claude Code and silently fail OPEN.
+    # No working Python 3 ⇒ the gate cannot evaluate ⇒ fail CLOSED (deny JSON, exit 0 — see the
+    # exit-code contract note at the top of this file).
     cat <<'JSON'
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security gate could not run: no working Python 3 interpreter was found, so the scanner is inactive. This operation is BLOCKED fail-closed.","additionalContext":"Install Python 3, then retry. Windows: install from https://python.org (NOT the Microsoft Store stub). macOS: `xcode-select --install` or `brew install python3`. Linux: `apt install python3` / `dnf install python3` / `apk add python3`. The plugin's bundled bootstrap (scripts/cx-bootstrap.sh) installs the cx CLI and itself needs NO Python, but this version/auth gate does. All agent actions remain blocked until a Python 3 interpreter is available."}}
 JSON
-    exit 2
+    exit 0
 fi
 
 # Replay the captured stdin to Python (we already consumed it above, so it can't stream).
+# cx_check.py's own allow/deny paths now exit 0 with the decision JSON on stdout (see the
+# exit-code contract note at the top of this file), so its exit code is safe to propagate
+# as-is: 0 for any decided outcome, non-zero only for a genuine crash inside cx_check.py.
 printf '%s' "$INPUT" | $PYTHON_BIN "$PY_SCRIPT" "$@"

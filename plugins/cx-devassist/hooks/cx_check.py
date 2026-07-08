@@ -587,8 +587,13 @@ def _scanner_state(identity=None):
 
 
 def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, version_state=None) -> None:
+    # Exit 0 with permissionDecision:"deny" JSON on stdout — the only form BOTH Claude Code and
+    # Copilot CLI parse as a structured deny-with-reason. Exit 2 is NOT that: Claude Code discards
+    # stdout on exit 2 and only feeds stderr text back as a generic error, and Copilot CLI's exit-2
+    # path does not reliably surface hookSpecificOutput either — both degrade to a generic
+    # "hook errored" with the reason lost, defeating the whole point of a structured deny.
     _log("gate_decision", decision="deny", reason_code=reason_code, tool_name=tool_name,
-         version_state=version_state, exit_code=2)
+         version_state=version_state, exit_code=0)
     output = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -598,7 +603,7 @@ def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, versio
         }
     }
     print(json.dumps(output))
-    sys.exit(2)
+    sys.exit(0)
 
 
 def _allow_with_warning(context: str, *, reason_code=None, tool_name=None) -> None:
@@ -1077,8 +1082,9 @@ def cx_check():
 
 def _fail_closed_on_crash():
     """Last-resort deny printed if the gate itself crashes. A fail-CLOSED guard: an unexpected
-    error inside cx_check() must BLOCK (exit 2), never exit 1 — Claude Code treats a non-2 exit
-    as a non-blocking hook error, which would let the tool call through UNSCANNED (fail open)."""
+    error inside cx_check() must still BLOCK via a decided deny (exit 0 + permissionDecision:
+    "deny" JSON) — see the exit-code contract note on _deny(). main() exits 0 after calling this
+    so the JSON is actually read instead of being discarded as a generic hook error."""
     try:
         print(json.dumps({
             "hookSpecificOutput": {
@@ -1100,16 +1106,17 @@ def _fail_closed_on_crash():
 
 
 def main():
-    # _deny()/_allow_with_warning() raise SystemExit with the real allow(0)/deny(2) code — let it
-    # propagate. ANY other exception is an internal gate failure → fail CLOSED (deny, exit 2),
-    # never an uncaught traceback (exit 1, which Claude Code treats as non-blocking = fail OPEN).
+    # _deny()/_allow_with_warning() raise SystemExit(0) with the decision JSON already printed —
+    # let it propagate. ANY other exception is an internal gate failure → still exit 0 after
+    # printing the fail-closed deny JSON (never an uncaught traceback / bare exit 1, which both
+    # Claude Code and Copilot CLI would surface as a generic, reason-less "hook errored").
     try:
         cx_check()
     except SystemExit:
         raise
     except BaseException:
         _fail_closed_on_crash()
-        sys.exit(2)
+        sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -8,8 +8,10 @@
 #
 # When cx CANNOT be resolved at all, the fail mode depends on the sub-command so a missing cx is
 # never a silent fail-OPEN on the scan path:
-#   - Blocking PreToolUse scanners (…pre-tool-use / …pre-file-write) -> emit a deny JSON + exit 2
+#   - Blocking PreToolUse scanners (…pre-tool-use / …pre-file-write) -> emit a deny JSON + exit 0
 #     (fail CLOSED, mirroring cx_check.sh's no-Python deny) so the tool call is BLOCKED, unscanned.
+#     Exit 0 (not 2) because that is the ONLY exit code both Claude Code and Copilot CLI parse
+#     stdout JSON on for a PreToolUse deny — see the exit-code contract note in cx_check.sh.
 #   - Advisory lifecycle hooks (…stop / …idle / …prompt-submit) -> exit 0 (non-blocking by design;
 #     a fail-closed prompt-submit would deadlock the user before they could even install cx).
 #   - Anything else (mcp bridge, scan, auth, configure, version, …) -> stderr error + exit 1.
@@ -89,7 +91,7 @@ case "${1:-} ${2:-}" in
         cat <<'JSON'
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.","additionalContext":"Run /cx-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. All agent actions remain blocked until cx is available."}}
 JSON
-        exit 2
+        exit 0
         ;;
     *stop* | *idle* | *prompt*)
         # Advisory lifecycle hook (stop / idle / user-prompt-submit) — stay non-blocking when cx is
