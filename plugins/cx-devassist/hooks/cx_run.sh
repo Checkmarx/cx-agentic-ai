@@ -4,7 +4,11 @@
 # the canonical store is usable immediately, even before this session's frozen PATH can see it
 # (setx / shell-profile changes only affect FUTURE sessions). Resolution precedence mirrors
 # hooks/cx_check.py _cx_exe():  CX_BINARY (pin) -> canonical store -> PATH.
-# When cx resolves, it is exec'd transparently (stdin/stdout/stderr and exit code preserved).
+# When cx resolves, it is exec'd transparently (stdin/stdout/stderr and exit code preserved) — EXCEPT
+# for the two blocking scan subcommands (…pre-tool-use / …pre-file-write), where stdout and the exit
+# code are captured (not exec'd) just long enough to record the native scanner's own allow/deny to
+# cx-devassist.jsonl via cx_log.py, then relayed unchanged. stderr still streams through live either
+# way.
 #
 # When cx CANNOT be resolved at all, the fail mode depends on the sub-command so a missing cx is
 # never a silent fail-OPEN on the scan path:
@@ -66,7 +70,49 @@ elif command -v cx >/dev/null 2>&1; then
     CX_RESOLVED="cx"
 fi
 
+# Whether this invocation IS the blocking scan decision (pre-tool-use / pre-file-write) — the same
+# substring match used below in the cx-unresolved branch, kept in lockstep with it. Advisory
+# lifecycle hooks (stop/idle/prompt) are not security decisions and stay on the plain exec fast path.
+case "${1:-} ${2:-}" in
+    *pre-tool-use* | *pre-file-write*) _CXRUN_SCAN=1 ;;
+    *)                                 _CXRUN_SCAN=0 ;;
+esac
+
 if [ -n "$CX_RESOLVED" ]; then
+    if [ "$_CXRUN_SCAN" = 1 ]; then
+        # Capture (rather than exec) ONLY for the blocking scan decision, so this wrapper can observe
+        # the native cx scanner's allow/deny and record it — a plain `exec` replaces this process, so
+        # nothing downstream could ever see or log the actual vulnerability/policy block (AST-162014).
+        # stderr still streams straight through (command substitution only captures stdout); stdin is
+        # read once here and replayed to cx unchanged.
+        _CXRUN_INPUT=$(cat)
+        _CXRUN_OUTPUT=$(printf '%s' "$_CXRUN_INPUT" | "$CX_RESOLVED" "$@")
+        _CXRUN_STATUS=$?
+
+        # decision: either signal cx may use — a literal deny in its JSON, or exit 2 (the same pair
+        # this script's OWN fail-closed branch below emits together for its cx-absent deny).
+        case "$_CXRUN_OUTPUT" in
+            *'"permissionDecision":"deny"'*) _CXRUN_DECISION=deny ;;
+            *) if [ "$_CXRUN_STATUS" -eq 2 ]; then _CXRUN_DECISION=deny; else _CXRUN_DECISION=allow; fi ;;
+        esac
+        _CXRUN_TOOL=$(printf '%s' "$_CXRUN_INPUT" | sed -n 's/.*"tool_name" *: *"\([A-Za-z0-9_.:-]*\)".*/\1/p' | head -1)
+
+        # Best-effort log — never let a missing/slow python or a logging failure affect the relay.
+        _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
+        for _CXRUN_PY in python3 python; do
+            command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
+            # `break` only on a real success: on Windows, "python3" can resolve to the Microsoft
+            # Store's App Execution Alias stub, which is ON PATH but exits non-zero without running
+            # anything (no Python actually installed under that name) — falling through to "python"
+            # in that case is what makes this work on such machines.
+            "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" scan_decision \
+                "decision=$_CXRUN_DECISION" "tool_name=$_CXRUN_TOOL" "exit_code=$_CXRUN_STATUS" \
+                >/dev/null 2>&1 && break
+        done
+
+        printf '%s\n' "$_CXRUN_OUTPUT"
+        exit "$_CXRUN_STATUS"
+    fi
     exec "$CX_RESOLVED" "$@"
 fi
 

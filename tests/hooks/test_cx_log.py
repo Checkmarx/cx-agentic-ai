@@ -5,6 +5,7 @@ Run: python3 hooks/test_cx_log.py   (stdlib only)
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -88,7 +89,8 @@ class TestRedaction(_Base):
         self.assertTrue(set(rec).issubset(allowed), "unexpected keys: %s" % (set(rec) - allowed))
         self.assertEqual(rec["event"], "gate_decision")
         self.assertEqual(rec["exit_code"], 2)
-        self.assertIsInstance(rec["ts"], int)
+        self.assertIsInstance(rec["ts"], str)
+        self.assertRegex(rec["ts"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
     def test_assistant_env_is_sanitized(self):
         os.environ["CX_ASSISTANT"] = "evil/../; rm"
@@ -101,6 +103,24 @@ class TestRedaction(_Base):
         rec = self.records()[0]
         self.assertNotIn("exit_code", rec)
         self.assertNotIn("rm -rf", self.raw())
+
+    def test_scan_decision_allowlist(self):
+        # scan_decision is the stage-2 native-scanner event (AST-162014); it must carry only the
+        # outcome, never a free-form finding/reason.
+        cx_log.log_event("scan_decision", decision="deny", tool_name="Bash", exit_code=2,
+                          reason="SQL injection in foo.py")
+        rec = self.records()[0]
+        self.assertEqual(rec["event"], "scan_decision")
+        self.assertEqual(rec["decision"], "deny")
+        self.assertEqual(rec["tool_name"], "Bash")
+        self.assertEqual(rec["exit_code"], 2)
+        self.assertNotIn("reason", rec)
+        self.assertNotIn("SQL injection", self.raw())
+
+    def test_scan_decision_unknown_value_coerces_to_other(self):
+        cx_log.log_event("scan_decision", decision="maybe", tool_name="Write")
+        rec = self.records()[0]
+        self.assertEqual(rec["decision"], "other")
 
     def test_as_int_accepts_posix_range_only(self):
         # PR#15 #5: exit_code must be a POSIX code 0..255; the non-POSIX -1 sentinel is dropped.
@@ -149,6 +169,33 @@ class TestBehavior(_Base):
             cx_log.log_event("gate_decision", reason_code="ok")  # must not raise
         finally:
             cx_log._log_dir = saved
+
+    def test_cli_entry_point_logs_scan_decision(self):
+        # cx_run.sh invokes cx_log.py as a subprocess (never a shell-interpolated -c string) to
+        # record the stage-2 scanner's decision. Values arrive as argv, not env, so run it directly.
+        env = dict(os.environ)
+        env["CX_LOG_DIR"] = self.dir
+        module_path = os.path.join(_HOOKS_DIR, "cx_log.py")
+        subprocess.run(
+            [sys.executable, module_path, "scan_decision",
+             "decision=deny", "tool_name=Write", "exit_code=2"],
+            env=env, check=True, capture_output=True, text=True,
+        )
+        rec = self.records()[0]
+        self.assertEqual(rec["event"], "scan_decision")
+        self.assertEqual(rec["decision"], "deny")
+        self.assertEqual(rec["tool_name"], "Write")
+        self.assertEqual(rec["exit_code"], 2)
+
+    def test_cli_entry_point_never_raises_on_bad_args(self):
+        env = dict(os.environ)
+        env["CX_LOG_DIR"] = self.dir
+        module_path = os.path.join(_HOOKS_DIR, "cx_log.py")
+        result = subprocess.run(
+            [sys.executable, module_path],  # no event name at all
+            env=env, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":

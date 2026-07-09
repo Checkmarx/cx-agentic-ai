@@ -181,11 +181,15 @@ All optional — sensible defaults apply.
 ## Privacy & logging
 
 The gate writes one redacted JSONL record per decision to
-`~/.checkmarx/agent-logs/<assistant>/cx-devassist.jsonl`. Logging uses a **redaction allowlist**: each
-event declares the exact keys it may write and a type coercer per key. Anything else — source code,
-secrets, tokens, prompts, free-form strings — is dropped before it can reach disk. The MCP bridge
-sends your credential only in the `Authorization` header, never to chat or logs. Logging never raises
-into the gate, and `CX_LOG_DISABLE=1` turns it off.
+`~/.checkmarx/agent-logs/<assistant>/cx-devassist.jsonl` — both the stage-1 readiness gate's own
+allow/deny (`gate_decision`) and the stage-2 native scanner's allow/deny (`scan_decision`), so a tool
+call blocked because of an actual finding is recorded, not just a blocked-because-cx-isn't-ready
+decision. Logging uses a **redaction allowlist**: each event declares the exact keys it may write and
+a type coercer per key. Anything else — source code, secrets, tokens, prompts, free-form strings — is
+dropped before it can reach disk; `scan_decision` in particular never carries the finding/reason text,
+only the outcome. Every record's `ts` is a UTC ISO-8601 timestamp (e.g. `2026-07-09T14:23:01Z`). The
+MCP bridge sends your credential only in the `Authorization` header, never to chat or logs. Logging
+never raises into the gate, and `CX_LOG_DISABLE=1` turns it off.
 
 ---
 
