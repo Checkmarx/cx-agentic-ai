@@ -44,21 +44,33 @@ cx_is_bootstrap_command() {
     fi
 
     case "$_cxbm_norm" in
-        *'"tool_name":"Bash"'* | *'"tool_name": "Bash"'*)
+        # Claude Code format: tool_name at top level, Bash or command tool.
+        *'"tool_name":"Bash"'*    | *'"tool_name": "Bash"'*    | \
+        *'"tool_name":"command"'* | *'"tool_name": "command"'* | \
+        # Copilot CLI ACTUAL format: toolName at top level (confirmed from diag log).
+        *'"toolName":"powershell"'* | *'"toolName": "powershell"'* | \
+        *'"toolName":"bash"'*       | *'"toolName": "bash"'*       | \
+        *'"toolName":"shell"'*      | *'"toolName": "shell"'*      | \
+        # Copilot CLI toolCalls array format (events.jsonl / alternative).
+        *'"name":"powershell"'*   | *'"name": "powershell"'*   | \
+        *'"name":"bash"'*         | *'"name": "bash"'*         | \
+        *'"name":"shell"'*        | *'"name": "shell"'*)
             case "$_cxbm_norm" in
                 *';'* | *'|'* | *'&'* | *'`'* | *'$('* | *'<'* | *'>'*) return 1 ;;  # chaining/redirect → deny
             esac
             for _cxbm_bp in "$_cxbm_boot_posix" "$_cxbm_boot_win"; do
                 [ -n "$_cxbm_bp" ] || continue
                 # Exact sanctioned shape ONLY: the command value is precisely
-                # `bash "<bundled-bootstrap>" install` (or upgrade) and nothing else. The `bash /"`
-                # prefix (a JSON `bash \"`) rejects `bash -c …`; the bundled ABSOLUTE path rejects
-                # foreign scripts; the trailing mode + closing quote reject extra arguments / a missing mode.
+                # Exact sanctioned shape: `bash` or `sh` + quoted bundled path + install/upgrade.
                 case "$_cxbm_norm" in
                     *'"command":"bash /"'"$_cxbm_bp"'/" install"'*  | \
                     *'"command": "bash /"'"$_cxbm_bp"'/" install"'* | \
                     *'"command":"bash /"'"$_cxbm_bp"'/" upgrade"'*  | \
-                    *'"command": "bash /"'"$_cxbm_bp"'/" upgrade"'*)
+                    *'"command": "bash /"'"$_cxbm_bp"'/" upgrade"'* | \
+                    *'"command":"sh /"'"$_cxbm_bp"'/" install"'*    | \
+                    *'"command": "sh /"'"$_cxbm_bp"'/" install"'*   | \
+                    *'"command":"sh /"'"$_cxbm_bp"'/" upgrade"'*    | \
+                    *'"command": "sh /"'"$_cxbm_bp"'/" upgrade"'*)
                         return 0 ;;
                 esac
             done

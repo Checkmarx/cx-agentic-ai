@@ -177,7 +177,7 @@ _SHELL_CHAINING = (";", "|", "&", "`", "$(", "\n")
 # REQUIRED (a bare `bash "<bootstrap>"` is not a sanctioned action); the path is validated
 # separately (must resolve to the plugin's own bootstrap); the regex pins the shape so no extra
 # arguments or a `-c` payload can ride along.
-_BOOTSTRAP_RE = re.compile(r'^\s*bash\s+"?(?P<path>[^"]+?)"?\s+(?:install|upgrade)\s*$')
+_BOOTSTRAP_RE = re.compile(r'^\s*(?:bash|sh)\s+"?(?P<path>[^"]+?)"?\s+(?:install|upgrade)\s*$')
 
 # Read-only Bash programs that cannot write code to disk or execute another program — safe to run
 # WITHOUT the cx readiness/auth gate, so a plain `ls`/`cat` works during setup instead of being blocked
@@ -215,8 +215,30 @@ def _bootstrap_script_path():
 
 def _bootstrap_command_str(mode):
     """The exact command the agent should run to escape the block — embedded in deny
-    messages so the agent doesn't need ${CLAUDE_PLUGIN_ROOT} (which is empty in its shell)."""
-    return 'bash "{0}" {1}'.format(_bootstrap_script_path(), mode)
+    messages so the agent doesn't need ${CLAUDE_PLUGIN_ROOT} (which is empty in its shell).
+    Uses `sh` with forward slashes so it works on Windows (bash fails with backslash paths
+    when invoked from the Copilot CLI powershell tool or WSL-less Git Bash contexts)."""
+    path = _bootstrap_script_path().replace("\\", "/")
+    return 'sh "{0}" {1}'.format(path, mode)
+
+
+def _bootstrap_copilot_cli_instruction(mode):
+    """Copilot CLI-specific bootstrap instruction embedded in deny messages.
+    The agent must run the bootstrap command EXACTLY as shown — using `sh`, not a
+    platform-native shell invocation — and with NO chaining (no `;`, `|`, `&&`, `2>&1`,
+    `if(...)`, etc.) — because the hook's bootstrap carve-out rejects any command that
+    contains shell-chaining tokens.
+    On Windows the powershell tool accepts `sh "..." mode` directly via Git Bash's sh.exe.
+    On macOS/Linux the bash tool runs it via the system sh. Both forms pass the carve-out."""
+    cmd = _bootstrap_command_str(mode)
+    shell_tool = "powershell" if os.name == "nt" else "bash"
+    return (
+        "To unblock, use the {0} tool to run this command EXACTLY as shown below "
+        "(do NOT rewrite as a native shell invocation, do NOT add `2>&1`, `if(...)`, "
+        "or any other chaining — the security hook only allows this exact bare form):\n    {1}".format(
+            shell_tool, cmd
+        )
+    )
 
 
 def _cx_bash_token():
@@ -588,21 +610,35 @@ def _scanner_state(identity=None):
 
 
 def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, version_state=None) -> None:
-    # Exit 0 with permissionDecision:"deny" JSON on stdout — the only form BOTH Claude Code and
-    # Copilot CLI parse as a structured deny-with-reason. Exit 2 is NOT that: Claude Code discards
-    # stdout on exit 2 and only feeds stderr text back as a generic error, and Copilot CLI's exit-2
-    # path does not reliably surface hookSpecificOutput either — both degrade to a generic
-    # "hook errored" with the reason lost, defeating the whole point of a structured deny.
+    # Exit-code + output contract differs by client:
+    #   Claude Code:  exit 0 + hookSpecificOutput JSON wrapper — Claude Code PARSES
+    #                 hookSpecificOutput.permissionDecision:"deny" and surfaces the reason.
+    #   Copilot CLI:  exit 0 + FLAT JSON (no hookSpecificOutput wrapper) — Copilot CLI reads
+    #                 permissionDecision / permissionDecisionReason at the TOP LEVEL of the
+    #                 JSON object (per https://docs.github.com/en/copilot/reference/hooks-reference).
+    #                 Using exit 1 also blocks but degrades to a generic "hook errored" with no
+    #                 reason shown — the flat-JSON path is strictly better.
+    # _COPILOT_CLI_MODE is set once per cx_check() call based on the --copilot-cli flag or
+    # the detected stdin format.
     _log("gate_decision", decision="deny", reason_code=reason_code, tool_name=tool_name,
          version_state=version_state, exit_code=0)
-    output = {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
+    if _COPILOT_CLI_MODE:
+        # Flat JSON — Copilot CLI reads permissionDecision at the top level.
+        # permissionDecisionReason is shown directly to the agent.
+        output = {
             "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-            "additionalContext": context,
+            "permissionDecisionReason": reason + "\n\n" + context,
         }
-    }
+    else:
+        # Claude Code nested wrapper format.
+        output = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+                "additionalContext": context,
+            }
+        }
     print(json.dumps(output))
     sys.exit(0)
 
@@ -621,8 +657,8 @@ def _allow_with_warning(context: str, *, reason_code=None, tool_name=None) -> No
 
 
 def _read_hook_input():
-    """Parse the PreToolUse JSON Claude Code sends on stdin. Returns {} on any problem
-    (no stdin / empty / non-JSON) so the normal gate still runs."""
+    """Parse the PreToolUse JSON from stdin (Claude Code or Copilot CLI). Returns {} on
+    any problem so the normal gate still runs."""
     try:
         if sys.stdin.isatty():
             return {}
@@ -635,15 +671,101 @@ def _read_hook_input():
         data = json.loads(raw)
     except (ValueError, TypeError):
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    # Copilot CLI sends the full hook invocation envelope as stdin:
+    #   { "hookInvocationId": "...", "hookType": "preToolUse", "input": { "sessionId": ...,
+    #     "cwd": ..., "toolCalls": [...] } }
+    # Unwrap to the inner "input" so all downstream helpers (which look for "toolCalls" at the
+    # top level) work correctly. Claude Code sends the inner object directly (no envelope).
+    if "input" in data and isinstance(data.get("input"), dict) and "hookType" in data:
+        return data["input"]
+    return data
+
+
+def _is_copilot_cli_input(hook_input):
+    """True when the hook input uses Copilot CLI's actual format.
+    Real stdin has 'toolName' + 'toolArgs' at top level (confirmed from diag log).
+    Also handles the toolCalls array format seen in events.jsonl."""
+    return (
+        "toolName" in hook_input or
+        "toolArgs" in hook_input or
+        isinstance(hook_input.get("toolCalls"), list)
+    )
+
+
+# Set once at the start of cx_check() after parsing the hook input. Read by _deny() and
+# _fail_closed_on_crash() to choose the correct deny exit code per client.
+_COPILOT_CLI_MODE = False
+
+
+def _tool_name(hook_input):
+    """Extract tool name supporting all client formats:
+    - Claude Code snake_case:       hook_input['tool_name']
+    - Copilot CLI camelCase:        hook_input['toolName']   ← ACTUAL format confirmed from diag
+    - Copilot CLI toolCalls array:  hook_input['toolCalls'][0]['name']
+    Returns '' when no recognised key is present."""
+    # Claude Code + Copilot CLI actual (toolName at top level)
+    v = hook_input.get("tool_name") or hook_input.get("toolName")
+    if v:
+        return v
+    # Copilot CLI toolCalls array format (events.jsonl format — may differ from real stdin)
+    calls = hook_input.get("toolCalls")
+    if isinstance(calls, list) and calls and isinstance(calls[0], dict):
+        return calls[0].get("name") or ""
+    return ""
+
+
+def _tool_input(hook_input):
+    """Extract tool input supporting all client formats:
+    - Claude Code snake_case:    hook_input['tool_input']  (dict)
+    - Copilot CLI actual format: JSON.parse(hook_input['toolArgs'])  ← ACTUAL confirmed from diag
+    - Copilot CLI camelCase:     hook_input['toolInput']   (dict)
+    - Copilot CLI toolCalls:     JSON.parse(hook_input['toolCalls'][0]['args'])
+    Returns {} when no recognised key is present or args can't be parsed."""
+    # Claude Code
+    v = hook_input.get("tool_input")
+    if isinstance(v, dict):
+        return v
+    # Copilot CLI ACTUAL format: toolArgs is a JSON string at top level
+    raw = hook_input.get("toolArgs")
+    if raw is not None:
+        if isinstance(raw, dict):
+            return raw
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except (ValueError, TypeError):
+            pass
+    # Copilot CLI camelCase variant
+    v = hook_input.get("toolInput")
+    if isinstance(v, dict):
+        return v
+    # Copilot CLI toolCalls array format
+    calls = hook_input.get("toolCalls")
+    if isinstance(calls, list) and calls and isinstance(calls[0], dict):
+        raw = calls[0].get("args", "{}")
+        if isinstance(raw, dict):
+            return raw
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+    return {}
 
 
 def _bash_command(hook_input):
-    """The command string of a Bash tool call, or '' if this isn't a Bash call."""
-    if hook_input.get("tool_name") != "Bash":
+    """The command string of a shell tool call, or '' if this is not a shell tool.
+    Recognises all known shell tool names across clients:
+      Claude Code:    tool_name='Bash'
+      Copilot CLI:    toolCalls[0].name='powershell' (Windows) or 'bash' (Unix)
+      Assumed/legacy: tool_name='command'
+    All share the same carve-out guards: bootstrap, auth-recovery, read-only allowlist."""
+    _SHELL_TOOLS = ("Bash", "command", "powershell", "bash", "shell")
+    if _tool_name(hook_input) not in _SHELL_TOOLS:
         return ""
-    tool_input = hook_input.get("tool_input")
-    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
+    command = _tool_input(hook_input).get("command", "")
     return command if isinstance(command, str) else ""
 
 
@@ -717,13 +839,26 @@ def _is_bootstrap_command(hook_input):
     ${CLAUDE_PLUGIN_ROOT} placeholder (which the agent's shell does NOT expand) is honored only
     after expanding it from the gate's own environment and proving it resolves to the bundled
     bootstrap — never blessed blindly."""
+    # TEMPORARY DIAGNOSTIC — remove after debugging bootstrap carve-out
+    _diag = os.path.join(os.path.expanduser("~"), ".checkmarx", "agent-logs", "cx_diag.log")
+    def _dlog(msg):
+        try:
+            os.makedirs(os.path.dirname(_diag), exist_ok=True)
+            with open(_diag, "a", encoding="utf-8") as _f:
+                _f.write("[cx_check.py _is_bootstrap_command] " + msg + "\n")
+        except Exception:
+            pass
+
     command = _bare_bash_command(hook_input)
+    _dlog("bare_command=" + repr(command))
     if command is None:
         return False
     m = _BOOTSTRAP_RE.match(command)
+    _dlog("regex_match=" + repr(bool(m)))
     if not m:
         return False
     raw_path = m.group("path").strip()
+    _dlog("raw_path=" + repr(raw_path))
     if raw_path == "${CLAUDE_PLUGIN_ROOT}/scripts/cx-bootstrap.sh":
         # Claude Code sets CLAUDE_PLUGIN_ROOT in the hook (gate) environment; an unset or foreign
         # value cannot be proven to be the bundled bootstrap → fail CLOSED.
@@ -733,15 +868,15 @@ def _is_bootstrap_command(hook_input):
         raw_path = os.path.join(root, "scripts", "cx-bootstrap.sh")
     candidate = _normalize_path(raw_path)
     expected = _normalize_path(_bootstrap_script_path())
+    _dlog("candidate=" + repr(candidate) + " expected=" + repr(expected) + " match=" + repr(candidate == expected))
     return candidate is not None and candidate == expected
 
 
 def _is_readonly_command(hook_input, tool):
-    """True for a BARE Bash command whose first token is a known read-only program (_READONLY_COMMANDS)
-    — safe to run without the cx gate. Reuses the same shape-guard the auth/bootstrap carve-outs use, so
-    `ls; rm -rf x`, `cat $(evil)`, `> file` redirects, etc. are NOT matched. Bash-tool only; opt out
-    with CX_GATE_ALL_COMMANDS=1. A path form (e.g. /bin/rm) is not matched — only a plain program name."""
-    if tool != "Bash" or os.environ.get("CX_GATE_ALL_COMMANDS") == "1":
+    """True for a BARE shell tool call whose first token is a known read-only program.
+    Reuses the same shape-guard; opt out with CX_GATE_ALL_COMMANDS=1."""
+    _SHELL_TOOLS = ("Bash", "command", "powershell", "bash", "shell")
+    if tool not in _SHELL_TOOLS or os.environ.get("CX_GATE_ALL_COMMANDS") == "1":
         return False
     command = _bare_bash_command(hook_input)
     if not command:
@@ -752,12 +887,21 @@ def _is_readonly_command(hook_input, tool):
 
 def cx_check():
     hook_input = _read_hook_input()
-    tool = hook_input.get("tool_name")
+    tool = _tool_name(hook_input)
 
     # 1. The bootstrap is the ONLY way out of the block — must be checked first.
     if _is_bootstrap_command(hook_input):
         _log("gate_decision", decision="allow", reason_code="bootstrap", tool_name=tool)
         return
+
+    # Set the client mode flag — read by _deny() to choose the correct exit code.
+    # Priority: explicit --copilot-cli argv flag (passed from hooks-copilot-cli.json) overrides
+    # the stdin-format heuristic. The flag is the reliable signal because Copilot CLI may not
+    # include a `toolCalls` key in every hook payload, causing _is_copilot_cli_input() to return
+    # False and _deny() to fall back to exit 0 — which Copilot CLI ignores (it only blocks on
+    # a non-zero exit). The argv flag makes Copilot CLI mode explicit and format-independent.
+    global _COPILOT_CLI_MODE
+    _COPILOT_CLI_MODE = ("--copilot-cli" in sys.argv[1:]) or _is_copilot_cli_input(hook_input)
 
     # 2. Audited manual override. Loud, durable, and explicitly opt-in.
     if os.environ.get("CX_ALLOW_UNSCANNED") == "1":
@@ -837,6 +981,12 @@ def cx_check():
     effective = _cx_exe()
     resolved = effective if os.path.isabs(effective) else shutil.which(effective)
     if resolved is None:
+        _install_instruction = (
+            _bootstrap_copilot_cli_instruction("install") if _COPILOT_CLI_MODE else
+            "To self-install now, run the plugin's bundled bootstrap by its resolved absolute path "
+            "(its directory is empty in ${CLAUDE_PLUGIN_ROOT} in your shell, so use this literal "
+            "command):\n    " + _bootstrap_command_str("install")
+        )
         _deny(
             reason=(
                 "The Checkmarx CLI (cx) is not installed. Security scanning cannot run, so this "
@@ -845,10 +995,8 @@ def cx_check():
             context=(
                 "cx CLI is not installed on this machine (not found via CX_BINARY, the canonical "
                 "store, or PATH). All agent actions are blocked fail-closed until it is installed and "
-                "authenticated. IMMEDIATELY invoke the cx-cli-setup skill (via /cx-cli-setup). To "
-                "self-install now, run the plugin's bundled bootstrap by its resolved absolute path "
-                "(its directory is empty in ${CLAUDE_PLUGIN_ROOT} in your shell, so use this literal "
-                "command):\n    " + _bootstrap_command_str("install")
+                "authenticated. IMMEDIATELY invoke the cx-cli-setup skill (via /cx-cli-setup). "
+                + _install_instruction
             ),
             reason_code="cx_absent",
             tool_name=tool,
@@ -865,6 +1013,13 @@ def cx_check():
     state = _version_state(identity)
     if state == "below":
         min_ver = ".".join(str(n) for n in _load_min_version())
+        _upgrade_instruction = (
+            _bootstrap_copilot_cli_instruction("upgrade") if _COPILOT_CLI_MODE else
+            "Invoke /cx-cli-setup (Phase 1b — Upgrade). To self-upgrade now, run "
+            "the plugin's bundled bootstrap by its resolved absolute path:\n    {0}".format(
+                _bootstrap_command_str("upgrade")
+            )
+        )
         _deny(
             reason=(
                 "The Checkmarx CLI (cx) is older than the required v{0} and cannot run the scanner "
@@ -873,16 +1028,18 @@ def cx_check():
             context=(
                 "cx is below the minimum supported version (v{0}). All agent actions are blocked "
                 "fail-closed — including `cx auth login`, which this old build may not support — until "
-                "cx is upgraded. Invoke /cx-cli-setup (Phase 1b — Upgrade). To self-upgrade now, run "
-                "the plugin's bundled bootstrap by its resolved absolute path:\n    {1}".format(
-                    min_ver, _bootstrap_command_str("upgrade")
-                )
+                "cx is upgraded. {1}".format(min_ver, _upgrade_instruction)
             ),
             reason_code="below_min",
             tool_name=tool,
             version_state="below",
         )
     if state == "unrunnable":
+        _reinstall_instruction = (
+            _bootstrap_copilot_cli_instruction("install") if _COPILOT_CLI_MODE else
+            "Invoke /cx-cli-setup. To reinstall now, run the plugin's bundled bootstrap "
+            "by its resolved absolute path:\n    " + _bootstrap_command_str("install")
+        )
         _deny(
             reason=(
                 "The Checkmarx CLI (cx) is on PATH but `cx version` did not run or did not report a "
@@ -890,9 +1047,8 @@ def cx_check():
             ),
             context=(
                 "`cx version` failed or returned no parseable version (corrupt install, wrong binary, "
-                "or a hung process). All agent actions are blocked fail-closed. Invoke /cx-cli-setup. "
-                "To reinstall now, run the plugin's bundled bootstrap by its resolved absolute path:\n    "
-                + _bootstrap_command_str("install")
+                "or a hung process). All agent actions are blocked fail-closed. "
+                + _reinstall_instruction
             ),
             reason_code="unrunnable",
             tool_name=tool,
@@ -1107,17 +1263,18 @@ def _fail_closed_on_crash():
 
 
 def main():
-    # _deny()/_allow_with_warning() raise SystemExit(0) with the decision JSON already printed —
-    # let it propagate. ANY other exception is an internal gate failure → still exit 0 after
-    # printing the fail-closed deny JSON (never an uncaught traceback / bare exit 1, which both
-    # Claude Code and Copilot CLI would surface as a generic, reason-less "hook errored").
+    # _deny()/_allow_with_warning() raise SystemExit with the decision JSON already printed.
+    # ANY other exception is an internal gate failure → still deny (fail-closed).
+    # Exit code follows the same client rule as _deny(): exit 0 for Claude Code, exit 1 for
+    # Copilot CLI — _fail_closed_on_crash() uses _COPILOT_CLI_MODE which is set before any
+    # deny path is reached (it is set right after bootstrap check, before any deny call).
     try:
         cx_check()
     except SystemExit:
         raise
     except BaseException:
         _fail_closed_on_crash()
-        sys.exit(0)
+        sys.exit(1 if _COPILOT_CLI_MODE else 0)
 
 
 if __name__ == "__main__":

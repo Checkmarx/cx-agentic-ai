@@ -58,6 +58,7 @@ def run(hook_input, *, which="cx", version_state="ok", authed=True,
         "scanner": cx_check._scanner_state,
         "read": cx_check._read_hook_input,
         "environ": cx_check.os.environ,
+        "copilot_cli_mode": cx_check._COPILOT_CLI_MODE,
     }
     cx_check.shutil.which = lambda name: which
     cx_check._version_state = lambda identity=None: version_state
@@ -85,6 +86,7 @@ def run(hook_input, *, which="cx", version_state="ok", authed=True,
         cx_check._scanner_state = orig["scanner"]
         cx_check._read_hook_input = orig["read"]
         cx_check.os.environ = orig["environ"]
+        cx_check._COPILOT_CLI_MODE = orig["copilot_cli_mode"]
 
     global LAST_OUTPUT
     LAST_OUTPUT = None
@@ -108,9 +110,26 @@ def write(content):
 
 
 # --- Copilot CLI tool-name helpers ---
+def copilot_real(tool_name, args_dict):
+    """Simulates the ACTUAL Copilot CLI hook stdin format confirmed from events.jsonl:
+    {sessionId, cwd, toolCalls:[{id, name, args: JSON_STRING}]}
+    The matcher in hooks-copilot-cli.json matches against toolCalls[0].name."""
+    import json as _json
+    return {
+        "sessionId": "test-session",
+        "cwd": "/workspace",
+        "toolCalls": [{"id": "toolu_test", "name": tool_name, "args": _json.dumps(args_dict)}]
+    }
+
+
 def copilot_command(command):
     """Simulates a Copilot CLI shell-command hook input (tool_name='command')."""
     return {"tool_name": "command", "tool_input": {"command": command}}
+
+
+def copilot_command_camel(command):
+    """Simulates Copilot CLI camelCase format (toolName/toolInput)."""
+    return {"toolName": "command", "toolInput": {"command": command}}
 
 
 def copilot_create(path="/x", content="x"):
@@ -118,9 +137,19 @@ def copilot_create(path="/x", content="x"):
     return {"tool_name": "create", "tool_input": {"file_path": path, "content": content}}
 
 
+def copilot_create_camel(path="/x", content="x"):
+    """Simulates Copilot CLI camelCase file-create (toolName/toolInput)."""
+    return {"toolName": "create", "toolInput": {"file_path": path, "content": content}}
+
+
 def copilot_edit(path="/x", old_str="x", new_str="y"):
     """Simulates a Copilot CLI file-edit hook input (tool_name='edit')."""
     return {"tool_name": "edit", "tool_input": {"file_path": path, "old_str": old_str, "new_str": new_str}}
+
+
+def copilot_edit_camel(path="/x", old_str="x", new_str="y"):
+    """Simulates Copilot CLI camelCase file-edit (toolName/toolInput)."""
+    return {"toolName": "edit", "toolInput": {"file_path": path, "old_str": old_str, "new_str": new_str}}
 
 
 class TestMissingCx(unittest.TestCase):
@@ -1471,10 +1500,58 @@ class TestCopilotCLIInputs(unittest.TestCase):
         self.assertIsNone(decision)
         self.assertEqual(code, 0)
 
-    def test_command_no_readonly_carveout(self):
-        # Copilot CLI 'command' tool is NOT 'Bash', so the readonly-command allowlist never fires.
-        # Even a plain `ls` via Copilot CLI's command tool is fully gated.
+    def test_command_readonly_carveout_applies(self):
+        # command tool shares the readonly allowlist with Bash — read-only commands
+        # (ls, cat, grep …) are allowed even when cx is absent, same as Claude's Bash tool.
         decision, code = run(copilot_command("ls -la"), which=None)
+        self.assertIsNone(decision)  # silent allow
+        self.assertEqual(code, 0)
+
+    # --- bootstrap carve-out works for command tool ---
+
+    def test_command_allows_bootstrap_install(self):
+        # Bootstrap carve-out fires for tool_name='command' (Copilot CLI), so
+        # the agent can self-install cx even when cx is absent — no manual step needed.
+        decision, code = run(copilot_command('bash "%s" install' % BOOTSTRAP), which=None)
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
+
+    def test_command_allows_bootstrap_upgrade(self):
+        decision, code = run(copilot_command('bash "%s" upgrade' % BOOTSTRAP), which=None)
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
+
+    def test_command_bootstrap_requires_mode(self):
+        # Bare bootstrap path with no install/upgrade mode is NOT the carve-out.
+        decision, code = run(copilot_command('bash "%s"' % BOOTSTRAP), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 0)
+
+    def test_command_bootstrap_rejects_chaining(self):
+        decision, code = run(copilot_command('bash "%s"; rm -rf /' % BOOTSTRAP), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 0)
+
+    # --- auth recovery works for command tool ---
+
+    def test_command_allows_cx_auth_when_unauthenticated(self):
+        # cx auth login via Copilot CLI command tool must be allowed while unauthenticated,
+        # so the agent can recover auth without developer running it manually.
+        decision, code = run(copilot_command("cx auth login"), authed=False)
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
+
+    def test_command_allows_cx_configure_when_unauthenticated(self):
+        decision, code = run(
+            copilot_command("cx configure set --prop-name cx_apikey --prop-value X"),
+            authed=False,
+        )
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
+
+    def test_command_auth_redirect_to_file_still_denied(self):
+        # Redirect guard applies to command tool too — token exfiltration blocked.
+        decision, code = run(copilot_command("cx auth login > /tmp/steal"), authed=False)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 0)
 
@@ -1535,6 +1612,50 @@ class TestCopilotCLIInputs(unittest.TestCase):
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 0)
 
+    # --- REAL Copilot CLI format: toolCalls[0].name + args JSON string ---
+
+    def test_real_format_glob_gates_cx_absent(self):
+        # 'glob' is the first tool seen in events.jsonl — gate fires for ALL tool names
+        # Real Copilot CLI format → _COPILOT_CLI_MODE=True → deny uses exit 1 (not 0)
+        decision, code = run(copilot_real("glob", {"pattern": "**/*.java"}), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 1)
+
+    def test_real_format_powershell_gates_cx_absent(self):
+        # 'powershell' is the Windows shell tool — confirmed from events.jsonl
+        # Real format → exit 1 for deny (Copilot CLI blocks on non-zero exit)
+        decision, code = run(copilot_real("powershell", {"command": "npm test"}), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 1)
+
+    def test_real_format_powershell_passes_when_ok(self):
+        decision, code = run(copilot_real("powershell", {"command": "npm test"}))
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
+
+    def test_real_format_powershell_bootstrap_allow(self):
+        # bootstrap carve-out must fire for powershell tool via the real format
+        decision, code = run(copilot_real("powershell", {"command": 'bash "%s" install' % BOOTSTRAP}), which=None)
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
+
+    def test_real_format_powershell_auth_recovery(self):
+        decision, code = run(copilot_real("powershell", {"command": "cx auth login"}), authed=False)
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
+
+    def test_real_format_create_gates_cx_absent(self):
+        # Real format → exit 1 for deny
+        decision, code = run(copilot_real("create", {"file_path": "/src/x.java", "content": "x"}), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 1)
+
+    def test_real_format_args_as_json_string_parsed_correctly(self):
+        # Verify _tool_input correctly parses args when it's a JSON string
+        inp = copilot_real("powershell", {"command": "cx auth login"})
+        self.assertEqual(cx_check._tool_name(inp), "powershell")
+        self.assertEqual(cx_check._tool_input(inp), {"command": "cx auth login"})
+
     # --- Copilot CLI vs Claude capability probe ---
 
     def test_capability_probes_include_copilot_cli(self):
@@ -1545,6 +1666,39 @@ class TestCopilotCLIInputs(unittest.TestCase):
             any("copilot-cli-pre-file-write" in p for p in probes_flat),
             "copilot-cli-pre-file-write not in _CAPABILITY_PROBES: %r" % probes_flat,
         )
+
+    # --- camelCase format (Copilot CLI may send toolName/toolInput) ---
+
+    def test_camel_command_gates_cx_absent(self):
+        decision, code = run(copilot_command_camel("npm test"), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 0)
+
+    def test_camel_command_allows_bootstrap(self):
+        # camelCase bootstrap must also be allowed — carve-out handles both formats.
+        decision, code = run(copilot_command_camel('bash "%s" install' % BOOTSTRAP), which=None)
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
+
+    def test_camel_command_allows_auth_recovery(self):
+        decision, code = run(copilot_command_camel("cx auth login"), authed=False)
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
+
+    def test_camel_create_gates_cx_absent(self):
+        decision, code = run(copilot_create_camel("/src/foo.py"), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 0)
+
+    def test_camel_create_passes_when_ok(self):
+        decision, code = run(copilot_create_camel("/src/foo.py"))
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
+
+    def test_camel_edit_gates_unauthenticated(self):
+        decision, code = run(copilot_edit_camel("/src/bar.py"), authed=False)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 0)
 
 
 if __name__ == "__main__":

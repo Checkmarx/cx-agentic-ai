@@ -2,7 +2,7 @@
 # Cross-platform launcher for cx_check.py — fail-closed. POSIX sh (no bashisms).
 #
 # Invoked by hooks.json as:              sh "${CLAUDE_PLUGIN_ROOT}/hooks/cx_check.sh"
-# Invoked by hooks-copilot-cli.json as:  sh "${COPILOT_CLI_PLUGIN_ROOT}/hooks/cx_check.sh"
+# Invoked by hooks-copilot-cli.json as:  sh "${COPILOT_CLI_PLUGIN_ROOT}/hooks/cx_check.sh" --copilot-cli
 #
 # Why `sh` and not `bash`: on Windows a bare `bash` resolves to the System32 WSL
 # launcher (C:\Windows\System32\bash.exe), which is handed a Windows file path it
@@ -13,17 +13,34 @@
 #
 # Exit-code contract (both Claude Code AND Copilot CLI): a PreToolUse "deny" is signaled
 # by EXIT 0 with a `hookSpecificOutput.permissionDecision:"deny"` JSON body on stdout —
-# NOT exit 2. Both clients discard stdout on a non-zero exit (Claude Code feeds stderr
-# text back as a generic error; Copilot CLI reports a generic "hook errored" with no
-# reason), so a real deny reason only ever reaches the agent via exit 0 + JSON. A crash
-# / no-Python condition still can't produce that JSON, so it exits 1 (a genuine hook
-# error) — every DECIDABLE outcome (allow or deny) uses exit 0.
+# NOT exit 2. Both clients signal a deny via exit 0 + JSON on stdout, but with DIFFERENT
+# JSON shapes: Claude Code reads a nested hookSpecificOutput wrapper; Copilot CLI reads a
+# FLAT JSON object with permissionDecision/permissionDecisionReason at the top level (per
+# https://docs.github.com/en/copilot/reference/hooks-reference). cx_check.py detects the
+# client via --copilot-cli flag (passed from hooks-copilot-cli.json) and emits the correct
+# shape. A crash / no-Python condition still exits 1 (a genuine hook error) — every
+# DECIDABLE outcome (allow or deny) uses exit 0.
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PY_SCRIPT="$SCRIPT_DIR/cx_check.py"
 
 # Capture stdin once: we inspect it (carve-out below) and replay it to Python.
 INPUT=$(cat)
+
+# DEBUG LOGGING — set CX_CHECK_DEBUG=1 to capture the raw stdin JSON and key decisions
+# to $HOME/.checkmarx/agent-logs/cx_check_debug.log. Lets you verify the exact field names
+# (toolName vs tool_name, toolInput vs tool_input) that the agent client actually sends.
+# Never enabled by default; has no effect on gate behaviour.
+if [ "${CX_CHECK_DEBUG:-0}" = "1" ]; then
+    _DEBUG_LOG="${CX_LOG_DIR:-${HOME}/.checkmarx/agent-logs}/cx_check_debug.log"
+    mkdir -p "$(dirname "$_DEBUG_LOG")" 2>/dev/null
+    printf '[cx_check.sh] %s stdin=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo ts-unavail)" "$INPUT" >> "$_DEBUG_LOG"
+fi
+
+# ALWAYS log for debugging — temporary, remove after diagnosis
+_DIAG_LOG="${HOME}/.checkmarx/agent-logs/cx_diag.log"
+mkdir -p "$(dirname "$_DIAG_LOG")" 2>/dev/null
+printf '[cx_check.sh diag] %s args=%s stdin=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo ts)" "$*" "$INPUT" >> "$_DIAG_LOG" 2>/dev/null
 
 # The shell-level bootstrap carve-out now lives INSIDE the no-Python branch below (search:
 # NO-PYTHON CARVE-OUT). When Python 3 IS present (the normal case on all three OSes),

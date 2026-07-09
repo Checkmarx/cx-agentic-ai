@@ -88,9 +88,19 @@ case "${1:-} ${2:-}" in
             . "$_CXRUN_DIR/_cx_bootstrap_match.sh"
             cx_is_bootstrap_command "$_CXRUN_INPUT" "$_CXRUN_DIR" && exit 0
         fi
-        cat <<'JSON'
+        # Detect Copilot CLI context from the subcommand name (contains "copilot-cli").
+        # Copilot CLI reads a flat JSON with permissionDecision at the top level; Claude Code
+        # reads the nested hookSpecificOutput wrapper. Emit the correct shape per client.
+        case "$*" in
+            *copilot-cli*)
+                printf '{"permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: cx CLI not found (not in CX_BINARY, canonical store, or PATH). This operation is BLOCKED fail-closed. Run /cx-cli-setup to install cx, then retry."}\n'
+                ;;
+            *)
+                cat <<'JSON'
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.","additionalContext":"Run /cx-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. All agent actions remain blocked until cx is available."}}
 JSON
+                ;;
+        esac
         exit 0
         ;;
     *stop* | *idle* | *prompt*)
