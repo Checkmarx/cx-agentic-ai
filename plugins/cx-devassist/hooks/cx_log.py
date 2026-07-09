@@ -77,6 +77,14 @@ _EVENTS = {
         "result": _as_bool,
         "version_state": _VERSION_STATES,
     },
+    "scan_decision": {
+        # The stage-2 native `cx hooks claude-pre-*` scanner's own allow/deny — distinct from
+        # "gate_decision" (the stage-1 readiness gate). Never carries the finding/reason text
+        # itself, only the outcome, so a real vulnerability's details never reach this log.
+        "decision": _enum({"allow", "deny"}),
+        "tool_name": _token,
+        "exit_code": _as_int,
+    },
 }
 
 
@@ -165,7 +173,7 @@ def log_event(event, **fields):
         if schema is None:
             return
         record = {
-            "ts": int(time.time()),
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "assistant": _assistant(),
             "plugin_version": _plugin_version(),
             "os": _os_name(),
@@ -188,3 +196,26 @@ def log_event(event, **fields):
     except Exception:
         # Logging must NEVER break the gate.
         return
+
+
+if __name__ == "__main__":
+    # CLI entry point for callers outside Python (cx_run.sh's stage-2 scanner wrapper): a caller
+    # process passes `event key=value key=value ...` as argv, never as a shell-interpolated string,
+    # so a hostile value can't reach a shell. Same guarantees as log_event: never raises, drops
+    # anything not on the per-event allowlist.
+    import sys
+
+    try:
+        _event = sys.argv[1] if len(sys.argv) > 1 else ""
+        _fields = dict(_arg.split("=", 1) for _arg in sys.argv[2:] if "=" in _arg)
+        # argv values are always strings; exit_code's coercer (_as_int) requires a real int, so
+        # convert here rather than loosen that allowlist gate. A non-numeric value is left as-is
+        # and simply dropped by the coercer, same as any other bad exit_code.
+        if "exit_code" in _fields:
+            try:
+                _fields["exit_code"] = int(_fields["exit_code"])
+            except ValueError:
+                pass
+        log_event(_event, **_fields)
+    except Exception:
+        pass
