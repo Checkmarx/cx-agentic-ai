@@ -397,7 +397,7 @@ try {
         [Environment]::SetEnvironmentVariable('PATH', \$newPath, 'User')
     }
 } catch {
-    Write-Warning ('Could not persist the canonical store on your User PATH: ' + \$_.Exception.Message + '. cx is installed and the security gate resolves it by absolute path regardless; only bare `cx` in a new terminal is affected (add ' + \$store + ' to PATH manually if you want it).')
+    Write-Warning ('Could not persist the canonical store on your User PATH: ' + \$_.Exception.Message + '. cx is installed and the security gate resolves it by absolute path regardless; only bare \`cx\` in a new terminal is affected (add ' + \$store + ' to PATH manually if you want it).')
 }
 Write-Output \$dest
 " | tr -d '\r'
