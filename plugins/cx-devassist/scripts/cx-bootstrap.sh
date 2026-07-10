@@ -29,9 +29,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/cx-path-probe.sh" 2>/dev/null \
     || { printf 'ERROR: missing helper beside this script: cx-path-probe.sh\n' >&2; exit 1; }
 
+# Shared version + capability decision for `cx mcp bridge` — the SAME decision hooks/cx_run.sh
+# makes before spawning the MCP bridge, so install-time verification and MCP-spawn-time gating can
+# never drift into disagreeing about what counts as a capable cx. POSIX `sh` (sourced fine under
+# bash too) — own unit-tested module (scripts/test_cx_mcp_guard.sh).
+# shellcheck source=cx-mcp-guard.sh
+. "$SCRIPT_DIR/cx-mcp-guard.sh" 2>/dev/null \
+    || { printf 'ERROR: missing helper beside this script: cx-mcp-guard.sh\n' >&2; exit 1; }
+
 # Numeric floor only (capability is decided by the gate's probe, not this number). Keep IDENTICAL
 # to scripts/cx-min-version and the fallback in hooks/cx_check.py. (search marker: CX_MIN_VERSION)
-MIN_CX_VERSION_FALLBACK="2.3.54"
+MIN_CX_VERSION_FALLBACK="2.3.55"
 
 GITHUB_RELEASES="https://github.com/Checkmarx/ast-cli/releases"
 GITHUB_LATEST="$GITHUB_RELEASES/latest/download"
@@ -81,19 +89,6 @@ load_min_version() {
         done < "$f"
     fi
     printf '%s' "$MIN_CX_VERSION_FALLBACK"
-}
-
-# Compare dotted versions: prints "ok" if $1 >= $2, else "below".
-version_ge() {
-    local have="$1" want="$2" IFS=.
-    local -a h=($have) w=($want)
-    local i
-    for i in 0 1 2; do
-        local hv="${h[i]:-0}" wv="${w[i]:-0}"
-        ((10#$hv > 10#$wv)) && { printf 'ok'; return; }
-        ((10#$hv < 10#$wv)) && { printf 'below'; return; }
-    done
-    printf 'ok'
 }
 
 # ---------------------------------------------------------------------------------------
@@ -408,29 +403,37 @@ invalidate_version_cache() {
 }
 
 verify() {
-    local cx_path="$1" min="$2" out parsed cx_bin
+    local cx_path="$1" min="$2" cx_bin have state
     # Prefer the just-placed binary; fall back to PATH resolution.
     if [[ -n "$cx_path" && -x "$cx_path" ]]; then
-        out="$("$cx_path" version 2>&1 || true)"; cx_bin="$cx_path"
+        cx_bin="$cx_path"
     else
-        out="$(cx version 2>&1 || true)"; cx_bin="cx"
+        cx_bin="cx"
     fi
-    if [[ "$out" =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
-        parsed="${BASH_REMATCH[1]}"
-        [[ "$(version_ge "$parsed" "$min")" == "ok" ]] \
-            || die "placed cx reports $parsed, still below required $min — check the release asset."
-    elif printf '%s' "$out" | grep -qiw dev; then
-        : # dev build — numeric gate bypassed
-    else
-        die "could not verify cx version after placement. Output was: $out"
-    fi
-    # CAPABILITY check — a numeric/dev match does NOT guarantee the agent-security subcommands
-    # exist: a PUBLIC min-version build can still lack `cx mcp bridge` / `cx hooks claude-*`. Without
-    # this check the bootstrap would report SUCCESS, then the fail-closed gate would classify cx
-    # 'incapable' and block every tool call with no obvious cause. Fail LOUDLY here instead.
-    "$cx_bin" mcp bridge --help >/dev/null 2>&1 \
-        || die "placed cx is missing 'cx mcp bridge' — this build cannot run the remediation MCP. \
+    # Version + `cx mcp bridge` capability: the SAME decision hooks/cx_run.sh makes before spawning
+    # the MCP bridge (cx-mcp-guard.sh, sourced above) — one source of truth instead of a second,
+    # driftable copy of the version-compare + capability-probe logic.
+    have="$(cx_mcp_parse_semver "$("$cx_bin" version 2>&1)" || true)"
+    state="$(cx_mcp_guard_state "$cx_bin" "$SCRIPT_DIR/cx-min-version" "$min")"
+    case "$state" in
+        ok | dev)
+            : # numeric floor cleared (or a `dev` build, which bypasses it) — fall through
+            ;;
+        below)
+            die "placed cx reports ${have:-an unparseable version}, still below required $min — check the release asset."
+            ;;
+        incapable)
+            # A numeric/dev match does NOT guarantee the agent-security subcommands exist: a PUBLIC
+            # min-version build can still lack `cx mcp bridge`. Without this check the bootstrap would
+            # report SUCCESS, then the fail-closed gate would classify cx 'incapable' and block every
+            # tool call with no obvious cause. Fail LOUDLY here instead.
+            die "placed cx is missing 'cx mcp bridge' — this build cannot run the remediation MCP. \
 A capability-complete cx release is required (the public release may predate it; see scripts/cx-min-version)."
+            ;;
+        *)
+            die "could not verify cx version after placement (state: $state)."
+            ;;
+    esac
     "$cx_bin" hooks claude-pre-tool-use --help >/dev/null 2>&1 \
         || die "placed cx is missing 'cx hooks claude-pre-tool-use' — this build cannot run the \
 security scanner. A capability-complete cx release is required."

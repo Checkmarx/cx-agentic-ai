@@ -26,4 +26,20 @@ since the live `cx mcp bridge` holds a handle). When it finishes:
 - The **running MCP bridge keeps the old code until `/reload-plugins`** re-spawns it against the
   upgraded binary (see `references/mcp.md`).
 
+**Before doing anything else, reconnect the MCP now — do not skip this even if auth was already
+valid before the upgrade.** The upgrade only replaces the binary on disk; the MCP subprocess
+Claude Code already spawned keeps running the OLD binary until it is explicitly re-spawned, and
+`/reload-plugins` alone does not reconnect an already-open session's MCP connection. Run, in
+order:
+
+```
+/reload-plugins
+/mcp
+```
+
+Confirm `Checkmarx` shows **Connected** in the `/mcp` output before continuing — this is required
+every time this upgrade path runs, not just when the full setup flow reaches its own completion
+step. Skipping it leaves the remediation MCP silently running the old, below-minimum binary even
+though `cx version` now reports the upgraded one.
+
 Then return to **Phase 1a** to confirm the new version, and continue to Phase 2 if needed.

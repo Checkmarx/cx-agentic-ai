@@ -1,7 +1,7 @@
 """Packaging invariants — guard the Phase-4 release contract (stdlib only).
 
 These fail fast if the plugin's identity ever drifts: a single version identity, no redundant
-`mcpServers` declaration (the `.mcp.json` is auto-discovered), the three synced CX_MIN_VERSION
+`mcpServers` declaration (the `.mcp.json` is auto-discovered), the four synced CX_MIN_VERSION
 sites agreeing, the marketplace pointing at a real plugin, and — on a tag build — the release tag
 matching `plugin.json`.
 
@@ -57,7 +57,7 @@ class TestMarketplace(unittest.TestCase):
 
 
 class TestMinVersionSync(unittest.TestCase):
-    """The numeric floor lives in three synced sites (search marker: CX_MIN_VERSION)."""
+    """The numeric floor lives in four synced sites (search marker: CX_MIN_VERSION)."""
 
     def _canonical(self):
         for line in _read(_PLUGIN_ROOT, "scripts", "cx-min-version").splitlines():
@@ -66,7 +66,7 @@ class TestMinVersionSync(unittest.TestCase):
                 return s
         self.fail("no version line found in scripts/cx-min-version")
 
-    def test_three_sites_agree(self):
+    def test_four_sites_agree(self):
         canon = self._canonical()
         self.assertRegex(canon, _SEMVER)
 
@@ -80,6 +80,11 @@ class TestMinVersionSync(unittest.TestCase):
         m2 = re.search(r'MIN_CX_VERSION_FALLBACK="([^"]+)"', sh)
         self.assertIsNotNone(m2, "cx-bootstrap.sh: MIN_CX_VERSION_FALLBACK not found")
         self.assertEqual(m2.group(1), canon, "cx-bootstrap.sh fallback != cx-min-version")
+
+        guard = _read(_PLUGIN_ROOT, "scripts", "cx-mcp-guard.sh")
+        m3 = re.search(r'_CXMCP_FALLBACK="\$\{2:-([^}]+)\}"', guard)
+        self.assertIsNotNone(m3, "cx-mcp-guard.sh: cx_mcp_load_min_version fallback not found")
+        self.assertEqual(m3.group(1), canon, "cx-mcp-guard.sh fallback != cx-min-version")
 
 
 class TestReleaseTag(unittest.TestCase):
@@ -103,6 +108,7 @@ class TestShippedBytes(unittest.TestCase):
         ("scripts", "cx-bootstrap.sh"),
         ("scripts", "cx-asset-resolver.sh"),
         ("scripts", "cx-path-probe.sh"),
+        ("scripts", "cx-mcp-guard.sh"),
         ("scripts", "cx-min-version"),
         ("hooks", "cx_check.sh"),
         ("hooks", "cx_check.py"),

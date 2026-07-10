@@ -831,6 +831,78 @@ class TestCxBinaryOverride(unittest.TestCase):
         finally:
             cx_check._canonical_cx = orig
 
+    def test_exe_with_tier_reports_binary(self):
+        p = self._make_exe()
+        exe, tier = self._with_env({"CX_BINARY": p}, cx_check._cx_exe_with_tier)
+        self.assertEqual(exe, p)
+        self.assertEqual(tier, "binary")
+
+    def test_exe_with_tier_reports_canonical(self):
+        p = self._make_exe()
+        orig = cx_check._canonical_cx
+        cx_check._canonical_cx = lambda: p
+        try:
+            exe, tier = self._with_env({}, cx_check._cx_exe_with_tier)
+        finally:
+            cx_check._canonical_cx = orig
+        self.assertEqual(exe, p)
+        self.assertEqual(tier, "canonical")
+
+    def test_exe_with_tier_reports_path(self):
+        orig = cx_check._canonical_cx
+        cx_check._canonical_cx = lambda: None
+        try:
+            exe, tier = self._with_env({}, cx_check._cx_exe_with_tier)
+        finally:
+            cx_check._canonical_cx = orig
+        self.assertEqual(exe, "cx")
+        self.assertEqual(tier, "path")
+
+    def test_pin_note_empty_for_non_binary_tiers(self):
+        self.assertEqual(cx_check._cx_binary_pin_note("canonical"), "")
+        self.assertEqual(cx_check._cx_binary_pin_note("path"), "")
+
+    def test_pin_note_present_for_binary_tier(self):
+        note = cx_check._cx_binary_pin_note("binary")
+        self.assertIn("CX_BINARY", note)
+        self.assertIn("will NOT fix this", note)
+
+    def test_below_min_deny_notes_cx_binary_pin_when_pinned(self):
+        # A below-min cx resolved via CX_BINARY: re-running the upgrade bootstrap would NOT fix it
+        # (the bootstrap only ever writes the canonical store) — the deny must say so explicitly.
+        p = self._make_exe()
+        decision, code = run(bash("npm test"), version_state="below", env={"CX_BINARY": p})
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+        ctx = LAST_OUTPUT["additionalContext"]
+        self.assertIn("CX_BINARY is pinned to this exact binary", ctx)
+        self.assertIn("will NOT fix this", ctx)
+
+    def test_below_min_deny_omits_cx_binary_note_when_not_pinned(self):
+        # No CX_BINARY set (this test harness's stubbed environ has no HOME/LOCALAPPDATA either, so
+        # resolution falls through to the PATH tier) — the CX_BINARY-specific note must NOT appear.
+        decision, code = run(bash("npm test"), version_state="below")
+        self.assertEqual(decision, "deny")
+        ctx = LAST_OUTPUT["additionalContext"]
+        self.assertNotIn("CX_BINARY is pinned", ctx)
+
+    def test_incapable_deny_notes_already_pinned_when_cx_binary_set(self):
+        # The generic "(If the developer has an internal capable build, they can set CX_BINARY to
+        # its absolute path.)" suggestion is confusing when CX_BINARY is ALREADY set to the same
+        # incapable binary — the deny must clarify that a DIFFERENT build is needed.
+        p = self._make_exe()
+        decision, code = run(bash("npm test"), version_state="incapable", env={"CX_BINARY": p})
+        self.assertEqual(decision, "deny")
+        ctx = LAST_OUTPUT["additionalContext"]
+        self.assertIn("CX_BINARY is ALREADY set", ctx)
+        self.assertIn("DIFFERENT, capable build", ctx)
+
+    def test_incapable_deny_omits_pin_clarification_when_not_pinned(self):
+        decision, code = run(bash("npm test"), version_state="incapable")
+        self.assertEqual(decision, "deny")
+        ctx = LAST_OUTPUT["additionalContext"]
+        self.assertNotIn("CX_BINARY is ALREADY set", ctx)
+
     def test_canonical_store_resolves_when_not_on_path(self):
         # cx ONLY in the canonical store (not on PATH), capable + authed → the gate passes with no
         # restart. This is the core clean-flow property: resolve by absolute path, no PATH dependency.
