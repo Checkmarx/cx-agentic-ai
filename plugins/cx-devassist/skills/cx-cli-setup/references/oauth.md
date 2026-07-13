@@ -51,19 +51,31 @@ login`.** On a first-install session `cx` is **not on PATH**, so a **bare** `cx 
 path** (the canonical store — `~/.checkmarx/bin/cx` on Unix, `%LOCALAPPDATA%\Checkmarx\cx\cx.exe` on
 Windows — while cx isn't yet on PATH). Take that exact cx invocation and append the two login flags:
 
+**Bash tool (Claude Code / macOS / Linux):**
 ```bash
 # Use the resolved cx path from the deny message (bare `cx` works only once it is on PATH):
 "$HOME/.checkmarx/bin/cx" auth login --base-auth-uri <your Checkmarx One URL> --tenant <tenant> 1>/dev/null
 ```
 
-**Run this YOURSELF with the Bash tool — do NOT hand it to the developer with the `!` prefix.** This
+**PowerShell tool (Copilot CLI on Windows):**
+```powershell
+# Use the & call operator (required for paths with spaces) and $null to suppress stdout:
+& "C:/Users/<you>/AppData/Local/Checkmarx/cx/cx.exe" auth login --base-auth-uri <your Checkmarx One URL> --tenant <tenant> 1>$null
+```
+Replace the path above with the resolved cx path shown in the gate's deny message.
+The `&` call operator is mandatory in PowerShell when invoking an executable by absolute path.
+Use `1>$null` (not `1>/dev/null`) to suppress the live token on PowerShell.
+Run this with the **powershell tool**, not the Bash tool.
+
+**Run this YOURSELF — do NOT hand it to the developer with the `!` prefix.** This
 is the OAuth path: the agent runs the resolved login command itself (unlike an API key, which the
 *developer* sets because it is a plaintext secret). The security gate's auth-recovery carve-out admits
-`cx auth …` / `cx configure …` commands — including the resolved absolute-path form the deny message
-hands you — through even while it is blocking every other action (that is exactly why the carve-out
-exists), so you never need `!` here. The browser opens automatically on the developer's machine; they
-only complete the login there. If an earlier Bash call was denied by the gate, that does NOT mean the
-resolved `cx auth login` will be — the recovery commands are allowed; run it.
+`cx auth …` / `cx configure …` commands — including the resolved absolute-path form and the PowerShell
+`& "abs-path" auth …` form the deny message hands you — through even while it is blocking every other
+action (that is exactly why the carve-out exists), so you never need `!` here. The browser opens
+automatically on the developer's machine; they only complete the login there. If an earlier tool call
+was denied by the gate, that does NOT mean the resolved `cx auth login` will be — the recovery commands
+are allowed; run it.
 
 - The default browser opens automatically. Tell the developer: *"Your browser is opening — complete
   the Checkmarx login and MFA there. You have about 5 minutes."*

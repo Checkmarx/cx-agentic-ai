@@ -94,8 +94,17 @@ def run(hook_input, *, which="cx", version_state="ok", authed=True,
     text = out.getvalue().strip()
     if text:
         try:
-            LAST_OUTPUT = json.loads(text)["hookSpecificOutput"]
-            decision = LAST_OUTPUT["permissionDecision"]
+            parsed = json.loads(text)
+            if "hookSpecificOutput" in parsed:
+                # Claude Code format: nested under hookSpecificOutput
+                LAST_OUTPUT = parsed["hookSpecificOutput"]
+                decision = LAST_OUTPUT["permissionDecision"]
+            elif "permissionDecision" in parsed:
+                # Copilot CLI flat format: permissionDecision at top level
+                LAST_OUTPUT = parsed
+                decision = parsed["permissionDecision"]
+            else:
+                decision = "<unparseable:%s>" % text
         except (ValueError, KeyError):
             decision = "<unparseable:%s>" % text
     return decision, code
@@ -1616,17 +1625,17 @@ class TestCopilotCLIInputs(unittest.TestCase):
 
     def test_real_format_glob_gates_cx_absent(self):
         # 'glob' is the first tool seen in events.jsonl — gate fires for ALL tool names
-        # Real Copilot CLI format → _COPILOT_CLI_MODE=True → deny uses exit 1 (not 0)
+        # Real Copilot CLI format → _COPILOT_CLI_MODE=True → flat JSON deny + exit 0
         decision, code = run(copilot_real("glob", {"pattern": "**/*.java"}), which=None)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 0)
 
     def test_real_format_powershell_gates_cx_absent(self):
         # 'powershell' is the Windows shell tool — confirmed from events.jsonl
-        # Real format → exit 1 for deny (Copilot CLI blocks on non-zero exit)
+        # Real format → flat JSON deny + exit 0 (not exit 1 — flat JSON is strictly better UX)
         decision, code = run(copilot_real("powershell", {"command": "npm test"}), which=None)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 0)
 
     def test_real_format_powershell_passes_when_ok(self):
         decision, code = run(copilot_real("powershell", {"command": "npm test"}))
@@ -1645,16 +1654,62 @@ class TestCopilotCLIInputs(unittest.TestCase):
         self.assertEqual(code, 0)
 
     def test_real_format_create_gates_cx_absent(self):
-        # Real format → exit 1 for deny
+        # Real format → flat JSON deny + exit 0
         decision, code = run(copilot_real("create", {"file_path": "/src/x.java", "content": "x"}), which=None)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 0)
 
     def test_real_format_args_as_json_string_parsed_correctly(self):
         # Verify _tool_input correctly parses args when it's a JSON string
         inp = copilot_real("powershell", {"command": "cx auth login"})
         self.assertEqual(cx_check._tool_name(inp), "powershell")
         self.assertEqual(cx_check._tool_input(inp), {"command": "cx auth login"})
+
+    def test_powershell_auth_recovery_with_call_operator(self):
+        """Copilot CLI on Windows: `& "abs-cx-path" auth login 1>$null` must be admitted."""
+        orig = cx_check._canonical_cx
+        p = r"C:\Users\test\AppData\Local\Checkmarx\cx\cx.exe"
+        cx_check._canonical_cx = lambda: p
+        try:
+            fwd = p.replace("\\", "/")
+            inp = {"toolName": "powershell", "toolArgs": json.dumps(
+                {"command": '& "{}" auth login --base-auth-uri https://eu.ast.checkmarx.net --tenant cx 1>$null'.format(fwd)})}
+            self.assertTrue(cx_check._is_powershell_auth_recovery_command(inp))
+            # Ensure it's actually admitted through the full gate
+            decision, code = run(inp, authed=False)
+            self.assertIsNone(decision)
+            self.assertEqual(code, 0)
+        finally:
+            cx_check._canonical_cx = orig
+
+    def test_powershell_auth_recovery_rejects_chaining(self):
+        """Chaining after `& cx auth ...` must be rejected."""
+        orig = cx_check._canonical_cx
+        p = r"C:\Users\test\AppData\Local\Checkmarx\cx\cx.exe"
+        cx_check._canonical_cx = lambda: p
+        try:
+            fwd = p.replace("\\", "/")
+            # Semicolon after auth command → reject
+            inp = {"toolName": "powershell", "toolArgs": json.dumps(
+                {"command": '& "{}" auth login; Remove-Item -Force evil'.format(fwd)})}
+            self.assertFalse(cx_check._is_powershell_auth_recovery_command(inp))
+            # Pipe → reject
+            inp2 = {"toolName": "powershell", "toolArgs": json.dumps(
+                {"command": '& "{}" auth login | Out-Null'.format(fwd)})}
+            self.assertFalse(cx_check._is_powershell_auth_recovery_command(inp2))
+        finally:
+            cx_check._canonical_cx = orig
+
+    def test_powershell_auth_recovery_rejects_wrong_cx_path(self):
+        """A different cx path must not be admitted."""
+        orig = cx_check._canonical_cx
+        cx_check._canonical_cx = lambda: r"C:\real\cx.exe"
+        try:
+            inp = {"toolName": "powershell", "toolArgs": json.dumps(
+                {"command": r'& "C:\attacker\cx.exe" auth login 1>$null'})}
+            self.assertFalse(cx_check._is_powershell_auth_recovery_command(inp))
+        finally:
+            cx_check._canonical_cx = orig
 
     # --- Copilot CLI vs Claude capability probe ---
 

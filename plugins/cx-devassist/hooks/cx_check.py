@@ -256,8 +256,15 @@ def _cx_bash_token():
 
 def _cx_recovery_command_str(args):
     """A ready-to-run `cx auth …` / `cx configure …` recovery command using the gate's resolved cx
-    (absolute path when cx isn't yet on PATH). Mirrors _bootstrap_command_str, which likewise embeds a
-    resolved absolute path so the agent never needs ${CLAUDE_PLUGIN_ROOT} / cx on PATH."""
+    (absolute path when cx isn't yet on PATH). In Copilot CLI mode on Windows the command uses the
+    PowerShell `&` call operator and `1>$null` null-sink — both are needed for the gate's
+    PowerShell auth-recovery carve-out to admit the command."""
+    if _COPILOT_CLI_MODE and os.name == "nt":
+        exe = _cx_exe()
+        if os.path.isabs(exe):
+            # PowerShell form: `& "abs/path/cx.exe" auth … 1>$null`
+            path_token = '"{0}"'.format(exe.replace("\\", "/"))
+            return "& {0} {1} 1>$null".format(path_token, args)
     return "{0} {1}".format(_cx_bash_token(), args)
 
 
@@ -769,15 +776,21 @@ def _bash_command(hook_input):
     return command if isinstance(command, str) else ""
 
 
-# The ONLY redirect SAFE inside an allow carve-out: suppression to the shell's null device,
-# `/dev/null` (the oauth.md-mandated `1>/dev/null`, with an optional fd or `>>`). The carve-out only
-# ever matches a Bash tool command, whose shell is bash / Git-Bash — where `/dev/null` is the null
-# device but `NUL` / `$null` are ORDINARY files, so those are NOT safe here. The null-device name must
-# be a complete shell token — `(?=\s|$)`, not `\b` — so a real file whose name merely STARTS with it
-# (`/dev/null.bak`) is not mistaken for suppression. ANY other redirect could write the command's
-# stdout — which for `cx auth login` is the LIVE token — to a real file, so it disqualifies the
-# carve-out. (fd-dups like `2>&1` contain `&` and are already rejected by _SHELL_CHAINING.)
+# The ONLY redirect SAFE inside an allow carve-out: suppression to the shell's null device.
+# Bash/Git Bash: `/dev/null` (the oauth.md-mandated `1>/dev/null`, with an optional fd or `>>`).
+# The null-device name must be a complete shell token — `(?=\s|$)`, not `\b` — so a real file
+# whose name merely STARTS with it (`/dev/null.bak`) is not mistaken for suppression. ANY other
+# redirect could write the command's stdout — which for `cx auth login` is the LIVE token — to a
+# real file, so it disqualifies the carve-out. (fd-dups like `2>&1` contain `&` and are already
+# rejected by _SHELL_CHAINING.) Note: `NUL` / `$null` are ORDINARY files in bash, so they are NOT
+# safe to allow here — they are handled separately for PowerShell by _is_powershell_auth_recovery_command.
 _NULL_REDIRECT_RE = re.compile(r'(?:&|\d)?(?:>>?|<)\s*/dev/null(?=\s|$)')
+
+# PowerShell null-sink redirects: `1>$null`, `>$null`, `2>$null`, `>NUL`, etc.
+# Safe to allow in the PowerShell auth-recovery carve-out — they discard stdout only (where the
+# live token appears) and leave stderr attached. NOT used with the bash carve-out because `$null`
+# and `NUL` are ordinary filenames in bash/Git Bash.
+_PS_NULL_REDIRECT_RE = re.compile(r'(?:\d)?>>?\s*(?:\$null|NUL)(?=\s|$)', re.IGNORECASE)
 
 
 def _has_unsafe_redirect(command):
@@ -805,13 +818,55 @@ def _bare_bash_command(hook_input):
     return command
 
 
+def _is_powershell_auth_recovery_command(hook_input):
+    """PowerShell-specific auth recovery: allows `& "abs-cx-path" auth|configure …` with an
+    optional PowerShell null-sink redirect (`1>$null` / `1>NUL`).
+    The `&` call operator is PowerShell's way of invoking executables whose path contains spaces;
+    it is NOT a shell-chaining token in this context — it is mandatory syntax. The regular
+    _bare_bash_command guard rejects it because `&` is in _SHELL_CHAINING (which is correct for the
+    Bash tool), so we handle the PowerShell form here instead.
+    Security: pinned to the gate's OWN resolved cx (_cx_exe) — never an attacker-chosen path; no
+    other chaining tokens (`;`, `|`, backtick, `$(`, newline) are allowed after the call operator
+    and null-redirect are stripped."""
+    if _tool_name(hook_input).lower() != "powershell":
+        return False
+    command = _bash_command(hook_input)
+    if not command:
+        return False
+    # Strip trailing PowerShell null-sink redirect(s) — safe stdout suppression only.
+    stripped = _PS_NULL_REDIRECT_RE.sub("", command).rstrip()
+    s = stripped.lstrip()
+    # Must start with `& ` (PowerShell call operator + space).
+    if not s.startswith("& "):
+        return False
+    after_amp = s[2:].lstrip()
+    # No shell-chaining tokens allowed after the `&` operator (exclude `&` itself — already consumed).
+    for tok in _SHELL_CHAINING:
+        if tok != "&" and tok in after_amp:
+            return False
+    # Must be `"abs-cx-path" auth|configure …` pinned to the gate's resolved cx.
+    exe = _cx_exe()
+    if not os.path.isabs(exe):
+        return False
+    # Accept both forward-slash and backslash path forms (the agent may use either on Windows).
+    for path_form in (exe.replace("\\", "/"), exe):
+        tok_re = re.escape(path_form)
+        if re.match(r'"?' + tok_re + r'"?\s+(?:auth|configure)\b', after_amp, re.IGNORECASE):
+            return True
+    return False
+
+
 def _is_auth_recovery_command(hook_input):
     """True for a credential-recovery command (`cx auth …` / `cx configure …`) that passes the shared
     bare-command guard — the path that must run even when unauthenticated so the auth gate never blocks
     the command that fixes auth. Accepts the BARE form (`cx auth …`, for later sessions / manual install
     where cx is on PATH) AND the resolved ABSOLUTE-path form the deny messages emit (`"<cx>" auth …`) so
     cx resolves on a first-install session before it is on PATH. The absolute form is pinned to the
-    gate's OWN resolved cx (_cx_exe) — never an attacker-chosen path."""
+    gate's OWN resolved cx (_cx_exe) — never an attacker-chosen path.
+    Also handles the PowerShell `& "abs-cx-path" auth …` form used by Copilot CLI on Windows."""
+    # PowerShell-specific form: `& "abs-cx-path" auth|configure …` with optional $null redirect.
+    if _is_powershell_auth_recovery_command(hook_input):
+        return True
     command = _bare_bash_command(hook_input)
     if command is None:
         return False
