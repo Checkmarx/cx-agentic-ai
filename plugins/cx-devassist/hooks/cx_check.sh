@@ -42,6 +42,7 @@ _DIAG_LOG="${HOME}/.checkmarx/agent-logs/cx_diag.log"
 mkdir -p "$(dirname "$_DIAG_LOG")" 2>/dev/null
 printf '[cx_check.sh diag] %s args=%s stdin=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo ts)" "$*" "$INPUT" >> "$_DIAG_LOG" 2>/dev/null
 
+
 # The shell-level bootstrap carve-out now lives INSIDE the no-Python branch below (search:
 # NO-PYTHON CARVE-OUT). When Python 3 IS present (the normal case on all three OSes),
 # cx_check.py's strict _is_bootstrap_command is the AUTHORITATIVE matcher, so this coarse shell

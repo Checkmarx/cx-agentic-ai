@@ -1235,6 +1235,61 @@ class TestDenyVerdictSchema(unittest.TestCase):
         self._assert_schema(json.loads(out))
 
 
+class TestDenyVerdictSchema(unittest.TestCase):
+    """One fail-closed verdict SCHEMA, four emitters across two languages. The two shell heredocs run
+    BECAUSE Python/cx is absent, so they cannot share the Python emitter's code — this contract test
+    pins all four to the same JSON shape + exit 2, so a schema change can't silently diverge (the A2
+    hand-copied-JSON risk)."""
+
+    def _assert_schema(self, obj):
+        self.assertIsInstance(obj, dict)
+        hso = obj.get("hookSpecificOutput")
+        self.assertIsInstance(hso, dict, "missing hookSpecificOutput")
+        self.assertEqual(hso.get("hookEventName"), "PreToolUse")
+        self.assertEqual(hso.get("permissionDecision"), "deny")
+        self.assertTrue(hso.get("permissionDecisionReason"), "reason must be non-empty")
+        self.assertTrue(hso.get("additionalContext"), "context must be non-empty")
+
+    def test_python_deny_emitter(self):
+        decision, code = run(write("x"), which=None)  # cx absent → _deny(cx_absent)
+        self.assertEqual((decision, code), ("deny", 0))
+        self._assert_schema({"hookSpecificOutput": LAST_OUTPUT})
+
+    def test_python_crash_emitter(self):
+        # _fail_closed_on_crash prints the deny verdict; main() is what maps it to exit 2.
+        out = io.StringIO()
+        with redirect_stdout(out):
+            cx_check._fail_closed_on_crash()
+        self._assert_schema(json.loads(out.getvalue()))
+
+    def _run_sh(self, argv, stdin, extra_env=None):
+        bindir = tempfile.mkdtemp()
+        for tool in ("sh", "cat", "dirname", "tr"):
+            src = shutil.which(tool)
+            if not src:
+                self.skipTest("missing %s on PATH" % tool)
+            os.symlink(src, os.path.join(bindir, tool))
+        env = {"PATH": bindir, "PYTHONUTF8": "1", "HOME": "/nonexistent"}
+        if extra_env:
+            env.update(extra_env)
+        proc = subprocess.run([os.path.join(bindir, "sh")] + argv, input=stdin,
+                              capture_output=True, timeout=30, env=env)
+        return proc.returncode, proc.stdout.decode("utf-8", "replace")
+
+    @unittest.skipUnless(SH and os.name != "nt", "needs POSIX sh + symlinks (Windows → manual)")
+    def test_shell_no_python_emitter(self):
+        code, out = self._run_sh([CX_CHECK_SH], json.dumps({"tool_name": "Write"}).encode())
+        self.assertEqual(code, 2)
+        self._assert_schema(json.loads(out))
+
+    @unittest.skipUnless(SH and os.name != "nt", "needs POSIX sh + symlinks (Windows → manual)")
+    def test_shell_no_cx_emitter(self):
+        cxrun = os.path.join(_HOOKS_DIR, "cx_run.sh")
+        code, out = self._run_sh([cxrun, "hooks", "claude-pre-file-write"], b"", {"CX_BINARY": ""})
+        self.assertEqual(code, 2)
+        self._assert_schema(json.loads(out))
+
+
 class TestLoggingWiring(unittest.TestCase):
     """The gate emits redacted gate_decision events; logging must not change the decision."""
 

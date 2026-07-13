@@ -60,8 +60,10 @@ cx_is_bootstrap_command() {
             esac
             for _cxbm_bp in "$_cxbm_boot_posix" "$_cxbm_boot_win"; do
                 [ -n "$_cxbm_bp" ] || continue
-                # Exact sanctioned shape ONLY: the command value is precisely
                 # Exact sanctioned shape: `bash` or `sh` + quoted bundled path + install/upgrade.
+                # `bash "/"` prefix (a JSON `bash \"`) rejects `bash -c …`; the bundled ABSOLUTE path
+                # rejects foreign scripts; the trailing mode + closing quote reject extra arguments /
+                # a missing mode.
                 case "$_cxbm_norm" in
                     *'"command":"bash /"'"$_cxbm_bp"'/" install"'*  | \
                     *'"command": "bash /"'"$_cxbm_bp"'/" install"'* | \

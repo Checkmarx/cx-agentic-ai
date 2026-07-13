@@ -958,6 +958,7 @@ def cx_check():
     global _COPILOT_CLI_MODE
     _COPILOT_CLI_MODE = ("--copilot-cli" in sys.argv[1:]) or _is_copilot_cli_input(hook_input)
 
+
     # 2. Audited manual override. Loud, durable, and explicitly opt-in.
     if os.environ.get("CX_ALLOW_UNSCANNED") == "1":
         audit = "CX_ALLOW_UNSCANNED=1 bypassed scanning for tool={0} at {1}".format(
