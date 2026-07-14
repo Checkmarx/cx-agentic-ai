@@ -28,8 +28,8 @@ values. Collect both in a single reply:
 > "Browser sign-in it is. Reply with **two things, comma-separated**, in one message — your URL,
 > then your tenant:
 > 1. **The URL you use to reach Checkmarx One** in your browser — pick your region or paste your own:
->    EU `https://eu.ast.checkmarx.net` · US `https://us.ast.checkmarx.net` · ANZ `https://anz.ast.checkmarx.net` · or your on-prem URL
->    (full region list: https://docs.checkmarx.com/en/34965-68630-configure.html)
+>    US `https://ast.checkmarx.net` · US2 `https://us.ast.checkmarx.net` · EU `https://eu.ast.checkmarx.net` · EU2 `https://eu-2.ast.checkmarx.net` · ANZ `https://anz.ast.checkmarx.net` · India `https://ind.ast.checkmarx.net` · or your on-prem URL
+>    (full region list + how to find your tenant: https://docs.checkmarx.com/en/34965-68530-logging-in-to-checkmarx-one.html)
 > 2. **Your tenant** — the Checkmarx One organization you sign in under.
 >
 > Example: `https://eu.ast.checkmarx.net, acme-corp`

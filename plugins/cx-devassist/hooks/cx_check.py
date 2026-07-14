@@ -297,10 +297,11 @@ def _load_min_version(path=None):
 
 
 # --- Admin onboarding config (config/cx-onboarding.properties) -------------------------------------
-# Official Checkmarx One environment/regional URLs doc (the only page listing BOTH the region base
-# URLs and the matching IAM/auth URLs). Surfaced in the OAuth recovery guidance so a developer can
-# look up their region instead of guessing.
-_CX_ENV_URLS_DOC = "https://docs.checkmarx.com/en/34965-68630-configure.html"
+# Official Checkmarx One doc that lists the regional environment base URLs and how to find your
+# tenant. Surfaced in the OAuth recovery guidance so a developer can look up their region instead of
+# guessing. The concrete region examples are ALSO embedded inline below, so the guidance is useful
+# even without opening the page.
+_CX_ENV_URLS_DOC = "https://docs.checkmarx.com/en/34965-68530-logging-in-to-checkmarx-one.html"
 
 # STRICT validation for admin-supplied values. These get embedded into the `cx auth login …` command
 # the AGENT then runs, so the charset must exclude every shell-active and flag-smuggling character:
@@ -395,10 +396,11 @@ def _oauth_recovery_bullet(cfg):
         "absolute path so it works before cx is on PATH). Only AFTER OAuth is chosen, ask for the "
         "URL/tenant — NEVER guess or default the --base-auth-uri or --tenant values (e.g. do not try "
         "'iam.checkmarx.net' or a tenant of 'checkmarx') — ask the developer, per the cx-cli-setup "
-        "skill's oauth.md Question 2, which lists the regional URL examples (EU "
-        "https://eu.ast.checkmarx.net, US https://us.ast.checkmarx.net, ANZ "
-        "https://anz.ast.checkmarx.net, or their on-prem URL; full list: " + _CX_ENV_URLS_DOC
-        + "):\n    " + cmd
+        "skill's oauth.md Question 2. Regional URL examples: US https://ast.checkmarx.net, "
+        "US2 https://us.ast.checkmarx.net, EU https://eu.ast.checkmarx.net, "
+        "ANZ https://anz.ast.checkmarx.net, India https://ind.ast.checkmarx.net, or their on-prem "
+        "URL. Full region list + how to find your tenant: " + _CX_ENV_URLS_DOC
+        + "\n    " + cmd
     )
 
 

@@ -110,7 +110,8 @@ class OAuthRecoveryBullet(unittest.TestCase):
         b = cx_check._oauth_recovery_bullet({})
         self.assertIn("<url>", b)
         self.assertIn("<tenant>", b)
-        self.assertIn("34965-68630", b)  # env-URLs doc link present
+        self.assertIn("34965-68530", b)  # env-URLs doc link present (logging-in-to-checkmarx-one)
+        self.assertIn("ast.checkmarx.net", b)  # inline region examples present
 
     def test_partial_config_falls_back_to_placeholder(self):
         # Only one of the two values → must NOT embed a half-command; use placeholders.

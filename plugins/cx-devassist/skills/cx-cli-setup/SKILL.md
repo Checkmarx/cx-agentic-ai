@@ -192,4 +192,4 @@ developer originally used, then route: **API key →** generate a new key and re
 
 Releases: https://github.com/Checkmarx/ast-cli/releases ·
 Quick-start: https://docs.checkmarx.com/en/34965-68621-checkmarx-one-cli-quick-start-guide.html ·
-Environment/region URLs (base + IAM): https://docs.checkmarx.com/en/34965-68630-configure.html
+Environment/region URLs + tenant lookup: https://docs.checkmarx.com/en/34965-68530-logging-in-to-checkmarx-one.html
