@@ -64,10 +64,14 @@ PINNED_CX_RELEASE_ASSETS=("ast-cli_linux_x64.tar.gz" "ast-cli_windows_x64.zip" "
 TMP_BASE="${TMPDIR:-${TEMP:-${TMP:-/tmp}}}"
 
 # Mirror hooks/cx_check.py _agent_log_dir(): the version cache lives under
-# ~/.checkmarx/agent-logs/claude (or $CX_LOG_DIR), NOT the OS temp dir. Clearing it after a
+# ~/.checkmarx/agent-logs/<assistant> (or $CX_LOG_DIR), NOT the OS temp dir. Clearing it after a
 # place lets the next hook fire re-probe the just-installed/upgraded cx immediately.
-AGENT_LOG_DIR="${CX_LOG_DIR:-$HOME/.checkmarx/agent-logs/claude}"
+# Bootstrap is client-agnostic — clear caches for BOTH claude and copilot-cli so whichever client
+# fired the bootstrap sees the fresh version on its next hook call.
+_LOG_BASE="${CX_LOG_DIR:-$HOME/.checkmarx/agent-logs}"
+AGENT_LOG_DIR="$_LOG_BASE/claude"
 VERSION_CACHE_FILE="$AGENT_LOG_DIR/cx_version_cache"
+_COPILOT_VERSION_CACHE="$_LOG_BASE/copilot-cli/cx_version_cache"
 
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -436,6 +440,7 @@ Write-Output \$dest
 
 invalidate_version_cache() {
     rm -f "$VERSION_CACHE_FILE" 2>/dev/null || true
+    rm -f "$_COPILOT_VERSION_CACHE" 2>/dev/null || true
 }
 
 verify() {
