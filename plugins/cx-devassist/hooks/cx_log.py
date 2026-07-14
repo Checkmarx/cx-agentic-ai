@@ -77,6 +77,14 @@ _EVENTS = {
         "result": _as_bool,
         "version_state": _VERSION_STATES,
     },
+    "admin_config": {
+        # Outcome of loading the bundled admin onboarding config
+        # (config/cx-onboarding.properties). NEVER carries the offending VALUE (which an admin — or a
+        # tamperer — controls); only WHICH known key was accepted/rejected and the outcome, so a bad
+        # config leaves an audit trail without echoing its payload into the log.
+        "result": _enum({"loaded", "invalid", "absent"}),
+        "key": _enum({"cx_base_auth_uri", "cx_tenant"}),
+    },
     "scan_decision": {
         # The stage-2 native `cx hooks claude-pre-*` scanner's own allow/deny — distinct from
         # "gate_decision" (the stage-1 readiness gate). Never carries the finding/reason text

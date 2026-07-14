@@ -296,6 +296,112 @@ def _load_min_version(path=None):
     return _MIN_VERSION_FALLBACK
 
 
+# --- Admin onboarding config (config/cx-onboarding.properties) -------------------------------------
+# Official Checkmarx One environment/regional URLs doc (the only page listing BOTH the region base
+# URLs and the matching IAM/auth URLs). Surfaced in the OAuth recovery guidance so a developer can
+# look up their region instead of guessing.
+_CX_ENV_URLS_DOC = "https://docs.checkmarx.com/en/34965-68630-configure.html"
+
+# STRICT validation for admin-supplied values. These get embedded into the `cx auth login …` command
+# the AGENT then runs, so the charset must exclude every shell-active and flag-smuggling character:
+#   - tenant: must START alphanumeric (bans a leading '-' → no `--proxy …`/`--insecure` flag
+#     smuggling), then only letters/digits/._- , max 64. No whitespace/quote/$/backtick by construction.
+#   - base-auth-uri: https:// + host (+ optional :port) ONLY — no path/query/userinfo/space, so it
+#     cannot carry a second token or a redirect.
+# Anything failing these is IGNORED (fall back to the <url>/<tenant> placeholders); a bad value is
+# never emitted and never blocks — this is a convenience, not a gate control (fail SOFT, not closed).
+_ADMIN_TENANT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}$")
+_ADMIN_URL_RE = re.compile(r"^https://[A-Za-z0-9][A-Za-z0-9.\-]{0,127}(?::[0-9]{2,5})?$")
+_ADMIN_CONFIG_MAX_BYTES = 8192
+_ADMIN_CONFIG_VALIDATORS = {
+    "cx_base_auth_uri": _ADMIN_URL_RE,
+    "cx_tenant": _ADMIN_TENANT_RE,
+}
+
+
+def _admin_config_path():
+    """Absolute path to the bundled admin onboarding config, relative to THIS file (…/hooks) —
+    mirrors _bootstrap_script_path()/_load_min_version(); never uses ${CLAUDE_PLUGIN_ROOT} (which is
+    empty in the agent shell). Works on every OS via os.path.join."""
+    return os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config",
+                     "cx-onboarding.properties")
+    )
+
+
+def _load_admin_config(path=None):
+    """Read config/cx-onboarding.properties and return ONLY the known, VALIDATED keys as a dict
+    (possibly empty). FAIL SOFT: a missing/garbled/oversized/undecodable file, an invalid value, or
+    any unexpected error yields {} (no pre-fill). This must NEVER raise — an escaped exception would
+    trip _fail_closed_on_crash and brick every tool call — and NEVER block. `path` is a test hook."""
+    try:
+        if path is None:
+            path = _admin_config_path()
+        try:
+            # utf-8-sig (not plain utf-8): an admin editing this file with Windows Notepad can prepend
+            # a UTF-8 BOM, which would otherwise corrupt the first key name (cx_base_auth_uri →
+            # ﻿cx_base_auth_uri → silently dropped). utf-8-sig strips a leading BOM and is a no-op
+            # when there isn't one.
+            with open(path, "r", encoding="utf-8-sig") as f:
+                raw = f.read(_ADMIN_CONFIG_MAX_BYTES + 1)
+        except (OSError, UnicodeDecodeError):
+            return {}
+        if len(raw) > _ADMIN_CONFIG_MAX_BYTES:
+            return {}  # implausibly large for two values — refuse rather than parse
+        result = {}
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _sep, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            validator = _ADMIN_CONFIG_VALIDATORS.get(key)
+            if validator is None:
+                continue  # unknown key — silently dropped
+            if value and validator.match(value):
+                result[key] = value
+            else:
+                _log("admin_config", result="invalid", key=key)
+        return result
+    except Exception:
+        return {}
+
+
+def _oauth_recovery_bullet(cfg):
+    """The 'Browser sign-in (OAuth)' bullet for an auth-recovery deny context, branched on whether the
+    admin config supplied a VALIDATED base-auth-uri AND tenant. Both present → embed the real values
+    and tell the agent to use them as-is (skip the URL/tenant question). Otherwise → the original
+    ask-the-developer / never-guess guidance, now with the regional-URLs doc link. The embedded values
+    are pre-validated to a shell-inert charset, so the resulting `"<cx>" auth login …` command still
+    passes _is_auth_recovery_command's bare-command guard."""
+    base = cfg.get("cx_base_auth_uri")
+    tenant = cfg.get("cx_tenant")
+    if base and tenant:
+        cmd = _cx_recovery_command_str(
+            "auth login --base-auth-uri {0} --tenant {1}".format(base, tenant))
+        return (
+            "- Browser sign-in (OAuth) — only if the developer picks this: you may run it yourself "
+            "(it opens the developer's browser with MFA; no secret passes through you; it resolves cx "
+            "by absolute path so it works before cx is on PATH). The --base-auth-uri and --tenant "
+            "below were PRECONFIGURED BY YOUR ADMINISTRATOR (the plugin's "
+            "config/cx-onboarding.properties) — use them AS-IS and do NOT ask the developer for a URL "
+            "or tenant:\n    " + cmd
+        )
+    cmd = _cx_recovery_command_str("auth login --base-auth-uri <url> --tenant <tenant>")
+    return (
+        "- Browser sign-in (OAuth) — only if the developer picks this: you may run it yourself (it "
+        "opens the developer's browser with MFA; no secret passes through you; it resolves cx by "
+        "absolute path so it works before cx is on PATH). Only AFTER OAuth is chosen, ask for the "
+        "URL/tenant — NEVER guess or default the --base-auth-uri or --tenant values (e.g. do not try "
+        "'iam.checkmarx.net' or a tenant of 'checkmarx') — ask the developer, per the cx-cli-setup "
+        "skill's oauth.md Question 2, which lists the regional URL examples (EU "
+        "https://eu.ast.checkmarx.net, US https://us.ast.checkmarx.net, ANZ "
+        "https://anz.ast.checkmarx.net, or their on-prem URL; full list: " + _CX_ENV_URLS_DOC
+        + "):\n    " + cmd
+    )
+
+
 def _parse_semver(text):
     """Extract the first MAJOR.MINOR.PATCH from arbitrary text → (int, int, int) or None."""
     if not isinstance(text, str):
@@ -1009,18 +1115,7 @@ def cx_check():
                 "- API key (ask this first / simplest): the DEVELOPER runs this in their own terminal "
                 "(it is a plaintext secret — do not type an API key yourself):\n    "
                 + _cx_recovery_command_str("configure set --prop-name cx_apikey --prop-value <key>")
-                + "\n- Browser sign-in (OAuth) — only if the developer picks this: you may run it "
-                "yourself — it opens the developer's browser (with MFA) and no secret passes through "
-                "you. Only NOW, after OAuth is chosen, ask for the URL/tenant — NEVER guess or default "
-                "the --base-auth-uri or --tenant values (e.g. do not try a guessed 'iam.checkmarx.net' "
-                "or a tenant name of 'checkmarx') — ask the developer, per the cx-cli-setup skill's "
-                "oauth.md Question 2, which gives concrete regional URL examples (EU "
-                "https://eu.ast.checkmarx.net, US https://us.ast.checkmarx.net, ANZ "
-                "https://anz.ast.checkmarx.net, or their on-prem URL) plus where to find their tenant. "
-                "The gate allows this recovery "
-                "command through while it blocks everything else, and it resolves cx by absolute path "
-                "so it works even before cx is on your PATH:\n    "
-                + _cx_recovery_command_str("auth login --base-auth-uri <url> --tenant <tenant>")
+                + "\n" + _oauth_recovery_bullet(_load_admin_config())
                 + "\n  It blocks until the developer finishes (~5 min) — run it with a long timeout or "
                 "in the background.\n"
                 "Only `cx auth …` / `cx configure …` recovery commands run until authentication "
@@ -1096,14 +1191,7 @@ def cx_check():
                 "- API key (ask this first / simplest): the DEVELOPER runs this in their own terminal "
                 "(do not type an API key yourself):\n    "
                 + _cx_recovery_command_str("configure set --prop-name cx_apikey --prop-value <key>")
-                + "\n- Browser sign-in (OAuth) — only if the developer picks this: you may run it "
-                "yourself (opens the developer's browser; no secret passes through you; resolves cx by "
-                "absolute path so it works before cx is on PATH). Only NOW, after OAuth is chosen, ask "
-                "for the URL/tenant — NEVER guess or default the --base-auth-uri or --tenant values — "
-                "ask the developer, per the cx-cli-setup skill's oauth.md Question 2 (regional URL "
-                "examples: EU https://eu.ast.checkmarx.net, US https://us.ast.checkmarx.net, ANZ "
-                "https://anz.ast.checkmarx.net, or their on-prem URL):\n    "
-                + _cx_recovery_command_str("auth login --base-auth-uri <url> --tenant <tenant>")
+                + "\n" + _oauth_recovery_bullet(_load_admin_config())
                 + "\nOnly `cx auth …` / `cx configure …` commands run until the scanner is authenticated."
             ),
             reason_code="scanner_passthrough",

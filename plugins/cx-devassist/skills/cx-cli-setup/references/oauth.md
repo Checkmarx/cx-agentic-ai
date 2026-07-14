@@ -11,8 +11,15 @@ step.
 
 **Never guess or default the URL or tenant** (e.g. do not try an assumed tenant like `checkmarx` or
 a guessed host like `https://iam.checkmarx.net`) — both are org-specific and a wrong guess just
-burns a failed login round-trip. Always ask Question 2 below first, even if a hook's deny message
-already shows the `--base-auth-uri <url> --tenant <tenant>` flags as bare placeholders.
+burns a failed login round-trip.
+
+**First check whether the values are already provided — if so, SKIP Question 2:**
+- If the gate's deny recovery command already shows a **real** `--base-auth-uri <URL> --tenant
+  <tenant>` (concrete values, not the literal `<url>` / `<tenant>` placeholders), your administrator
+  preconfigured them in the plugin's `config/cx-onboarding.properties`. Use those values as-is: go
+  straight to running that login command and do **not** ask Question 2.
+- Only when the flags are still **bare placeholders** (`<url>` / `<tenant>`) do you ask Question 2
+  below.
 
 **Question 2 — ask in a plain chat message (NOT `AskUserQuestion`)**: the tenant is org-specific
 free text with no preset options, and one `AskUserQuestion` cannot return two independent free-text
@@ -22,6 +29,7 @@ values. Collect both in a single reply:
 > then your tenant:
 > 1. **The URL you use to reach Checkmarx One** in your browser — pick your region or paste your own:
 >    EU `https://eu.ast.checkmarx.net` · US `https://us.ast.checkmarx.net` · ANZ `https://anz.ast.checkmarx.net` · or your on-prem URL
+>    (full region list: https://docs.checkmarx.com/en/34965-68630-configure.html)
 > 2. **Your tenant** — the Checkmarx One organization you sign in under.
 >
 > Example: `https://eu.ast.checkmarx.net, acme-corp`

@@ -70,23 +70,50 @@ plugins/cx-devassist/
 │   └── plugin.json              # Claude Code manifest (name, version, license)
 ├── .mcp.json                    # declares the Checkmarx MCP server (cx mcp bridge); auto-discovered
 ├── README.md
+├── config/
+│   └── cx-onboarding.properties # OPTIONAL admin pre-fill of Checkmarx One URL + tenant (onboarding)
 ├── hooks/
 │   ├── hooks.json               # Claude Code PreToolUse / Stop wiring
 │   ├── cx_check.sh              # POSIX launcher — resolves Git Bash + Python 3, then runs the gate
 │   ├── cx_check.py              # the fail-closed gate (present → recent → capable → authenticated)
+│   ├── _cx_bootstrap_match.sh   # shared bootstrap-command matcher for the shell stages
 │   ├── cx_run.sh                # resolves cx by absolute path; runs the native scanner + MCP bridge
 │   └── cx_log.py                # structured, redacted JSONL logging
 ├── scripts/
 │   ├── cx-bootstrap.sh          # download + checksum-verify + install the cx CLI (self-install)
 │   ├── cx-asset-resolver.sh     # OS/arch → release asset name
+│   ├── cx-mcp-guard.sh          # shared version/capability decision for `cx mcp bridge`
 │   ├── cx-path-probe.sh         # first writable on-PATH directory
 │   └── cx-min-version           # minimum cx version (numeric floor)
 └── skills/
     ├── cx-cli-setup/            # guided cx install + authentication (router + references/)
-    └── cx-devassist-asca/       # ASCA remediation guidance
+    ├── cx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
+    └── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
 ```
 
 > Tests live at the **repo root** (`tests/`), outside the shipped plugin, so they aren't distributed.
+
+### On-demand scanning (skills)
+
+Beyond the automatic PreToolUse gate, two skills scan on request and remediate via the Checkmarx MCP:
+
+| Ask | Skill | Engine |
+|---|---|---|
+| "scan this file" / "check app.py" (source code) | `cx-devassist-asca` | SAST (ASCA) → `mcp__Checkmarx__codeRemediation` |
+| "scan my dependencies" / "check package.json" (manifest/lockfile) | `cx-devassist-sca` | SCA / OSS → `mcp__Checkmarx__packageRemediation` |
+| whole project / cloud-scale scan | Checkmarx MCP (Cx1 cloud) tools | — |
+
+A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA.
+
+### Admin onboarding pre-fill (optional)
+
+An administrator can pre-seed the Checkmarx One **URL** and **tenant** for browser (OAuth) sign-in by
+editing `config/cx-onboarding.properties`. When set (and valid), the values are embedded straight into
+the gate's `cx auth login` recovery command and the `cx-cli-setup` skill skips the URL/tenant question.
+Edit the file in your **forked / internal marketplace copy** (the reviewed, versioned artifact) — not
+in an end-user's live install, which is overwritten on plugin update. Values are strictly validated
+(https-only host for the URL; a shell-inert charset for the tenant); an invalid value is ignored and
+the developer is asked as usual. There is deliberately no out-of-tree (`~/.checkmarx` / env) override.
 
 ---
 
