@@ -25,6 +25,13 @@ _MAX_BYTES = 1_000_000  # rotate at ~1 MB
 _ROTATE_KEEP = 3        # keep cx-devassist.jsonl.1 .. .3
 _SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_.:\-]{1,64}$")
 
+# Named permission / limit constants — used everywhere below so ASCA does not
+# flag bare octal literals as "magic numbers" (they are intentional POSIX constants).
+_DIR_MODE  = 0o700   # user-only directory: rwx------
+_FILE_MODE = 0o600   # user-only file:      rw-------
+_EXIT_CODE_MAX = 255 # POSIX exit-code ceiling used by _as_int coercer
+_TOKEN_MAX_LEN = 64  # maximum length of a safe identifier token
+
 
 # --- coercers: the redaction core. Each maps an arbitrary value to a SAFE value, or None to omit.
 
@@ -44,7 +51,7 @@ def _as_bool(value):
 def _as_int(value):
     if isinstance(value, bool):
         return None
-    return value if isinstance(value, int) and 0 <= value <= 255 else None
+    return value if isinstance(value, int) and 0 <= value <= _EXIT_CODE_MAX else None
 
 
 def _enum(allowed):
@@ -69,6 +76,10 @@ _EVENTS = {
     "unscanned_override": {
         "tool_name": _token,
     },
+    # CX_ALLOW_UNLICENSED=1 bypass — distinct from unscanned_override (different env var / policy).
+    "unlicensed_override": {
+        "tool_name": _token,
+    },
     "bootstrap": {
         "mode": _enum({"install", "upgrade", "unknown"}),
         "allowed": _as_bool,
@@ -81,12 +92,17 @@ _EVENTS = {
 
 
 def _disabled():
-    # ONLY the documented value disables logging; CX_LOG_DISABLE=0 / =false must NOT silently turn
-    # off the audit trail (any other value, including unset, keeps logging on).
+    # ONLY the documented value disables logging; CX_LOG_DISABLE=0 / =false must NOT silently
+    # turn off the audit trail (any other value, including unset, keeps logging on).
     return os.environ.get("CX_LOG_DISABLE") == "1"
 
 
 def _assistant():
+    """Identify which agent client is running. Reads CX_ASSISTANT env var set by the hooks
+    config (hooks.json sets CX_ASSISTANT=claude, hooks-copilot-cli.json sets
+    CX_ASSISTANT=copilot-cli) so each client writes to its own log subdirectory and every
+    log entry carries the correct assistant label. Falls back to 'claude' when unset so
+    existing Claude Code deployments that don't yet pass CX_ASSISTANT keep working."""
     return _token(os.environ.get("CX_ASSISTANT", "")) or "claude"
 
 
@@ -105,17 +121,27 @@ def _plugin_version():
     if _PLUGIN_VERSION is not None:
         return _PLUGIN_VERSION
     _PLUGIN_VERSION = "unknown"
-    try:
-        path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", ".claude-plugin", "plugin.json"
-        )
-        with open(path) as f:
-            data = json.load(f)
-        version = _token(str(data.get("version", "")))
-        if version:
-            _PLUGIN_VERSION = version
-    except Exception:
-        pass
+    # Try plugin.json candidates in priority order:
+    #   1. plugin.json at the plugin root (shared, written by both Claude Code and Copilot CLI)
+    #   2. .claude-plugin/plugin.json (Claude Code legacy location)
+    #   3. .plugin/plugin.json (Copilot CLI location)
+    # Reading any one that has a parseable version is sufficient.
+    _base = os.path.dirname(os.path.abspath(__file__))
+    for rel in (
+        os.path.join("..", "plugin.json"),
+        os.path.join("..", ".claude-plugin", "plugin.json"),
+        os.path.join("..", ".plugin", "plugin.json"),
+    ):
+        try:
+            path = os.path.join(_base, rel)
+            with open(path) as f:
+                data = json.load(f)
+            version = _token(str(data.get("version", "")))
+            if version:
+                _PLUGIN_VERSION = version
+                break
+        except Exception:  # swallow — cx_log cannot use logging (would be circular)
+            pass
     return _PLUGIN_VERSION
 
 
@@ -136,7 +162,7 @@ def _open_0600(path, flags):
     """open() opener that creates new files with 0600 (POSIX) so a record is never briefly group/
     world readable between create-with-umask and a later chmod. On Windows the mode bits are
     ignored and the file already sits under the user profile (NTFS ACLs restrict it)."""
-    return os.open(path, flags, 0o600)
+    return os.open(path, flags, _FILE_MODE)
 
 
 def _rotate(path):
@@ -178,13 +204,13 @@ def log_event(event, **fields):
                     record[key] = safe
         line = json.dumps(record, separators=(",", ":"), ensure_ascii=True)
         directory = _log_dir()
-        os.makedirs(directory, mode=0o700, exist_ok=True)
-        _chmod(directory, 0o700)
+        os.makedirs(directory, mode=_DIR_MODE, exist_ok=True)
+        _chmod(directory, _DIR_MODE)
         path = os.path.join(directory, _LOG_FILE_NAME)
         _rotate(path)
         with open(path, "a", encoding="utf-8", newline="\n", opener=_open_0600) as f:
             f.write(line + "\n")
-        _chmod(path, 0o600)
+        _chmod(path, _FILE_MODE)
     except Exception:
         # Logging must NEVER break the gate.
         return

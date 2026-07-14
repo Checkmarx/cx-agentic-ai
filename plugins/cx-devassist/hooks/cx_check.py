@@ -652,13 +652,22 @@ def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, versio
 
 def _allow_with_warning(context: str, *, reason_code=None, tool_name=None) -> None:
     _log("gate_decision", decision="allow", reason_code=reason_code, tool_name=tool_name, exit_code=0)
-    output = {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
+    if _COPILOT_CLI_MODE:
+        # Copilot CLI: flat JSON — embed warning in permissionDecisionReason.
+        # permissionDecision:"allow" is not a standard Copilot CLI field but exit 0 = allow;
+        # we include it so the agent sees the warning text in the hook output.
+        output = {
             "permissionDecision": "allow",
-            "additionalContext": context,
+            "permissionDecisionReason": context,
         }
-    }
+    else:
+        output = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "additionalContext": context,
+            }
+        }
     print(json.dumps(output))
     sys.exit(0)
 
@@ -1297,40 +1306,54 @@ def _fail_closed_on_crash():
     """Last-resort deny printed if the gate itself crashes. A fail-CLOSED guard: an unexpected
     error inside cx_check() must still BLOCK via a decided deny (exit 0 + permissionDecision:
     "deny" JSON) — see the exit-code contract note on _deny(). main() exits 0 after calling this
-    so the JSON is actually read instead of being discarded as a generic hook error."""
+    so the JSON is actually read instead of being discarded as a generic hook error.
+    Uses the correct JSON shape per client: flat for Copilot CLI, nested for Claude Code.
+    NOTE: reads sys.argv directly (not _COPILOT_CLI_MODE) because a crash inside
+    _is_bootstrap_command() or any pre-mode-set code path means _COPILOT_CLI_MODE may still
+    be False even for a Copilot CLI invocation — sys.argv is always reliable."""
     try:
-        print(json.dumps({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
+        is_copilot = _COPILOT_CLI_MODE or "--copilot-cli" in sys.argv
+        if is_copilot:
+            print(json.dumps({
                 "permissionDecision": "deny",
                 "permissionDecisionReason": (
-                    "The Checkmarx security gate hit an internal error and could not evaluate this "
-                    "action, so it is BLOCKED fail-closed."
+                    "The Checkmarx security gate hit an internal error and could not evaluate "
+                    "this action, so it is BLOCKED fail-closed. Re-run /cx-cli-setup, or set "
+                    "CX_ALLOW_UNSCANNED=1 to bypass scanning (audited)."
                 ),
-                "additionalContext": (
-                    "An unexpected error occurred inside cx_check.py. All agent actions remain "
-                    "blocked until it is resolved. Re-run /cx-cli-setup, or set CX_ALLOW_UNSCANNED=1 "
-                    "to bypass scanning (audited)."
-                ),
-            }
-        }))
+            }))
+        else:
+            print(json.dumps({
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        "The Checkmarx security gate hit an internal error and could not evaluate this "
+                        "action, so it is BLOCKED fail-closed."
+                    ),
+                    "additionalContext": (
+                        "An unexpected error occurred inside cx_check.py. All agent actions remain "
+                        "blocked until it is resolved. Re-run /cx-cli-setup, or set CX_ALLOW_UNSCANNED=1 "
+                        "to bypass scanning (audited)."
+                    ),
+                }
+            }))
     except Exception:
         pass
 
 
 def main():
     # _deny()/_allow_with_warning() raise SystemExit with the decision JSON already printed.
-    # ANY other exception is an internal gate failure → still deny (fail-closed).
-    # Exit code follows the same client rule as _deny(): exit 0 for Claude Code, exit 1 for
-    # Copilot CLI — _fail_closed_on_crash() uses _COPILOT_CLI_MODE which is set before any
-    # deny path is reached (it is set right after bootstrap check, before any deny call).
+    # ANY other exception is an internal gate failure → still deny (fail-closed), exit 0.
+    # Both Claude Code and Copilot CLI: exit 0 + JSON deny is the correct contract.
+    # (exit 1 on Copilot CLI degrades to a generic "hook errored" with no reason shown.)
     try:
         cx_check()
     except SystemExit:
         raise
     except BaseException:
         _fail_closed_on_crash()
-        sys.exit(1 if _COPILOT_CLI_MODE else 0)
+        sys.exit(0)
 
 
 if __name__ == "__main__":

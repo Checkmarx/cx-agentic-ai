@@ -12,14 +12,14 @@
 # runs under dash/ash too (not just bash).
 #
 # Exit-code contract (both Claude Code AND Copilot CLI): a PreToolUse "deny" is signaled
-# by EXIT 0 with a `hookSpecificOutput.permissionDecision:"deny"` JSON body on stdout —
-# NOT exit 2. Both clients signal a deny via exit 0 + JSON on stdout, but with DIFFERENT
-# JSON shapes: Claude Code reads a nested hookSpecificOutput wrapper; Copilot CLI reads a
-# FLAT JSON object with permissionDecision/permissionDecisionReason at the top level (per
-# https://docs.github.com/en/copilot/reference/hooks-reference). cx_check.py detects the
-# client via --copilot-cli flag (passed from hooks-copilot-cli.json) and emits the correct
-# shape. A crash / no-Python condition still exits 1 (a genuine hook error) — every
-# DECIDABLE outcome (allow or deny) uses exit 0.
+# by EXIT 0 with a JSON body on stdout — for ALL paths (decided deny, no-Python fallback,
+# internal crash). The JSON SHAPE differs by client:
+#   Claude Code:  {"hookSpecificOutput":{"permissionDecision":"deny",...}}
+#   Copilot CLI:  {"permissionDecision":"deny","permissionDecisionReason":"..."}  (FLAT)
+# cx_check.py detects the client via --copilot-cli flag and emits the correct shape.
+# This script's own no-Python fallback also checks the flag and emits the right shape.
+# A genuine crash / unrecoverable error still uses exit 0 + deny JSON — never exit 1 —
+# because exit 1 on Copilot CLI degrades to a generic "hook errored" with no reason shown.
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PY_SCRIPT="$SCRIPT_DIR/cx_check.py"
@@ -115,11 +115,19 @@ if [ -z "$PYTHON_BIN" ]; then
         . "$SCRIPT_DIR/_cx_bootstrap_match.sh"
         cx_is_bootstrap_command "$INPUT" "$SCRIPT_DIR" && exit 0
     fi
-    # No working Python 3 ⇒ the gate cannot evaluate ⇒ fail CLOSED (deny JSON, exit 0 — see the
-    # exit-code contract note at the top of this file).
-    cat <<'JSON'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security gate could not run: no working Python 3 interpreter was found, so the scanner is inactive. This operation is BLOCKED fail-closed.","additionalContext":"Install Python 3, then retry. Windows: install from https://python.org (NOT the Microsoft Store stub). macOS: `xcode-select --install` or `brew install python3`. Linux: `apt install python3` / `dnf install python3` / `apk add python3`. The plugin's bundled bootstrap (scripts/cx-bootstrap.sh) installs the cx CLI and itself needs NO Python, but this version/auth gate does. All agent actions remain blocked until a Python 3 interpreter is available."}}
-JSON
+    # No working Python 3 ⇒ the gate cannot evaluate ⇒ fail CLOSED (deny JSON, exit 0).
+    # JSON shape differs by client: Copilot CLI expects FLAT JSON (--copilot-cli flag set);
+    # Claude Code expects the nested hookSpecificOutput wrapper.
+    _NO_PY_REASON="The Checkmarx security gate could not run: no working Python 3 interpreter was found, so the scanner is inactive. This operation is BLOCKED fail-closed."
+    _NO_PY_CONTEXT="Install Python 3, then retry. Windows: install from https://python.org (NOT the Microsoft Store stub). macOS: \`xcode-select --install\` or \`brew install python3\`. Linux: \`apt install python3\` / \`dnf install python3\` / \`apk add python3\`. The plugin's bundled bootstrap (scripts/cx-bootstrap.sh) installs the cx CLI and itself needs NO Python, but this version/auth gate does. All agent actions remain blocked until a Python 3 interpreter is available."
+    case "$*" in
+        *--copilot-cli*)
+            printf '{"permissionDecision":"deny","permissionDecisionReason":"%s %s"}\n' "$_NO_PY_REASON" "$_NO_PY_CONTEXT"
+            ;;
+        *)
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s","additionalContext":"%s"}}\n' "$_NO_PY_REASON" "$_NO_PY_CONTEXT"
+            ;;
+    esac
     exit 0
 fi
 

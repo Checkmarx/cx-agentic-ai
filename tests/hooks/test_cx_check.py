@@ -1184,9 +1184,11 @@ class TestDenyVerdictSchema(unittest.TestCase):
     """One fail-closed verdict SCHEMA, four emitters across two languages. The two shell heredocs run
     BECAUSE Python/cx is absent, so they cannot share the Python emitter's code — this contract test
     pins all four to the same JSON shape + exit 0, so a schema change can't silently diverge (the A2
-    hand-copied-JSON risk)."""
+    hand-copied-JSON risk).
+    Claude Code uses nested hookSpecificOutput; Copilot CLI uses flat JSON — both are tested."""
 
     def _assert_schema(self, obj):
+        """Assert Claude Code nested schema."""
         self.assertIsInstance(obj, dict)
         hso = obj.get("hookSpecificOutput")
         self.assertIsInstance(hso, dict, "missing hookSpecificOutput")
@@ -1195,17 +1197,40 @@ class TestDenyVerdictSchema(unittest.TestCase):
         self.assertTrue(hso.get("permissionDecisionReason"), "reason must be non-empty")
         self.assertTrue(hso.get("additionalContext"), "context must be non-empty")
 
+    def _assert_copilot_schema(self, obj):
+        """Assert Copilot CLI flat JSON schema."""
+        self.assertIsInstance(obj, dict)
+        self.assertEqual(obj.get("permissionDecision"), "deny")
+        self.assertTrue(obj.get("permissionDecisionReason"), "reason must be non-empty")
+
     def test_python_deny_emitter(self):
         decision, code = run(write("x"), which=None)  # cx absent → _deny(cx_absent)
         self.assertEqual((decision, code), ("deny", 0))
         self._assert_schema({"hookSpecificOutput": LAST_OUTPUT})
 
-    def test_python_crash_emitter(self):
-        # _fail_closed_on_crash prints the deny verdict; main() is what maps it to exit 2.
+    def test_python_crash_emitter_claude(self):
+        # _fail_closed_on_crash in Claude Code mode emits nested hookSpecificOutput.
+        orig = cx_check._COPILOT_CLI_MODE
+        cx_check._COPILOT_CLI_MODE = False
         out = io.StringIO()
-        with redirect_stdout(out):
-            cx_check._fail_closed_on_crash()
+        try:
+            with redirect_stdout(out):
+                cx_check._fail_closed_on_crash()
+        finally:
+            cx_check._COPILOT_CLI_MODE = orig
         self._assert_schema(json.loads(out.getvalue()))
+
+    def test_python_crash_emitter_copilot(self):
+        # _fail_closed_on_crash in Copilot CLI mode emits flat JSON.
+        orig = cx_check._COPILOT_CLI_MODE
+        cx_check._COPILOT_CLI_MODE = True
+        out = io.StringIO()
+        try:
+            with redirect_stdout(out):
+                cx_check._fail_closed_on_crash()
+        finally:
+            cx_check._COPILOT_CLI_MODE = orig
+        self._assert_copilot_schema(json.loads(out.getvalue()))
 
     def _run_sh(self, argv, stdin, extra_env=None):
         bindir = tempfile.mkdtemp()
@@ -1232,61 +1257,6 @@ class TestDenyVerdictSchema(unittest.TestCase):
         cxrun = os.path.join(_HOOKS_DIR, "cx_run.sh")
         code, out = self._run_sh([cxrun, "hooks", "claude-pre-file-write"], b"", {"CX_BINARY": ""})
         self.assertEqual(code, 0)
-        self._assert_schema(json.loads(out))
-
-
-class TestDenyVerdictSchema(unittest.TestCase):
-    """One fail-closed verdict SCHEMA, four emitters across two languages. The two shell heredocs run
-    BECAUSE Python/cx is absent, so they cannot share the Python emitter's code — this contract test
-    pins all four to the same JSON shape + exit 2, so a schema change can't silently diverge (the A2
-    hand-copied-JSON risk)."""
-
-    def _assert_schema(self, obj):
-        self.assertIsInstance(obj, dict)
-        hso = obj.get("hookSpecificOutput")
-        self.assertIsInstance(hso, dict, "missing hookSpecificOutput")
-        self.assertEqual(hso.get("hookEventName"), "PreToolUse")
-        self.assertEqual(hso.get("permissionDecision"), "deny")
-        self.assertTrue(hso.get("permissionDecisionReason"), "reason must be non-empty")
-        self.assertTrue(hso.get("additionalContext"), "context must be non-empty")
-
-    def test_python_deny_emitter(self):
-        decision, code = run(write("x"), which=None)  # cx absent → _deny(cx_absent)
-        self.assertEqual((decision, code), ("deny", 0))
-        self._assert_schema({"hookSpecificOutput": LAST_OUTPUT})
-
-    def test_python_crash_emitter(self):
-        # _fail_closed_on_crash prints the deny verdict; main() is what maps it to exit 2.
-        out = io.StringIO()
-        with redirect_stdout(out):
-            cx_check._fail_closed_on_crash()
-        self._assert_schema(json.loads(out.getvalue()))
-
-    def _run_sh(self, argv, stdin, extra_env=None):
-        bindir = tempfile.mkdtemp()
-        for tool in ("sh", "cat", "dirname", "tr"):
-            src = shutil.which(tool)
-            if not src:
-                self.skipTest("missing %s on PATH" % tool)
-            os.symlink(src, os.path.join(bindir, tool))
-        env = {"PATH": bindir, "PYTHONUTF8": "1", "HOME": "/nonexistent"}
-        if extra_env:
-            env.update(extra_env)
-        proc = subprocess.run([os.path.join(bindir, "sh")] + argv, input=stdin,
-                              capture_output=True, timeout=30, env=env)
-        return proc.returncode, proc.stdout.decode("utf-8", "replace")
-
-    @unittest.skipUnless(SH and os.name != "nt", "needs POSIX sh + symlinks (Windows → manual)")
-    def test_shell_no_python_emitter(self):
-        code, out = self._run_sh([CX_CHECK_SH], json.dumps({"tool_name": "Write"}).encode())
-        self.assertEqual(code, 2)
-        self._assert_schema(json.loads(out))
-
-    @unittest.skipUnless(SH and os.name != "nt", "needs POSIX sh + symlinks (Windows → manual)")
-    def test_shell_no_cx_emitter(self):
-        cxrun = os.path.join(_HOOKS_DIR, "cx_run.sh")
-        code, out = self._run_sh([cxrun, "hooks", "claude-pre-file-write"], b"", {"CX_BINARY": ""})
-        self.assertEqual(code, 2)
         self._assert_schema(json.loads(out))
 
 
@@ -1345,23 +1315,47 @@ class TestMinVersionLoader(unittest.TestCase):
 
 class TestCrashGuard(unittest.TestCase):
     """main() must fail CLOSED: an unexpected exception inside cx_check() becomes a deny + exit 0,
-    never an uncaught traceback (exit 1), which Claude Code would treat as a non-blocking hook
-    error (fail OPEN). Real allow(0)/deny(0) SystemExit codes must pass through unchanged."""
+    never an uncaught traceback (exit 1), for BOTH Claude Code and Copilot CLI.
+    Real allow(0)/deny(0) SystemExit codes must pass through unchanged."""
 
-    def test_unexpected_exception_denies_exit_0(self):
+    def test_unexpected_exception_denies_exit_0_claude(self):
+        """Claude Code: crash → exit 0 + nested hookSpecificOutput deny."""
         def boom():
             raise RuntimeError("internal gate failure")
-        orig = cx_check.cx_check
+        orig_check = cx_check.cx_check
+        orig_mode = cx_check._COPILOT_CLI_MODE
         cx_check.cx_check = boom
+        cx_check._COPILOT_CLI_MODE = False
         out = io.StringIO()
         try:
             with self.assertRaises(SystemExit) as cm, redirect_stdout(out):
                 cx_check.main()
         finally:
-            cx_check.cx_check = orig
+            cx_check.cx_check = orig_check
+            cx_check._COPILOT_CLI_MODE = orig_mode
         self.assertEqual(cm.exception.code, 0)
         self.assertEqual(
             json.loads(out.getvalue())["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_unexpected_exception_denies_exit_0_copilot(self):
+        """Copilot CLI: crash → exit 0 + flat JSON deny (not exit 1, not nested format)."""
+        def boom():
+            raise RuntimeError("internal gate failure")
+        orig_check = cx_check.cx_check
+        orig_mode = cx_check._COPILOT_CLI_MODE
+        cx_check.cx_check = boom
+        cx_check._COPILOT_CLI_MODE = True
+        out = io.StringIO()
+        try:
+            with self.assertRaises(SystemExit) as cm, redirect_stdout(out):
+                cx_check.main()
+        finally:
+            cx_check.cx_check = orig_check
+            cx_check._COPILOT_CLI_MODE = orig_mode
+        self.assertEqual(cm.exception.code, 0)
+        parsed = json.loads(out.getvalue())
+        self.assertEqual(parsed["permissionDecision"], "deny")
+        self.assertNotIn("hookSpecificOutput", parsed)  # must be FLAT, not nested
 
     def test_real_exit_codes_propagate(self):
         for code in (0,):
