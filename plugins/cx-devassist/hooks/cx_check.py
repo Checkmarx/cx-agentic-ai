@@ -937,26 +937,13 @@ def _is_bootstrap_command(hook_input):
     ${CLAUDE_PLUGIN_ROOT} placeholder (which the agent's shell does NOT expand) is honored only
     after expanding it from the gate's own environment and proving it resolves to the bundled
     bootstrap — never blessed blindly."""
-    # TEMPORARY DIAGNOSTIC — remove after debugging bootstrap carve-out
-    _diag = os.path.join(os.path.expanduser("~"), ".checkmarx", "agent-logs", "cx_diag.log")
-    def _dlog(msg):
-        try:
-            os.makedirs(os.path.dirname(_diag), exist_ok=True)
-            with open(_diag, "a", encoding="utf-8") as _f:
-                _f.write("[cx_check.py _is_bootstrap_command] " + msg + "\n")
-        except Exception:
-            pass
-
     command = _bare_bash_command(hook_input)
-    _dlog("bare_command=" + repr(command))
     if command is None:
         return False
     m = _BOOTSTRAP_RE.match(command)
-    _dlog("regex_match=" + repr(bool(m)))
     if not m:
         return False
     raw_path = m.group("path").strip()
-    _dlog("raw_path=" + repr(raw_path))
     if raw_path == "${CLAUDE_PLUGIN_ROOT}/scripts/cx-bootstrap.sh":
         # Claude Code sets CLAUDE_PLUGIN_ROOT in the hook (gate) environment; an unset or foreign
         # value cannot be proven to be the bundled bootstrap → fail CLOSED.
@@ -966,7 +953,6 @@ def _is_bootstrap_command(hook_input):
         raw_path = os.path.join(root, "scripts", "cx-bootstrap.sh")
     candidate = _normalize_path(raw_path)
     expected = _normalize_path(_bootstrap_script_path())
-    _dlog("candidate=" + repr(candidate) + " expected=" + repr(expected) + " match=" + repr(candidate == expected))
     return candidate is not None and candidate == expected
 
 

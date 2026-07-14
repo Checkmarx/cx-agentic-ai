@@ -11,15 +11,11 @@
 # tools on PATH. On macOS/Linux `sh` is the system shell; this script is POSIX so it
 # runs under dash/ash too (not just bash).
 #
-# Exit-code contract (both Claude Code AND Copilot CLI): a PreToolUse "deny" is signaled
-# by EXIT 0 with a JSON body on stdout — for ALL paths (decided deny, no-Python fallback,
-# internal crash). The JSON SHAPE differs by client:
-#   Claude Code:  {"hookSpecificOutput":{"permissionDecision":"deny",...}}
-#   Copilot CLI:  {"permissionDecision":"deny","permissionDecisionReason":"..."}  (FLAT)
-# cx_check.py detects the client via --copilot-cli flag and emits the correct shape.
-# This script's own no-Python fallback also checks the flag and emits the right shape.
-# A genuine crash / unrecoverable error still uses exit 0 + deny JSON — never exit 1 —
-# because exit 1 on Copilot CLI degrades to a generic "hook errored" with no reason shown.
+# Exit-code contract:
+#   Claude Code:  deny = exit 2, allow = exit 0. (exit 1 = uncaught error = fail-open)
+#   Copilot CLI:  deny = exit 0, allow = exit 0. (non-zero = hook error = fail-open)
+# cx_check.py handles this split via --copilot-cli flag. This script's no-Python fallback
+# also emits the correct exit code per client.
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PY_SCRIPT="$SCRIPT_DIR/cx_check.py"
@@ -36,12 +32,6 @@ if [ "${CX_CHECK_DEBUG:-0}" = "1" ]; then
     mkdir -p "$(dirname "$_DEBUG_LOG")" 2>/dev/null
     printf '[cx_check.sh] %s stdin=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo ts-unavail)" "$INPUT" >> "$_DEBUG_LOG"
 fi
-
-# ALWAYS log for debugging — temporary, remove after diagnosis
-_DIAG_LOG="${HOME}/.checkmarx/agent-logs/cx_diag.log"
-mkdir -p "$(dirname "$_DIAG_LOG")" 2>/dev/null
-printf '[cx_check.sh diag] %s args=%s stdin=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo ts)" "$*" "$INPUT" >> "$_DIAG_LOG" 2>/dev/null
-
 
 # The shell-level bootstrap carve-out now lives INSIDE the no-Python branch below (search:
 # NO-PYTHON CARVE-OUT). When Python 3 IS present (the normal case on all three OSes),
@@ -115,20 +105,22 @@ if [ -z "$PYTHON_BIN" ]; then
         . "$SCRIPT_DIR/_cx_bootstrap_match.sh"
         cx_is_bootstrap_command "$INPUT" "$SCRIPT_DIR" && exit 0
     fi
-    # No working Python 3 ⇒ the gate cannot evaluate ⇒ fail CLOSED (deny JSON, exit 0).
-    # JSON shape differs by client: Copilot CLI expects FLAT JSON (--copilot-cli flag set);
-    # Claude Code expects the nested hookSpecificOutput wrapper.
+    # No working Python 3 ⇒ the gate cannot evaluate ⇒ fail CLOSED.
+    # Exit-code contract: Claude Code requires exit 2 to treat a deny as a block (exit 0 = allow).
+    # Copilot CLI requires exit 0 — a non-zero exit is treated as a hook error (fail-open, no reason shown).
+    # JSON shape also differs by client.
     _NO_PY_REASON="The Checkmarx security gate could not run: no working Python 3 interpreter was found, so the scanner is inactive. This operation is BLOCKED fail-closed."
     _NO_PY_CONTEXT="Install Python 3, then retry. Windows: install from https://python.org (NOT the Microsoft Store stub). macOS: \`xcode-select --install\` or \`brew install python3\`. Linux: \`apt install python3\` / \`dnf install python3\` / \`apk add python3\`. The plugin's bundled bootstrap (scripts/cx-bootstrap.sh) installs the cx CLI and itself needs NO Python, but this version/auth gate does. All agent actions remain blocked until a Python 3 interpreter is available."
     case "$*" in
         *--copilot-cli*)
             printf '{"permissionDecision":"deny","permissionDecisionReason":"%s %s"}\n' "$_NO_PY_REASON" "$_NO_PY_CONTEXT"
+            exit 0
             ;;
         *)
             printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s","additionalContext":"%s"}}\n' "$_NO_PY_REASON" "$_NO_PY_CONTEXT"
+            exit 2
             ;;
     esac
-    exit 0
 fi
 
 # Replay the captured stdin to Python (we already consumed it above, so it can't stream).
