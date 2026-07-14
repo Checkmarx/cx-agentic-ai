@@ -88,7 +88,63 @@ _EVENTS = {
         "result": _as_bool,
         "version_state": _VERSION_STATES,
     },
+    "scan_decision": {
+        # The stage-2 native `cx hooks claude-pre-*` scanner's own allow/deny — distinct from
+        # "gate_decision" (the stage-1 readiness gate). Never carries the finding/reason text
+        # itself, only the outcome, so a real vulnerability's details never reach this log.
+        # `reason_code` (not a raw exit code) says WHY: "vulnerability_detected" for a genuine,
+        # well-formed deny (the scanner's own JSON carried a permissionDecision:deny), vs
+        # "error_during_block" for a deny that fell back to the raw fail-closed exit-2 path without
+        # that structured output (an unexpected/error condition, not necessarily a real finding).
+        "decision": _enum({"allow", "deny"}),
+        "tool_name": _token,
+        "reason_code": _enum({"vulnerability_detected", "error_during_block", "no_issues_found"}),
+    },
+    "mcp_connect": {
+        # Every attempt by hooks/cx_run.sh to spawn/respawn `cx mcp bridge` (session start,
+        # /reload-plugins, /mcp reconnect) — success or denial — so a connect failure always has an
+        # exact, on-disk reason instead of only Claude Code's generic "-32000 / failed to reconnect".
+        # No caller-supplied free text: `message` is synthesized below from `reason_code` (an
+        # allowlisted enum) plus the already-token-validated version fields, so this event can never
+        # carry raw subprocess output or anything else a caller might pass by mistake.
+        "result": _enum({"ok", "denied"}),
+        "reason_code": _enum({"ok", "dev", "below", "incapable", "unrunnable",
+                               "cx_absent", "cx_binary_invalid"}),
+        "version_have": _token,
+        "version_min": _token,
+        # Which resolution tier supplied the checked binary — mirrors cx_check.py's
+        # _cx_exe_with_tier(). Drives the CX_BINARY-pin note appended to `message` below: a denial
+        # on a CX_BINARY-resolved binary will NOT self-heal from a bootstrap upgrade (the bootstrap
+        # only ever writes the canonical store, which a CX_BINARY pin continues to shadow).
+        "tier": _enum({"binary", "canonical", "path"}),
+    },
 }
+
+# Fixed, first-party message templates for "mcp_connect" — never derived from caller input. Formatted
+# ONLY with `version_have`/`version_min`, which are themselves already constrained to _SAFE_TOKEN by
+# the schema's `_token` coercer above, so the rendered message can never carry an injected/secret
+# value even if a caller passed one.
+_MCP_CONNECT_MESSAGES = {
+    "ok": "cx v{have} is capable and current (>= v{min}) — mcp bridge starting.",
+    "dev": "cx reports a 'dev' build and is capable — mcp bridge starting.",
+    "below": "cx v{have} is below the required v{min} — mcp bridge blocked; run /cx-cli-setup to upgrade.",
+    "incapable": ("cx v{have} is missing the 'mcp bridge' subcommand (capability-incomplete build) — "
+                  "mcp bridge blocked; run /cx-cli-setup."),
+    "unrunnable": "cx did not report a usable version ('cx version' failed or was unparseable) — mcp bridge blocked.",
+    "cx_absent": ("cx CLI could not be resolved via CX_BINARY, the canonical store, or PATH — mcp "
+                  "bridge blocked; run /cx-cli-setup to install."),
+    "cx_binary_invalid": ("CX_BINARY is set but invalid (not absolute / missing / not executable); "
+                          "ignored, falling back to the canonical store or PATH."),
+}
+
+# Appended to `message` when a "denied" mcp_connect has tier == "binary" — see the schema comment
+# above. Same first-party guarantee as _MCP_CONNECT_MESSAGES: a fixed, hardcoded sentence, never
+# derived from caller input.
+_CX_BINARY_PIN_NOTE = (
+    " Note: CX_BINARY is pinned to this exact binary and takes priority over the canonical store, "
+    "so running the bootstrap will NOT fix this — unset CX_BINARY, replace the binary at that "
+    "exact path, or repoint CX_BINARY at the canonical store after upgrading."
+)
 
 
 def _disabled():
@@ -191,7 +247,7 @@ def log_event(event, **fields):
         if schema is None:
             return
         record = {
-            "ts": int(time.time()),
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "assistant": _assistant(),
             "plugin_version": _plugin_version(),
             "os": _os_name(),
@@ -202,6 +258,14 @@ def log_event(event, **fields):
                 safe = coerce(fields[key])
                 if safe is not None:
                     record[key] = safe
+        if event == "mcp_connect":
+            template = _MCP_CONNECT_MESSAGES.get(record.get("reason_code"))
+            if template:
+                message = template.format(
+                    have=record.get("version_have", "?"), min=record.get("version_min", "?"))
+                if record.get("result") == "denied" and record.get("tier") == "binary":
+                    message += _CX_BINARY_PIN_NOTE
+                record["message"] = message
         line = json.dumps(record, separators=(",", ":"), ensure_ascii=True)
         directory = _log_dir()
         os.makedirs(directory, mode=_DIR_MODE, exist_ok=True)
@@ -214,3 +278,26 @@ def log_event(event, **fields):
     except Exception:
         # Logging must NEVER break the gate.
         return
+
+
+if __name__ == "__main__":
+    # CLI entry point for callers outside Python (cx_run.sh's stage-2 scanner wrapper): a caller
+    # process passes `event key=value key=value ...` as argv, never as a shell-interpolated string,
+    # so a hostile value can't reach a shell. Same guarantees as log_event: never raises, drops
+    # anything not on the per-event allowlist.
+    import sys
+
+    try:
+        _event = sys.argv[1] if len(sys.argv) > 1 else ""
+        _fields = dict(_arg.split("=", 1) for _arg in sys.argv[2:] if "=" in _arg)
+        # argv values are always strings; exit_code's coercer (_as_int) requires a real int, so
+        # convert here rather than loosen that allowlist gate. A non-numeric value is left as-is
+        # and simply dropped by the coercer, same as any other bad exit_code.
+        if "exit_code" in _fields:
+            try:
+                _fields["exit_code"] = int(_fields["exit_code"])
+            except ValueError:
+                pass
+        log_event(_event, **_fields)
+    except Exception:
+        pass

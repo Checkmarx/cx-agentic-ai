@@ -63,6 +63,8 @@ run_sh "$DIR/scripts/test_cx_asset_resolver.sh"
 run_sh "$DIR/scripts/test_cx_path_probe.sh"
 run_sh "$DIR/scripts/test_cx_bootstrap.sh"
 run_sh "$DIR/scripts/test_cx_resolution_contract.sh"
+run_sh "$DIR/scripts/test_cx_mcp_guard.sh"
+run_sh "$DIR/scripts/test_cx_run_mcp_guard.sh"
 
 if [ "$COV" -eq 1 ]; then
     printf '\n========== coverage (hooks) ==========\n'

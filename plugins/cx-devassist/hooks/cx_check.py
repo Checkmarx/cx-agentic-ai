@@ -36,7 +36,7 @@ def _log(event, **fields):
 # is a fast pre-filter: capability is decided by the probe below (_capabilities_present), not by
 # this number. Keep IDENTICAL to scripts/cx-min-version and scripts/cx-bootstrap.sh.
 # (search marker: CX_MIN_VERSION)
-_MIN_VERSION_FALLBACK = (2, 3, 54)
+_MIN_VERSION_FALLBACK = (2, 3, 55)
 
 # The cx executable the GATE invokes for its own probes, resolved by ABSOLUTE path where possible so
 # the gate works the instant cx is installed — even before it is on PATH. A freshly-installed cx in
@@ -80,17 +80,48 @@ def _canonical_cx():
     return None
 
 
+def _cx_exe_with_tier():
+    """Same resolution as _cx_exe(), but also returns WHICH tier supplied it: 'binary' | 'canonical'
+    | 'path'. Lets a below/incapable/unrunnable deny explain WHY re-running the upgrade bootstrap
+    won't help when CX_BINARY is pinned to an old/unfit binary — the bootstrap only ever writes the
+    canonical store, and CX_BINARY takes priority over it in every resolution (this gate's own, and
+    cx_run.sh's for the MCP bridge), so upgrading the canonical store changes nothing observable."""
+    exe, err = _cx_binary()
+    if err is None and exe != "cx":
+        return exe, "binary"
+    canon = _canonical_cx()
+    if canon:
+        return canon, "canonical"
+    return "cx", "path"
+
+
 def _cx_exe():
     """The cx executable for subprocess calls, resolved by absolute path where possible:
     a valid CX_BINARY -> the canonical store -> 'cx' (PATH). Lenient: strict CX_BINARY validation +
     the fail-closed deny happen once in cx_check() via _cx_binary()."""
-    exe, err = _cx_binary()
-    if err is None and exe != "cx":
-        return exe
-    canon = _canonical_cx()
-    if canon:
-        return canon
-    return "cx"
+    exe, _tier = _cx_exe_with_tier()
+    return exe
+
+
+def _cx_binary_pin_note(tier):
+    """An extra, explicit note to append to a below/incapable/unrunnable deny's context when the
+    unfit binary came from a CX_BINARY pin (tier == 'binary') — empty string otherwise. Re-running
+    the upgrade bootstrap does NOT fix this case: the bootstrap only ever writes the canonical
+    store, which a CX_BINARY pin continues to shadow, so an agent could loop re-running the
+    suggested upgrade command forever with no visible effect. Phrased as an instruction to the
+    agent (mirrors the "Tell the developer …" pattern already used elsewhere in this file) so the
+    note actually reaches the human instead of being silently absorbed."""
+    if tier != "binary":
+        return ""
+    return (
+        "\nNote: CX_BINARY is pinned to this exact binary and takes priority over the canonical "
+        "store, so running the bootstrap (install OR upgrade mode) will NOT fix this — the "
+        "bootstrap only ever writes the canonical store, which CX_BINARY continues to shadow. Tell "
+        "the developer to do ONE of: unset CX_BINARY (so resolution falls through to the canonical "
+        "store), replace the binary AT the CX_BINARY path directly, or run the bootstrap normally "
+        "and then repoint CX_BINARY at the resulting canonical store path. Do not just re-run the "
+        "bootstrap and expect it to take effect."
+    )
 
 
 # Single-shot auth validate. The gate's OWN retry lives in _auth_probe_with_grace — it retries only in
@@ -626,9 +657,12 @@ def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, versio
     #                 Using exit 1 also blocks but degrades to a generic "hook errored" with no
     #                 reason shown — the flat-JSON path is strictly better.
     # _COPILOT_CLI_MODE is set once per cx_check() call based on the --copilot-cli flag or
-    # the detected stdin format.
+    # Deny exit code differs by client: Claude Code uses exit 2 for deny (exit 1 = error =
+    # fail-open, exit 0 = allow). Copilot CLI uses exit 0 for everything — non-zero exits are
+    # treated as hook errors (fail-open), not denials.
+    _deny_exit = 0 if _COPILOT_CLI_MODE else 2
     _log("gate_decision", decision="deny", reason_code=reason_code, tool_name=tool_name,
-         version_state=version_state, exit_code=0)
+         version_state=version_state, exit_code=_deny_exit)
     if _COPILOT_CLI_MODE:
         # Flat JSON — Copilot CLI reads permissionDecision at the top level.
         # permissionDecisionReason is shown directly to the agent.
@@ -647,7 +681,7 @@ def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, versio
             }
         }
     print(json.dumps(output))
-    sys.exit(0)
+    sys.exit(_deny_exit)
 
 
 def _allow_with_warning(context: str, *, reason_code=None, tool_name=None) -> None:
@@ -1043,7 +1077,7 @@ def cx_check():
     #    installed to the canonical store resolves immediately, even before this frozen-PATH session
     #    can see it on PATH — which is what stops a fresh install from reading as "not installed".
     #    If NOTHING resolves, cx is genuinely absent → block.
-    effective = _cx_exe()
+    effective, effective_tier = _cx_exe_with_tier()
     resolved = effective if os.path.isabs(effective) else shutil.which(effective)
     if resolved is None:
         _install_instruction = (
@@ -1081,8 +1115,8 @@ def cx_check():
         _upgrade_instruction = (
             _bootstrap_copilot_cli_instruction("upgrade") if _COPILOT_CLI_MODE else
             "Invoke /cx-cli-setup (Phase 1b — Upgrade). To self-upgrade now, run "
-            "the plugin's bundled bootstrap by its resolved absolute path:\n    {0}".format(
-                _bootstrap_command_str("upgrade")
+            "the plugin's bundled bootstrap by its resolved absolute path:\n    {0}{1}".format(
+                _bootstrap_command_str("upgrade"), _cx_binary_pin_note(effective_tier)
             )
         )
         _deny(
@@ -1104,6 +1138,7 @@ def cx_check():
             _bootstrap_copilot_cli_instruction("install") if _COPILOT_CLI_MODE else
             "Invoke /cx-cli-setup. To reinstall now, run the plugin's bundled bootstrap "
             "by its resolved absolute path:\n    " + _bootstrap_command_str("install")
+            + _cx_binary_pin_note(effective_tier)
         )
         _deny(
             reason=(
@@ -1137,6 +1172,14 @@ def cx_check():
                 "developer a capable cx build is required, and stop. (If the developer has an internal "
                 "capable build, they can set CX_BINARY to its absolute path.) All agent actions remain "
                 "blocked fail-closed."
+                + (
+                    "\nNote: CX_BINARY is ALREADY set — and is pinned to THIS incapable binary. "
+                    "Setting CX_BINARY again to the same path changes nothing; the developer needs "
+                    "a DIFFERENT, capable build and must repoint CX_BINARY at THAT build's absolute "
+                    "path (or unset CX_BINARY if a capable build has been placed in the canonical "
+                    "store instead)."
+                    if effective_tier == "binary" else ""
+                )
             ),
             reason_code="capability_missing",
             tool_name=tool,
@@ -1344,16 +1387,17 @@ def _fail_closed_on_crash():
 
 def main():
     # _deny()/_allow_with_warning() raise SystemExit with the decision JSON already printed.
-    # ANY other exception is an internal gate failure → still deny (fail-closed), exit 0.
-    # Both Claude Code and Copilot CLI: exit 0 + JSON deny is the correct contract.
-    # (exit 1 on Copilot CLI degrades to a generic "hook errored" with no reason shown.)
+    # ANY other exception is an internal gate failure → fail CLOSED (deny).
+    # Claude Code: exit 2 (non-zero = deny; exit 1 = uncaught error = fail-open).
+    # Copilot CLI: exit 0 (non-zero is treated as hook error = fail-open, not a denial).
     try:
         cx_check()
     except SystemExit:
         raise
     except BaseException:
         _fail_closed_on_crash()
-        sys.exit(0)
+        is_copilot = _COPILOT_CLI_MODE or "--copilot-cli" in sys.argv
+        sys.exit(0 if is_copilot else 2)
 
 
 if __name__ == "__main__":

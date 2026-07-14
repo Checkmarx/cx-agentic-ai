@@ -45,12 +45,15 @@ def _fake_proc(stderr=b"", stdout=b"", returncode=0):
 
 
 def run(hook_input, *, which="cx", version_state="ok", authed=True,
-        scanner_state=cx_check._SCANNER_SCAN, env=None):
+        scanner_state=cx_check._SCANNER_SCAN, env=None, copilot_cli=False):
     """Invoke cx_check() with stubs. Returns (decision_or_None, exit_code).
 
     decision is the parsed permissionDecision ('allow'/'deny'), or None when cx_check
     returns normally (a silent pass-through / allow). scanner_state stubs the stage-2
-    scanner readiness probe (_SCANNER_SCAN by default = scanner authenticated & will scan)."""
+    scanner readiness probe (_SCANNER_SCAN by default = scanner authenticated & will scan).
+    copilot_cli=True simulates the --copilot-cli flag so _COPILOT_CLI_MODE is set correctly
+    for inputs that don't carry a detectable Copilot CLI envelope (e.g. already-unwrapped
+    tool_name/tool_input dicts)."""
     orig = {
         "which": cx_check.shutil.which,
         "vstate": cx_check._version_state,
@@ -59,12 +62,15 @@ def run(hook_input, *, which="cx", version_state="ok", authed=True,
         "read": cx_check._read_hook_input,
         "environ": cx_check.os.environ,
         "copilot_cli_mode": cx_check._COPILOT_CLI_MODE,
+        "argv": sys.argv,
     }
     cx_check.shutil.which = lambda name: which
     cx_check._version_state = lambda identity=None: version_state
     cx_check._is_authenticated = lambda identity=None: authed
     cx_check._scanner_state = lambda identity=None: scanner_state
     cx_check._read_hook_input = lambda: hook_input
+    if copilot_cli:
+        sys.argv = ["cx_check.py", "--copilot-cli"]
     # Disable structured logging during gate tests so they never write to the user's real
     # ~/.checkmarx log — unless a test opts in by providing CX_LOG_DIR (a temp dir).
     e = dict(env) if env is not None else {}
@@ -87,6 +93,7 @@ def run(hook_input, *, which="cx", version_state="ok", authed=True,
         cx_check._read_hook_input = orig["read"]
         cx_check.os.environ = orig["environ"]
         cx_check._COPILOT_CLI_MODE = orig["copilot_cli_mode"]
+        sys.argv = orig["argv"]
 
     global LAST_OUTPUT
     LAST_OUTPUT = None
@@ -165,7 +172,7 @@ class TestMissingCx(unittest.TestCase):
     def test_absent_denies_even_offline(self):
         decision, code = run(bash("npm test"), which=None)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_absent_still_allows_bootstrap(self):
         decision, code = run(bash('bash "%s" install' % BOOTSTRAP), which=None)
@@ -177,18 +184,18 @@ class TestVersionGate(unittest.TestCase):
     def test_below_min_denies(self):
         decision, code = run(bash("npm test"), version_state="below")
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_below_min_blocks_cx_auth_login(self):
         # Version gate is BEFORE auth-recovery, so an old build can't escape via cx auth.
         decision, code = run(bash("cx auth login"), version_state="below")
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_unrunnable_denies(self):
         decision, code = run(bash("npm test"), version_state="unrunnable")
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_dev_falls_through_to_auth(self):
         decision, code = run(bash("npm test"), version_state="dev", authed=True)
@@ -198,7 +205,7 @@ class TestVersionGate(unittest.TestCase):
     def test_dev_unauthenticated_denies(self):
         decision, code = run(bash("npm test"), version_state="dev", authed=False)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_ok_authed_passes(self):
         decision, code = run(bash("npm test"), version_state="ok", authed=True)
@@ -208,7 +215,7 @@ class TestVersionGate(unittest.TestCase):
     def test_ok_unauthed_denies(self):
         decision, code = run(bash("npm test"), version_state="ok", authed=False)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
 
 class TestAuthRecovery(unittest.TestCase):
@@ -236,7 +243,7 @@ class TestAuthRecovery(unittest.TestCase):
                   "cx configure set --prop-value k 2>/tmp/x", "cx auth login < /etc/passwd"):
             decision, code = run(bash(c), version_state="ok", authed=False)
             self.assertEqual(decision, "deny", "should deny (redirect to file): %s" % c)
-            self.assertEqual(code, 0)
+            self.assertEqual(code, 2)
 
     def test_redirect_hardening_applies_to_absolute_cx_form(self):
         p = r"C:\CxStore\cx\cx.exe" if os.name == "nt" else "/opt/cxstore/cx"
@@ -288,7 +295,7 @@ class TestScannerPassthrough(unittest.TestCase):
         decision, code = run(write("Runtime.getRuntime().exec(userInput)"),
                              authed=True, scanner_state=cx_check._SCANNER_PASSTHROUGH)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
         self.assertIn("/cx-cli-setup", LAST_OUTPUT["additionalContext"])
         self.assertIn("authenticate", LAST_OUTPUT["additionalContext"].lower())
 
@@ -296,7 +303,7 @@ class TestScannerPassthrough(unittest.TestCase):
         decision, code = run(bash("npm test"), authed=True,
                              scanner_state=cx_check._SCANNER_PASSTHROUGH)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_scan_ready_passes(self):
         decision, code = run(write("print('ok')"), authed=True,
@@ -316,7 +323,7 @@ class TestScannerPassthrough(unittest.TestCase):
         decision, code = run(bash("npm test"), authed=False,
                              scanner_state=cx_check._SCANNER_PASSTHROUGH)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_auth_recovery_bypasses_passthrough(self):
         # `cx auth login` must still run while the scanner is in pass-through — it's how you fix it.
@@ -556,7 +563,7 @@ class TestAllowUnscanned(unittest.TestCase):
         try:
             decision, code = run(bash("npm test"), which=None, env={"CX_ALLOW_UNSCANNED": "1"})
             self.assertEqual(decision, "deny")
-            self.assertEqual(code, 0)
+            self.assertEqual(code, 2)
         finally:
             cx_check._UNSCANNED_AUDIT_FILE = orig_audit
 
@@ -636,7 +643,7 @@ class TestBootstrapCarveOut(unittest.TestCase):
         for s in spoofs:
             decision, code = run(s, which=None)
             self.assertEqual(decision, "deny", msg="spoof slipped through: %r" % s)
-            self.assertEqual(code, 0)
+            self.assertEqual(code, 2)
 
 
 class TestCapabilityGate(unittest.TestCase):
@@ -646,14 +653,14 @@ class TestCapabilityGate(unittest.TestCase):
     def test_incapable_denies(self):
         decision, code = run(bash("npm test"), version_state="incapable")
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_incapable_blocks_cx_auth(self):
         # Capability gate is BEFORE auth-recovery (like the version gate): an incapable build
         # can't run the MCP anyway, so the fix is to upgrade, not to authenticate.
         decision, code = run(bash("cx auth login"), version_state="incapable")
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
 
 class TestCapabilityProbe(unittest.TestCase):
@@ -824,7 +831,7 @@ class TestCxBinaryOverride(unittest.TestCase):
     def test_invalid_cx_binary_denies_in_gate(self):
         decision, code = run(bash("npm test"), env={"CX_BINARY": "relative/cx"})
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_valid_cx_binary_not_on_path_now_passes(self):
         # NEW clean-flow: the gate AND stage-2 (hooks/cx_run.sh) both resolve CX_BINARY, so a valid
@@ -885,6 +892,78 @@ class TestCxBinaryOverride(unittest.TestCase):
         finally:
             cx_check._canonical_cx = orig
 
+    def test_exe_with_tier_reports_binary(self):
+        p = self._make_exe()
+        exe, tier = self._with_env({"CX_BINARY": p}, cx_check._cx_exe_with_tier)
+        self.assertEqual(exe, p)
+        self.assertEqual(tier, "binary")
+
+    def test_exe_with_tier_reports_canonical(self):
+        p = self._make_exe()
+        orig = cx_check._canonical_cx
+        cx_check._canonical_cx = lambda: p
+        try:
+            exe, tier = self._with_env({}, cx_check._cx_exe_with_tier)
+        finally:
+            cx_check._canonical_cx = orig
+        self.assertEqual(exe, p)
+        self.assertEqual(tier, "canonical")
+
+    def test_exe_with_tier_reports_path(self):
+        orig = cx_check._canonical_cx
+        cx_check._canonical_cx = lambda: None
+        try:
+            exe, tier = self._with_env({}, cx_check._cx_exe_with_tier)
+        finally:
+            cx_check._canonical_cx = orig
+        self.assertEqual(exe, "cx")
+        self.assertEqual(tier, "path")
+
+    def test_pin_note_empty_for_non_binary_tiers(self):
+        self.assertEqual(cx_check._cx_binary_pin_note("canonical"), "")
+        self.assertEqual(cx_check._cx_binary_pin_note("path"), "")
+
+    def test_pin_note_present_for_binary_tier(self):
+        note = cx_check._cx_binary_pin_note("binary")
+        self.assertIn("CX_BINARY", note)
+        self.assertIn("will NOT fix this", note)
+
+    def test_below_min_deny_notes_cx_binary_pin_when_pinned(self):
+        # A below-min cx resolved via CX_BINARY: re-running the upgrade bootstrap would NOT fix it
+        # (the bootstrap only ever writes the canonical store) — the deny must say so explicitly.
+        p = self._make_exe()
+        decision, code = run(bash("npm test"), version_state="below", env={"CX_BINARY": p})
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 2)
+        ctx = LAST_OUTPUT["additionalContext"]
+        self.assertIn("CX_BINARY is pinned to this exact binary", ctx)
+        self.assertIn("will NOT fix this", ctx)
+
+    def test_below_min_deny_omits_cx_binary_note_when_not_pinned(self):
+        # No CX_BINARY set (this test harness's stubbed environ has no HOME/LOCALAPPDATA either, so
+        # resolution falls through to the PATH tier) — the CX_BINARY-specific note must NOT appear.
+        decision, code = run(bash("npm test"), version_state="below")
+        self.assertEqual(decision, "deny")
+        ctx = LAST_OUTPUT["additionalContext"]
+        self.assertNotIn("CX_BINARY is pinned", ctx)
+
+    def test_incapable_deny_notes_already_pinned_when_cx_binary_set(self):
+        # The generic "(If the developer has an internal capable build, they can set CX_BINARY to
+        # its absolute path.)" suggestion is confusing when CX_BINARY is ALREADY set to the same
+        # incapable binary — the deny must clarify that a DIFFERENT build is needed.
+        p = self._make_exe()
+        decision, code = run(bash("npm test"), version_state="incapable", env={"CX_BINARY": p})
+        self.assertEqual(decision, "deny")
+        ctx = LAST_OUTPUT["additionalContext"]
+        self.assertIn("CX_BINARY is ALREADY set", ctx)
+        self.assertIn("DIFFERENT, capable build", ctx)
+
+    def test_incapable_deny_omits_pin_clarification_when_not_pinned(self):
+        decision, code = run(bash("npm test"), version_state="incapable")
+        self.assertEqual(decision, "deny")
+        ctx = LAST_OUTPUT["additionalContext"]
+        self.assertNotIn("CX_BINARY is ALREADY set", ctx)
+
     def test_canonical_store_resolves_when_not_on_path(self):
         # cx ONLY in the canonical store (not on PATH), capable + authed → the gate passes with no
         # restart. This is the core clean-flow property: resolve by absolute path, no PATH dependency.
@@ -910,7 +989,7 @@ class TestCxBinaryOverride(unittest.TestCase):
         finally:
             cx_check._canonical_cx = orig
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
         reason = LAST_OUTPUT["permissionDecisionReason"]
         ctx = LAST_OUTPUT["additionalContext"]
         self.assertIn("MISSING the security-scanner subcommands", reason)
@@ -1205,7 +1284,7 @@ class TestDenyVerdictSchema(unittest.TestCase):
 
     def test_python_deny_emitter(self):
         decision, code = run(write("x"), which=None)  # cx absent → _deny(cx_absent)
-        self.assertEqual((decision, code), ("deny", 0))
+        self.assertEqual((decision, code), ("deny", 2))
         self._assert_schema({"hookSpecificOutput": LAST_OUTPUT})
 
     def test_python_crash_emitter_claude(self):
@@ -1267,7 +1346,7 @@ class TestLoggingWiring(unittest.TestCase):
         tmp = tempfile.mkdtemp()
         decision, code = run(bash("npm test"), which=None, env={"CX_LOG_DIR": tmp})
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
         logfile = os.path.join(tmp, "cx-devassist.jsonl")
         self.assertTrue(os.path.exists(logfile))
         with open(logfile, encoding="utf-8") as fh:
@@ -1277,7 +1356,7 @@ class TestLoggingWiring(unittest.TestCase):
         self.assertEqual(match[-1]["decision"], "deny")
         self.assertEqual(match[-1]["reason_code"], "cx_absent")
         self.assertEqual(match[-1]["tool_name"], "Bash")
-        self.assertEqual(match[-1]["exit_code"], 0)
+        self.assertEqual(match[-1]["exit_code"], 2)
 
     def test_pass_emits_gate_decision(self):
         tmp = tempfile.mkdtemp()
@@ -1314,12 +1393,13 @@ class TestMinVersionLoader(unittest.TestCase):
 
 
 class TestCrashGuard(unittest.TestCase):
-    """main() must fail CLOSED: an unexpected exception inside cx_check() becomes a deny + exit 0,
-    never an uncaught traceback (exit 1), for BOTH Claude Code and Copilot CLI.
-    Real allow(0)/deny(0) SystemExit codes must pass through unchanged."""
+    """main() must fail CLOSED: an unexpected exception inside cx_check() becomes a deny.
+    Claude Code: deny + exit 2 (exit 1 = uncaught traceback = fail-open).
+    Copilot CLI: deny + exit 0 (non-zero exit = hook error = fail-open, not a denial).
+    Real allow(0)/deny(2|0) SystemExit codes must pass through unchanged."""
 
-    def test_unexpected_exception_denies_exit_0_claude(self):
-        """Claude Code: crash → exit 0 + nested hookSpecificOutput deny."""
+    def test_unexpected_exception_denies_exit_2_claude(self):
+        """Claude Code: crash → exit 2 + nested hookSpecificOutput deny."""
         def boom():
             raise RuntimeError("internal gate failure")
         orig_check = cx_check.cx_check
@@ -1333,7 +1413,7 @@ class TestCrashGuard(unittest.TestCase):
         finally:
             cx_check.cx_check = orig_check
             cx_check._COPILOT_CLI_MODE = orig_mode
-        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(cm.exception.code, 2)
         self.assertEqual(
             json.loads(out.getvalue())["hookSpecificOutput"]["permissionDecision"], "deny")
 
@@ -1450,7 +1530,7 @@ class TestScannerUnlicensedGate(unittest.TestCase):
         decision, code = run(write("x"), authed=True,
                              scanner_state=cx_check._SCANNER_UNLICENSED)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_unlicensed_allows_with_explicit_override(self):
         decision, code = run(write("x"), authed=True,
@@ -1479,27 +1559,27 @@ class TestReadonlyAllowlist(unittest.TestCase):
         # `;` disqualifies the bare-command guard, so it must fall through to the cx-absent deny.
         decision, code = run(bash("ls; rm -rf /tmp/x"), which=None)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_readonly_with_redirect_is_gated(self):
         decision, code = run(bash("cat secret > /tmp/out"), which=None)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_non_readonly_command_still_gated(self):
         decision, code = run(bash("python app.py"), which=None)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_readonly_is_bash_only_powershell_gated(self):
         decision, code = run({"tool_name": "PowerShell", "tool_input": {"command": "ls"}}, which=None)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
     def test_cx_gate_all_commands_disables_allowlist(self):
         decision, code = run(bash("ls"), which=None, env={"CX_GATE_ALL_COMMANDS": "1"})
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
 
 
 class TestFreshCredentialAuthMessage(unittest.TestCase):
@@ -1517,7 +1597,7 @@ class TestFreshCredentialAuthMessage(unittest.TestCase):
     def test_fresh_credential_says_wait_not_relogin(self):
         decision, code = self._run_unauthed(fresh=True)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
         reason = LAST_OUTPUT["permissionDecisionReason"]
         self.assertIn("Do NOT re-run", reason)
         self.assertIn("REVOKES", reason)
@@ -1525,7 +1605,7 @@ class TestFreshCredentialAuthMessage(unittest.TestCase):
     def test_stale_credential_uses_generic_message(self):
         decision, code = self._run_unauthed(fresh=False)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
         self.assertNotIn("REVOKES", LAST_OUTPUT["permissionDecisionReason"])
 
 
@@ -1535,6 +1615,15 @@ class TestCopilotCLIInputs(unittest.TestCase):
     No Bash carve-outs apply (no 'Bash' tool), so even read-only commands via 'command'
     are fully gated. Bootstrap carve-out is also unavailable (no Bash tool in Copilot CLI).
     """
+
+    def setUp(self):
+        # All tests in this class simulate the --copilot-cli argv flag so cx_check()
+        # sets _COPILOT_CLI_MODE=True even for inputs that don't carry a Copilot CLI envelope.
+        self._orig_argv = sys.argv
+        sys.argv = ["cx_check.py", "--copilot-cli"]
+
+    def tearDown(self):
+        sys.argv = self._orig_argv
 
     # --- command (shell execution) ---
 

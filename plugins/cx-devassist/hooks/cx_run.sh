@@ -4,7 +4,19 @@
 # the canonical store is usable immediately, even before this session's frozen PATH can see it
 # (setx / shell-profile changes only affect FUTURE sessions). Resolution precedence mirrors
 # hooks/cx_check.py _cx_exe():  CX_BINARY (pin) -> canonical store -> PATH.
-# When cx resolves, it is exec'd transparently (stdin/stdout/stderr and exit code preserved).
+# When cx resolves, it is exec'd transparently (stdin/stdout/stderr and exit code preserved) — EXCEPT
+# for two cases:
+#   - The two blocking scan subcommands (…pre-tool-use / …pre-file-write), where stdout and the exit
+#     code are captured (not exec'd) just long enough to record the native scanner's own allow/deny to
+#     cx-devassist.jsonl via cx_log.py, then relayed unchanged. stderr still streams through live.
+#   - `mcp bridge` — this is THE command .mcp.json declares as the MCP server itself, spawned by
+#     Claude Code outside the hook system entirely (no PreToolUse gate runs first). A resolved cx that
+#     is below the minimum version or missing the `mcp bridge` subcommand must NOT be exec'd blindly:
+#     it would die on cobra's "unknown command" error before/during the JSON-RPC initialize handshake,
+#     which Claude Code surfaces as a generic, undiagnosable "-32000 / failed to reconnect". So this
+#     one case is version/capability-checked first (scripts/cx-mcp-guard.sh, the same decision
+#     cx-bootstrap.sh's verify() and cx_check.py's gate already make) and the exact outcome is logged
+#     to cx-devassist.jsonl via cx_log.py — on success as well as denial — before exec'ing or refusing.
 #
 # When cx CANNOT be resolved at all, the fail mode depends on the sub-command so a missing cx is
 # never a silent fail-OPEN on the scan path:
@@ -58,17 +70,164 @@ cx_binary_valid() {
     return 0
 }
 
-# Resolve cx: CX_BINARY (valid pin) -> canonical store -> PATH.
+# Resolve cx: CX_BINARY (valid pin) -> canonical store -> PATH. _CX_RESOLVED_TIER records WHICH
+# tier supplied it (binary|canonical|path) — mirrors cx_check.py's _cx_exe_with_tier() — so a
+# below/incapable/unrunnable MCP guard denial can explain WHY re-running the upgrade bootstrap
+# won't help when CX_BINARY is the one pinning an unfit binary (the bootstrap only ever writes the
+# canonical store, which a CX_BINARY pin continues to shadow).
 CX_RESOLVED=""
+_CX_RESOLVED_TIER=""
 if cx_binary_valid; then
     CX_RESOLVED="$CX_BINARY"
+    _CX_RESOLVED_TIER="binary"
 elif _c="$(canonical_cx)"; then
     CX_RESOLVED="$_c"
+    _CX_RESOLVED_TIER="canonical"
 elif command -v cx >/dev/null 2>&1; then
     CX_RESOLVED="cx"
+    _CX_RESOLVED_TIER="path"
 fi
 
+# Whether this invocation IS the blocking scan decision (pre-tool-use / pre-file-write) — the same
+# substring match used below in the cx-unresolved branch, kept in lockstep with it. Advisory
+# lifecycle hooks (stop/idle/prompt) are not security decisions and stay on the plain exec fast path.
+case "${1:-} ${2:-}" in
+    *pre-tool-use* | *pre-file-write*) _CXRUN_SCAN=1 ;;
+    *)                                 _CXRUN_SCAN=0 ;;
+esac
+
+# Whether this invocation IS the MCP bridge spawn declared in .mcp.json — the exact-match (not a
+# wildcard like the scan patterns above) so nothing else can accidentally take the guarded path.
+case "${1:-} ${2:-}" in
+    "mcp bridge") _CXRUN_MCP=1 ;;
+    *)            _CXRUN_MCP=0 ;;
+esac
+
 if [ -n "$CX_RESOLVED" ]; then
+    if [ "$_CXRUN_SCAN" = 1 ]; then
+        # Capture (rather than exec) ONLY for the blocking scan decision, so this wrapper can observe
+        # the native cx scanner's allow/deny and record it — a plain `exec` replaces this process, so
+        # nothing downstream could ever see or log the actual vulnerability/policy block (AST-162014).
+        # stderr still streams straight through (command substitution only captures stdout); stdin is
+        # read once here and replayed to cx unchanged.
+        _CXRUN_INPUT=$(cat)
+        _CXRUN_OUTPUT=$(printf '%s' "$_CXRUN_INPUT" | "$CX_RESOLVED" "$@")
+        _CXRUN_STATUS=$?
+
+        # decision + WHY: either signal cx may use — a literal deny in its JSON (a genuine,
+        # well-formed finding: "vulnerability_detected"), or a bare exit 2 with no such JSON (the
+        # same pair this script's OWN fail-closed branch below emits together for its cx-absent
+        # deny — an unexpected/error condition, not necessarily a real finding: "error_during_block").
+        case "$_CXRUN_OUTPUT" in
+            *'"permissionDecision":"deny"'*)
+                _CXRUN_DECISION=deny
+                _CXRUN_REASON=vulnerability_detected
+                ;;
+            *)
+                if [ "$_CXRUN_STATUS" -eq 2 ]; then
+                    _CXRUN_DECISION=deny
+                    _CXRUN_REASON=error_during_block
+                else
+                    _CXRUN_DECISION=allow
+                    _CXRUN_REASON=no_issues_found
+                fi
+                ;;
+        esac
+        _CXRUN_TOOL=$(printf '%s' "$_CXRUN_INPUT" | sed -n 's/.*"tool_name" *: *"\([A-Za-z0-9_.:-]*\)".*/\1/p' | head -1)
+
+        # Best-effort log — never let a missing/slow python or a logging failure affect the relay.
+        _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
+        for _CXRUN_PY in python3 python; do
+            command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
+            # `break` only on a real success: on Windows, "python3" can resolve to the Microsoft
+            # Store's App Execution Alias stub, which is ON PATH but exits non-zero without running
+            # anything (no Python actually installed under that name) — falling through to "python"
+            # in that case is what makes this work on such machines.
+            "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" scan_decision \
+                "decision=$_CXRUN_DECISION" "tool_name=$_CXRUN_TOOL" "reason_code=$_CXRUN_REASON" \
+                >/dev/null 2>&1 && break
+        done
+
+        printf '%s\n' "$_CXRUN_OUTPUT"
+        exit "$_CXRUN_STATUS"
+    fi
+    if [ "$_CXRUN_MCP" = 1 ]; then
+        _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
+        _CXRUN_GUARD="$_CXRUN_DIR/../scripts/cx-mcp-guard.sh"
+        _CXRUN_MIN_FILE="$_CXRUN_DIR/../scripts/cx-min-version"
+        _CXRUN_MCP_STATE=""
+        _CXRUN_MCP_HAVE=""
+        _CXRUN_MCP_MIN=""
+        if [ -r "$_CXRUN_GUARD" ]; then
+            # shellcheck source=../scripts/cx-mcp-guard.sh
+            . "$_CXRUN_GUARD"
+            _CXRUN_MCP_STATE=$(cx_mcp_guard_state "$CX_RESOLVED" "$_CXRUN_MIN_FILE")
+            _CXRUN_MCP_HAVE=$(cx_mcp_parse_semver "$("$CX_RESOLVED" version 2>&1)") || _CXRUN_MCP_HAVE=""
+            # No hardcoded fallback here — omitted falls through to cx_mcp_load_min_version's own
+            # single default, so the floor constant lives in exactly one place in this module.
+            _CXRUN_MCP_MIN=$(cx_mcp_load_min_version "$_CXRUN_MIN_FILE")
+        fi
+        # A missing/unsourceable guard helper (a broken install) must NOT make the MCP worse than it
+        # was before this check existed — unlike cx_check.py's fail-closed SCAN gate, this guard is a
+        # reliability diagnostic, not a security control, so an unevaluable guard falls through to the
+        # plain exec below exactly as cx_run.sh always has (empty state ~ "ok").
+        case "$_CXRUN_MCP_STATE" in
+            ok | dev | "")
+                _CXRUN_MCP_RESULT=ok
+                _CXRUN_MCP_REASON="${_CXRUN_MCP_STATE:-ok}"
+                ;;
+            *)
+                _CXRUN_MCP_RESULT=denied
+                _CXRUN_MCP_REASON="$_CXRUN_MCP_STATE"
+                ;;
+        esac
+
+        # Best-effort log — same python3/python fallback loop as the scan_decision log above; never
+        # let a missing/slow python or a logging failure affect the connection outcome. `tier`
+        # records which resolution tier supplied $CX_RESOLVED, so the log can explain (via
+        # cx_log.py's message synthesis) why a CX_BINARY-pinned denial won't self-heal from a
+        # bootstrap upgrade — see the matching stderr note below.
+        for _CXRUN_PY in python3 python; do
+            command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
+            "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" mcp_connect \
+                "result=$_CXRUN_MCP_RESULT" "reason_code=$_CXRUN_MCP_REASON" \
+                "version_have=$_CXRUN_MCP_HAVE" "version_min=$_CXRUN_MCP_MIN" \
+                "tier=$_CX_RESOLVED_TIER" \
+                >/dev/null 2>&1 && break
+        done
+
+        if [ "$_CXRUN_MCP_RESULT" = denied ]; then
+            # Refuse to exec a subcommand this build can't run — that is what corrupts the stdio
+            # transport into today's opaque -32000. stdout stays untouched (no partial MCP framing);
+            # the reason goes to stderr (captured in Claude Code's own MCP log, per references/mcp.md)
+            # AND to cx-devassist.jsonl above, so a connect failure always has an exact cause on disk.
+            case "$_CXRUN_MCP_REASON" in
+                below)
+                    printf 'cx-devassist: Checkmarx MCP bridge unavailable: cx v%s is below the required v%s. Run /cx-cli-setup to upgrade.\n' \
+                        "$_CXRUN_MCP_HAVE" "$_CXRUN_MCP_MIN" >&2
+                    ;;
+                incapable)
+                    printf "cx-devassist: Checkmarx MCP bridge unavailable: cx v%s is missing the 'mcp bridge' subcommand (capability-incomplete build). Run /cx-cli-setup.\\n" \
+                        "$_CXRUN_MCP_HAVE" >&2
+                    ;;
+                unrunnable)
+                    printf 'cx-devassist: Checkmarx MCP bridge unavailable: cx version did not run or returned no usable version. Run /cx-cli-setup.\n' >&2
+                    ;;
+                *)
+                    printf 'cx-devassist: Checkmarx MCP bridge unavailable (%s). Run /cx-cli-setup.\n' "$_CXRUN_MCP_REASON" >&2
+                    ;;
+            esac
+            # CX_BINARY takes priority over the canonical store in this exact resolution — re-running
+            # the bootstrap upgrade only writes the canonical store, so it would silently NOT fix a
+            # CX_BINARY-pinned denial. Say so explicitly instead of leaving a confusing "I upgraded
+            # but it's still broken" loop.
+            if [ "$_CX_RESOLVED_TIER" = "binary" ]; then
+                printf 'cx-devassist: Note: CX_BINARY is pinned to this exact binary and takes priority over the canonical store, so running the bootstrap will NOT fix this. Unset CX_BINARY, replace the binary at that exact path, or repoint CX_BINARY at the canonical store after upgrading.\n' >&2
+            fi
+            exit 1
+        fi
+        # ok / dev / guard-unavailable — fall through to the plain exec below.
+    fi
     exec "$CX_RESOLVED" "$@"
 fi
 
@@ -109,6 +268,14 @@ JSON
         exit 0
         ;;
     *)
+        if [ "$_CXRUN_MCP" = 1 ]; then
+            _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
+            for _CXRUN_PY in python3 python; do
+                command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
+                "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" mcp_connect \
+                    "result=denied" "reason_code=cx_absent" >/dev/null 2>&1 && break
+            done
+        fi
         printf 'cx-devassist: cx CLI not found (looked at CX_BINARY, the canonical store, and PATH). Run /cx-cli-setup to install it.\n' >&2
         exit 1
         ;;
