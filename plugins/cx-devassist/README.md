@@ -187,7 +187,6 @@ All optional — sensible defaults apply.
 | `CX_LOG_DISABLE=1` | Turn structured logging off entirely. |
 | `CX_ASSISTANT` | Label the assistant in logs (default `claude`). |
 | `CX_REQUIRE_CHECKSUM=1` | Make `cx-bootstrap.sh` refuse to install an asset it can't checksum-verify. |
-| `CX_ALLOW_UNSCANNED=1` | Audited emergency bypass — runs the action **unscanned** and records it to the audit log. |
 
 ---
 

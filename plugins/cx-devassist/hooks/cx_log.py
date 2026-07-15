@@ -66,9 +66,6 @@ _EVENTS = {
         "version_state": _VERSION_STATES,
         "exit_code": _as_int,
     },
-    "unscanned_override": {
-        "tool_name": _token,
-    },
     "bootstrap": {
         "mode": _enum({"install", "upgrade", "unknown"}),
         "allowed": _as_bool,

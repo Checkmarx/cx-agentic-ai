@@ -1,8 +1,7 @@
 """Shared helper: enforces that the cx CLI is installed, recent enough, and authenticated
 before any gated tool call runs. Fail-closed: if cx is missing, unrunnable, or below the
 minimum version, every Bash/Write/Edit/mcp__* call is BLOCKED — even offline. The only
-escape from the block is running the plugin's own bundled bootstrap (or an audited
-CX_ALLOW_UNSCANNED=1)."""
+escape from the block is running the plugin's own bundled bootstrap."""
 
 import json
 import os
@@ -190,9 +189,6 @@ _AUTH_CACHE_TTL = 30 * 60  # 30 minutes
 # fire re-probes immediately.
 _VERSION_CACHE_FILE = _state_path("cx_version_cache")
 _VERSION_CACHE_TTL = 30 * 60  # 30 minutes
-
-# Audit log for CX_ALLOW_UNSCANNED escapes — a durable record that scanning was bypassed.
-_UNSCANNED_AUDIT_FILE = _state_path("cx_unscanned_audit.log")
 
 # Credential-recovery commands must be allowed even when unauthenticated — otherwise
 # the auth gate blocks the very command that fixes auth (a chicken-and-egg that forces
@@ -892,47 +888,7 @@ def cx_check():
         _log("gate_decision", decision="allow", reason_code="bootstrap", tool_name=tool)
         return
 
-    # 2. Audited manual override. Loud, durable, and explicitly opt-in.
-    if os.environ.get("CX_ALLOW_UNSCANNED") == "1":
-        audit = "CX_ALLOW_UNSCANNED=1 bypassed scanning for tool={0} at {1}".format(
-            tool or "<unknown>", time.time())
-        print("WARNING: " + audit, file=sys.stderr)
-        # The bypass is permitted ONLY if it can be DURABLY AUDITED. If the audit record cannot be
-        # written (no writable state dir, etc.), refuse it — an UNAUDITED unscanned run would defeat
-        # the escape hatch's only safeguard. Fail CLOSED.
-        try:
-            if not _UNSCANNED_AUDIT_FILE:
-                raise OSError("no audit-log location available")
-            with open(_UNSCANNED_AUDIT_FILE, "a", newline="\n") as f:
-                f.write(audit + "\n")
-            _chmod_600(_UNSCANNED_AUDIT_FILE)
-        except (OSError, TypeError) as exc:
-            _deny(
-                reason=(
-                    "CX_ALLOW_UNSCANNED=1 was set, but the unscanned-bypass AUDIT record could not "
-                    "be written — an unaudited bypass is refused, so this operation is BLOCKED."
-                ),
-                context=(
-                    "The CX_ALLOW_UNSCANNED escape hatch requires a durable audit record and that "
-                    "write failed ({0}). Make the agent-log directory writable (set CX_LOG_DIR to a "
-                    "writable path) or unset CX_ALLOW_UNSCANNED. All agent actions remain blocked "
-                    "fail-closed.".format(exc)
-                ),
-                reason_code="unscanned_audit_failed",
-                tool_name=tool,
-            )
-        _log("unscanned_override", tool_name=tool)
-        _allow_with_warning(
-            context=(
-                "WARNING: scanning was BYPASSED via CX_ALLOW_UNSCANNED=1. This operation ran "
-                "UNSCANNED and was recorded to the audit log. Unset CX_ALLOW_UNSCANNED to "
-                "restore enforcement."
-            ),
-            reason_code="unscanned_override",
-            tool_name=tool,
-        )
-
-    # 2b. Read-only Bash commands (ls, cat, grep, …) can't write code to disk or run another program,
+    # 2. Read-only Bash commands (ls, cat, grep, …) can't write code to disk or run another program,
     #     so there is nothing to scan — allow them WITHOUT requiring cx to be installed/authed. Removes
     #     the friction of gating a plain `ls` during setup. Allowlisted + shape-guarded so it can't be
     #     used to smuggle a write/exec (`ls; rm …`, `cat $(…)`, `> file` are all rejected).
@@ -1136,7 +1092,7 @@ def cx_check():
     #     CLOSED with the same visible /cx-cli-setup message. UNKNOWN (probe error/timeout) defers to
     #     the real stage-2 scanner — no worse than before — so a flaky probe can't over-block a
     #     genuinely-authenticated user. (Carve-outs in steps 1/2/5 already returned, so the bootstrap,
-    #     CX_ALLOW_UNSCANNED, and `cx auth`/`cx configure` recovery commands never reach this probe.)
+    #     read-only commands, and `cx auth`/`cx configure` recovery commands never reach this probe.)
     scanner = _scanner_state(identity)
     if scanner == _SCANNER_UNLICENSED:
         # Authenticated, but the cx account has NO AI-scanning license (Checkmarx One Assist / AI
@@ -1220,8 +1176,7 @@ def _fail_closed_on_crash():
                 ),
                 "additionalContext": (
                     "An unexpected error occurred inside cx_check.py. All agent actions remain "
-                    "blocked until it is resolved. Re-run /cx-cli-setup, or set CX_ALLOW_UNSCANNED=1 "
-                    "to bypass scanning (audited)."
+                    "blocked until it is resolved. Re-run /cx-cli-setup to restore the gate."
                 ),
             }
         }))
