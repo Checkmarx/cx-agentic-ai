@@ -172,7 +172,27 @@ bare `cx` only when it is on PATH):
 "$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan asca -s "<file-path>"
 ```
 
-Confirm all findings are resolved. If new findings appear, repeat the Remediation flow for them.
+The scan reads the WHOLE file, so it also reports findings in code you never touched. **Remediate only
+the findings that belong to your own changes** — everything else is pre-existing and out of scope.
+
+Classify every entry in `scan_details` against the changes you tracked in Step 3:
+
+- **In scope — remediate.** Either:
+  - the finding you set out to fix is still there (same `rule_id`, at or near its original line) — your
+    fix did not resolve it; or
+  - the finding sits on a line you added or modified — your fix introduced it.
+- **Out of scope — do NOT fix, and do not edit that code.** Every other finding: it lives in code you
+  did not touch and was already there before you started.
+
+Match on `problematicLine` (the offending source text) rather than the line number alone: if your fix
+added or removed lines, every finding below the edit shifts by that many lines, and a number-only match
+mis-classifies them as new.
+
+Repeat Flow 2 from Step 2 for the in-scope findings **only**. If an in-scope finding survives a second
+remediation attempt, stop and report it unresolved — do not keep looping.
+
+Report the out-of-scope findings in the Step 5 summary as pre-existing and unfixed; leave their code
+alone.
 
 ### Step 5 — Output Remediation Summary
 
@@ -188,6 +208,10 @@ Files Modified:
 1. [file]
    - Line [n]: [description of change]
    - [additional changes]
+
+Pre-existing findings (NOT fixed — outside the scope of this remediation):
+- [rule_name] — line [n] — [severity]
+- (omit this section entirely when the re-scan reports none)
 ```
 
 **Final status:**

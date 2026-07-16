@@ -168,8 +168,26 @@ field naming.
 
 ### Step 4 — Re-scan
 
-Re-run the Flow 1 Step 2 command on the same manifest and confirm the findings are resolved. If new
-findings appear (e.g. a transitive dependency), repeat Flow 2 for them.
+Re-run the Flow 1 Step 2 command on the same manifest.
+
+The scan reads the WHOLE manifest, so it also reports vulnerable packages you never touched.
+**Remediate only the findings that belong to the packages you changed in Step 3** — everything else is
+pre-existing and out of scope.
+
+Classify every finding against the packages you changed:
+
+- **In scope — remediate.** Either:
+  - the package you upgraded/removed is still reported — your fix did not resolve it; or
+  - the version you moved to has findings of its own, including a transitive dependency **that version
+    pulled in** — your fix introduced it.
+- **Out of scope — do NOT fix, and do not touch that dependency.** Any finding for a package you did not
+  change, including a transitive dependency that was already in the tree before your change.
+
+Repeat Flow 2 from Step 2 for the in-scope findings **only**. If an in-scope finding survives a second
+remediation attempt, stop and report it unresolved — do not keep looping (version ping-pong, where each
+upgrade surfaces the next CVE, is the failure mode this bound exists to stop).
+
+Report the out-of-scope findings in the Step 5 summary as pre-existing and unfixed.
 
 ### Step 5 — Output Remediation Summary
 
@@ -180,10 +198,15 @@ Package:   [PackageName] [old-version] → [new-version | REMOVED]
 Manager:   [PackageManager]
 Issue:     [CVE list] ([highest severity])
 File:      [FilePath]
+
+Pre-existing findings (NOT fixed — outside the scope of this remediation):
+- [package@version] — [CVE list] — [severity]
+- (omit this section entirely when the re-scan reports none)
 ```
 
 **Final status:**
-- ✅ All fixed: "SCA remediation completed. Affected packages upgraded/removed; re-scan is clean."
+- ✅ All fixed: "SCA remediation completed. Affected packages upgraded/removed; they are clean on
+  re-scan. Any pre-existing findings in packages I did not change are listed above, unfixed."
 - ⚠️ Partially fixed: "SCA remediation partially completed — manual review required (e.g. no fixed
   version exists / breaking upgrade). TODOs noted."
 - ❌ Failed: "SCA remediation failed. Reason: [summary]. Unresolved packages listed above."
