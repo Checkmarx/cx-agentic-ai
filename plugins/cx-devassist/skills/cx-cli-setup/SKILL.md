@@ -80,8 +80,8 @@ cx version
   To confirm the binary directly without relying on PATH, invoke it by its canonical absolute path:
   `"$HOME/.checkmarx/bin/cx" version` (Unix) or `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" version` (Windows).
 
-**Version gate:** the minimum is `scripts/cx-min-version` (the first ast-cli release with `cx mcp
-bridge` / `cx auth login`). A build **below** it is a hard block on every gated action — including
+**Version gate:** the minimum is `scripts/cx-min-version` — the oldest ast-cli release this plugin
+supports. A build **below** it is a hard block on every gated action — including
 `cx auth login` — so upgrade via `references/upgrade.md`. A `cx version` reporting the literal `dev`
 sentinel bypasses the numeric check (auth still applies); don't treat `dev` as a failure.
 
