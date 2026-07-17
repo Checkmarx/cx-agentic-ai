@@ -1,0 +1,103 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+            "timeout": 45,
+            "statusMessage": "Checking cx CLI is available..."
+          },
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks claude-pre-tool-use",
+            "timeout": 10,
+            "statusMessage": "Checking command against security policy..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+            "timeout": 45,
+            "statusMessage": "Checking cx CLI is available..."
+          },
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks claude-pre-file-write",
+            "timeout": 60,
+            "statusMessage": "Checking file write against security policy..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+            "timeout": 45,
+            "statusMessage": "Checking cx CLI is available..."
+          },
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks claude-pre-file-write",
+            "timeout": 60,
+            "statusMessage": "Checking file edit against security policy..."
+          }
+        ]
+      },
+      {
+        "matcher": "MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+            "timeout": 45,
+            "statusMessage": "Checking cx CLI is available..."
+          },
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks claude-pre-file-write",
+            "timeout": 60,
+            "statusMessage": "Checking file write against security policy..."
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__Checkmarx__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+            "timeout": 45,
+            "statusMessage": "Checking cx CLI is available..."
+          },
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks claude-pre-tool-use",
+            "timeout": 10,
+            "statusMessage": "Checking MCP tool call against security policy..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks claude-stop",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
