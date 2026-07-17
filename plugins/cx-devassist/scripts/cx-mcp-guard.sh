@@ -60,7 +60,7 @@ cx_mcp_version_ge() {
 #   copy to keep in sync with scripts/cx-min-version (search marker: CX_MIN_VERSION).
 cx_mcp_load_min_version() {
     _CXMCP_MINFILE="${1:-}"
-    _CXMCP_FALLBACK="${2:-2.3.56}"
+    _CXMCP_FALLBACK="${2:-2.3.57}"
     if [ -n "$_CXMCP_MINFILE" ] && [ -r "$_CXMCP_MINFILE" ]; then
         while IFS= read -r _CXMCP_LINE || [ -n "$_CXMCP_LINE" ]; do
             case "$_CXMCP_LINE" in
