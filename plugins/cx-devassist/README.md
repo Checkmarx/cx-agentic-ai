@@ -8,6 +8,8 @@ the Checkmarx `cx` CLI to scan the proposed action. If a real vulnerability or p
 found — **or if the scanner can't be trusted to run** — the action is **blocked**, not silently
 allowed. Found issues are remediated interactively through the bundled Checkmarx MCP server.
 
+Part of [Checkmarx Agentic AI](../../README.md).
+
 ---
 
 ## How it works
@@ -207,4 +209,5 @@ never raises into the gate, and `CX_LOG_DISABLE=1` turns it off.
 
 ## License
 
-MIT (declared in `plugin.json`).
+Apache 2.0 — see [LICENSE](../../LICENSE) at the repo root, which governs this plugin along with the
+rest of [Checkmarx Agentic AI](../../README.md).
