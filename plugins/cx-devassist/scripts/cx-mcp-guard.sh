@@ -19,7 +19,7 @@
 #   stdout: the first "MAJOR.MINOR.PATCH" substring found in <text>; return 1 with no output if none.
 #   `[^0-9]*` (not `.*[^0-9]`) as the prefix so a BARE version string with no leading text at all
 #   (exactly what scripts/cx-min-version contains) still matches — a `.*[^0-9]` prefix would require
-#   at least one non-digit character before the version and silently fail on a bare "2.3.54" line.
+#   at least one non-digit character before the version and silently fail on a bare "2.3.57" line.
 cx_mcp_parse_semver() {
     _CXMCP_SEMVER=$(printf '%s' "${1:-}" \
         | sed -n 's/[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1)
