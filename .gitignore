@@ -1,4 +1,32 @@
-.DS_Store
+# Local credentials — never commit a configured mcp.json with real secrets
+mcp/mcp.json.local
+*.local
+
+# IDE settings
+.vscode/settings.json
+.vscode/*.code-workspace
 .vscode/.checkmarxIgnored
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude Code local config
+.claude/settings.local.json
+
+# OS metadata
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Python
 __pycache__/
 *.pyc
+
+# Temporary and log files
+*.log
+*.tmp

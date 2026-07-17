@@ -20,10 +20,8 @@
 #
 # When cx CANNOT be resolved at all, the fail mode depends on the sub-command so a missing cx is
 # never a silent fail-OPEN on the scan path:
-#   - Blocking PreToolUse scanners (…pre-tool-use / …pre-file-write) -> emit a deny JSON + exit 0
+#   - Blocking PreToolUse scanners (…pre-tool-use / …pre-file-write) -> emit a deny JSON + exit 2
 #     (fail CLOSED, mirroring cx_check.sh's no-Python deny) so the tool call is BLOCKED, unscanned.
-#     Exit 0 (not 2) because that is the ONLY exit code both Claude Code and Copilot CLI parse
-#     stdout JSON on for a PreToolUse deny — see the exit-code contract note in cx_check.sh.
 #   - Advisory lifecycle hooks (…stop / …idle / …prompt-submit) -> exit 0 (non-blocking by design;
 #     a fail-closed prompt-submit would deadlock the user before they could even install cx).
 #   - Anything else (mcp bridge, scan, auth, configure, version, …) -> stderr error + exit 1.

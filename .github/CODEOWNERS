@@ -1,1 +1,6 @@
-* @cx-avi-sabzerou @cx-mor-levy @cx-amol-mane @cx-anurag-dalke
+# CODEOWNERS
+# Each line defines a file pattern and the owner(s) responsible for reviewing changes.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# All files owned by Checkmarx One Integrations Team
+* @checkmarx/sg-rnd-eng-sypher @cx-avi-sabzerou @cx-mor-levy @cx-amol-mane @cx-anurag-dalke

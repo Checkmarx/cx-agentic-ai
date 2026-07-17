@@ -73,9 +73,6 @@ _EVENTS = {
         "version_state": _VERSION_STATES,
         "exit_code": _as_int,
     },
-    "unscanned_override": {
-        "tool_name": _token,
-    },
     # CX_ALLOW_UNLICENSED=1 bypass — distinct from unscanned_override (different env var / policy).
     "unlicensed_override": {
         "tool_name": _token,
@@ -83,6 +80,14 @@ _EVENTS = {
     "bootstrap": {
         "mode": _enum({"install", "upgrade", "unknown"}),
         "allowed": _as_bool,
+    },
+    "admin_config": {
+        # Outcome of loading the bundled admin onboarding config
+        # (config/cx-onboarding.properties). NEVER carries the offending VALUE (which an admin -- or a
+        # tamperer -- controls); only WHICH known key was accepted/rejected and the outcome, so a bad
+        # config leaves an audit trail without echoing its payload into the log.
+        "result": _enum({"loaded", "invalid", "absent"}),
+        "key": _enum({"cx_base_auth_uri", "cx_tenant"}),
     },
     "capability_probe": {
         "result": _as_bool,

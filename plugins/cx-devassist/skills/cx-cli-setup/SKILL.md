@@ -80,8 +80,8 @@ cx version
   To confirm the binary directly without relying on PATH, invoke it by its canonical absolute path:
   `"$HOME/.checkmarx/bin/cx" version` (Unix) or `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" version` (Windows).
 
-**Version gate:** the minimum is `scripts/cx-min-version` (the first ast-cli release with `cx mcp
-bridge` / `cx auth login`). A build **below** it is a hard block on every gated action — including
+**Version gate:** the minimum is `scripts/cx-min-version` — the oldest ast-cli release this plugin
+supports. A build **below** it is a hard block on every gated action — including
 `cx auth login` — so upgrade via `references/upgrade.md`. A `cx version` reporting the literal `dev`
 sentinel bypasses the numeric check (auth still applies); don't treat `dev` as a failure.
 
@@ -89,6 +89,11 @@ sentinel bypasses the numeric check (auth still applies); don't treat `dev` as a
 
 Two methods: **API key** (simplest — the key encodes server URL, auth URL, and tenant) and **browser
 sign-in (OAuth)** (logs in via browser/MFA; saves a refresh token as `cx_apikey`).
+
+> **Admin pre-fill (OAuth only):** if an administrator filled the plugin's
+> `config/cx-onboarding.properties` with a URL + tenant, those values are embedded directly into the
+> gate's `cx auth login` recovery command, and the OAuth flow **skips the URL/tenant question**. See
+> `references/oauth.md`. An API key needs neither, so this pre-fill does not affect Path A.
 
 **Capability check — does this build support browser sign-in?** Exit codes vary, so check the
 subcommand list:
@@ -186,4 +191,5 @@ developer originally used, then route: **API key →** generate a new key and re
 | `cx utils env` | Show current configuration |
 
 Releases: https://github.com/Checkmarx/ast-cli/releases ·
-Quick-start: https://docs.checkmarx.com/en/34965-68621-checkmarx-one-cli-quick-start-guide.html
+Quick-start: https://docs.checkmarx.com/en/34965-68621-checkmarx-one-cli-quick-start-guide.html ·
+Environment/region URLs + tenant lookup: https://docs.checkmarx.com/en/34965-68530-logging-in-to-checkmarx-one.html

@@ -344,18 +344,6 @@ class TestScannerPassthrough(unittest.TestCase):
         self.assertIsNone(decision)
         self.assertEqual(code, 0)
 
-    def test_allow_unscanned_bypasses_passthrough(self):
-        orig_audit = cx_check._UNSCANNED_AUDIT_FILE
-        cx_check._UNSCANNED_AUDIT_FILE = os.path.join(tempfile.mkdtemp(), "audit.log")
-        try:
-            decision, code = run(write("Runtime.getRuntime().exec(userInput)"), authed=True,
-                                 scanner_state=cx_check._SCANNER_PASSTHROUGH,
-                                 env={"CX_ALLOW_UNSCANNED": "1"})
-            self.assertEqual(decision, "allow")
-            self.assertEqual(code, 0)
-        finally:
-            cx_check._UNSCANNED_AUDIT_FILE = orig_audit
-
 
 class TestRecoveryMessaging(unittest.TestCase):
     """The deny messages must split the two auth paths by WHO runs them (OAuth = agent may run it, no
@@ -538,34 +526,6 @@ class TestScannerCache(unittest.TestCase):
         cx_check._SCANNER_CACHE_FILE = None
         self._probe(cx_check._SCANNER_SCAN)
         self.assertEqual(cx_check._scanner_state(("/p", 1.0)), cx_check._SCANNER_SCAN)  # must not raise
-
-
-class TestAllowUnscanned(unittest.TestCase):
-    def test_allows_with_audit(self):
-        # Redirect the audit file to a throwaway path so the test never writes into the
-        # user's real ~/.checkmarx security audit log.
-        orig_audit = cx_check._UNSCANNED_AUDIT_FILE
-        cx_check._UNSCANNED_AUDIT_FILE = os.path.join(tempfile.mkdtemp(), "audit.log")
-        try:
-            decision, code = run(bash("npm test"), which=None, env={"CX_ALLOW_UNSCANNED": "1"})
-            self.assertEqual(decision, "allow")
-            self.assertEqual(code, 0)
-            with open(cx_check._UNSCANNED_AUDIT_FILE) as f:
-                self.assertIn("bypassed scanning", f.read())
-        finally:
-            cx_check._UNSCANNED_AUDIT_FILE = orig_audit
-
-    def test_denies_when_audit_cannot_be_written(self):
-        # The bypass requires a DURABLE audit record. If it can't be written (no log location),
-        # an unaudited bypass is refused → deny (exit 2), never a silent unscanned allow.
-        orig_audit = cx_check._UNSCANNED_AUDIT_FILE
-        cx_check._UNSCANNED_AUDIT_FILE = None
-        try:
-            decision, code = run(bash("npm test"), which=None, env={"CX_ALLOW_UNSCANNED": "1"})
-            self.assertEqual(decision, "deny")
-            self.assertEqual(code, 2)
-        finally:
-            cx_check._UNSCANNED_AUDIT_FILE = orig_audit
 
 
 class TestBootstrapCarveOut(unittest.TestCase):
@@ -779,7 +739,6 @@ class TestAgentLogDir(unittest.TestCase):
         for path in (
             cx_check._AUTH_CACHE_FILE,
             cx_check._VERSION_CACHE_FILE,
-            cx_check._UNSCANNED_AUDIT_FILE,
         ):
             self.assertEqual(os.path.dirname(path), cx_check._AGENT_LOG_DIR)
 
