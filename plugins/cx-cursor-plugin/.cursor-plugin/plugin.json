@@ -25,7 +25,7 @@
   ],
   "mcpServers": {
     "Checkmarx": {
-      "url": "https://ast-master-components.dev.cxast.net/api/security-mcp/mcp/master-sypher"
+      "url": "https://${env:CXONE_BASE_URL}/api/security-mcp/mcp/${env:CXONE_TENANT_ID}"
     }
   },
   "commands": [],
