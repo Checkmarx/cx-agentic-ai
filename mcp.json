@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "Checkmarx": {
-      "url": "https://{cxone_base_url}/api/security-mcp/mcp/{tenant_id}",
-    }
-  }
-}
-

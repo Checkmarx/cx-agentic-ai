@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "Checkmarx": {
+      "url": "https://ast-master-components.dev.cxast.net/api/security-mcp/mcp/master-sypher"
+    }
+  }
+}
