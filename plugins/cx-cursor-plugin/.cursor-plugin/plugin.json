@@ -23,10 +23,21 @@
     "sca",
     "secrets-detection"
   ],
-  "mcpServers": {
-    "Checkmarx": {
-      "url": "https://${env:CXONE_BASE_URL}/api/security-mcp/mcp/${env:CXONE_TENANT_ID}"
-    }
+  "variables": {
+    "type": "object",
+    "properties": {
+      "CXONE_BASE_URL": {
+        "type": "string",
+        "title": "Checkmarx One API Host",
+        "description": "Your Checkmarx One API host, e.g. ast.checkmarx.net"
+      },
+      "CXONE_TENANT_ID": {
+        "type": "string",
+        "title": "Tenant ID",
+        "description": "Your Checkmarx tenant identifier"
+      }
+    },
+    "required": ["CXONE_BASE_URL", "CXONE_TENANT_ID"]
   },
   "commands": [],
   "rules": [],
