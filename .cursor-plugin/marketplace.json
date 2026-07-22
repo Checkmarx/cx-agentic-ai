@@ -1,0 +1,19 @@
+{
+  "name": "cx-cursor-marketplace",
+  "owner": {
+    "name": "Checkmarx"
+  },
+  "metadata": {
+    "description": "Official Checkmarx MCP Plugin For Cursor IDE",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "checkmarx",
+      "displayName": "Checkmarx",
+      "description": "Checkmarx-powered security scanning and fixing inside your coding loop. Checks the code you write and the code AI generates for vulnerabilities and risky dependencies, then returns precise, engine-backed fixes. Best invoked after writing or changing code, before commits, and around security-sensitive logic. Applies fixes inline so you can accept them without leaving your editor.",
+      "category": "security",
+      "source": "./plugins/cx-cursor-plugin"
+    }
+  ]
+}
