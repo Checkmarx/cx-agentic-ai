@@ -5,6 +5,6 @@
   "author": {
     "name": "Checkmarx"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": ["security", "checkmarx", "cxone", "sast", "sca"]
 }

@@ -39,26 +39,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Numeric floor only (capability is decided by the gate's probe, not this number). Keep IDENTICAL
 # to scripts/cx-min-version and the fallback in hooks/cx_check.py. (search marker: CX_MIN_VERSION)
-MIN_CX_VERSION_FALLBACK="2.3.56"
+MIN_CX_VERSION_FALLBACK="2.3.57"
 
 GITHUB_RELEASES="https://github.com/Checkmarx/ast-cli/releases"
 GITHUB_LATEST="$GITHUB_RELEASES/latest/download"
-
-# ---------------------------------------------------------------------------------------
-# TEST PIN (2026-07-06) — TEMPORARY. Pin cx to the capability-complete prerelease
-# `2.3.54-claude-cli-pre-release` so the gate/MCP subcommands (cx mcp bridge, cx hooks claude-*)
-# exist while the public "latest" (stable 2.3.54) still lacks them. Unlike the earlier
-# 2.3.54-claude-prerelease, THIS release uses STANDARD naming (ast-cli_<os>_<arch> unversioned
-# aliases + ast-cli_<tag>_checksums.txt whose contents list those names), so pinning needs only the
-# tag — the unversioned ASSET from detect_os_arch downloads and verifies as-is (no tag-embedding, no
-# darwin no-prefix hack, no checksum fallback). Two upstream defects remain in THIS build, so only
-# Windows + Apple-Silicon macOS install cleanly:
-#   - linux_x64 tarball ships a WINDOWS binary → Linux fails LOUD at verify() (nothing is placed);
-#   - darwin_x64 tarball's binary is named `cx-mac` and is arm64 (handled in download_and_extract).
-# Remove this pin once the linux/darwin slots are rebuilt correctly (then "latest" / a clean pin).
-PINNED_CX_RELEASE_TAG="2.3.54-claude-cli-pre-release"
-PINNED_CX_RELEASE_ASSETS=("ast-cli_linux_x64.tar.gz" "ast-cli_windows_x64.zip" "ast-cli_darwin_x64.tar.gz")
-# --- END TEST PIN ---
 
 # Temp base for download staging and the transient checksums file (NOT for persistent state).
 TMP_BASE="${TMPDIR:-${TEMP:-${TMP:-/tmp}}}"
@@ -128,17 +112,6 @@ detect_os_arch() {
     esac
 }
 
-# Is $1 (the UNVERSIONED asset name from detect_os_arch, e.g. "ast-cli_darwin_x64.tar.gz") a platform
-# the pinned release actually publishes? Matched against the unversioned PINNED_CX_RELEASE_ASSETS names
-# (this release publishes those aliases and lists them in its checksums file — see the TEST PIN block).
-is_pinned_asset() {
-    local asset="$1" a
-    for a in "${PINNED_CX_RELEASE_ASSETS[@]}"; do
-        [[ "$a" == "$asset" ]] && return 0
-    done
-    return 1
-}
-
 # ---------------------------------------------------------------------------------------
 # Download + extract `cx` into a staging dir; echoes the staged binary path.
 # ---------------------------------------------------------------------------------------
@@ -189,17 +162,8 @@ download_and_extract() {
         tar -xzf "$archive" -C "$staging" || die "tar extract failed"
     fi
 
-    if [[ "$OS" == "windows" ]]; then
-        bin="$staging/cx.exe"
-    else
-        # Most tarballs name the binary `cx`; this prerelease's darwin tarball names it `cx-mac`.
-        # Accept either (placement normalizes the source to `cx` at the destination).
-        for cand in "$staging/cx" "$staging/cx-mac" "$staging/cx-darwin"; do
-            [[ -f "$cand" ]] && { bin="$cand"; break; }
-        done
-        : "${bin:=$staging/cx}"
-    fi
-    [[ -f "$bin" ]] || die "extracted archive did not contain a cx binary (looked for cx, cx-mac, cx-darwin)"
+    if [[ "$OS" == "windows" ]]; then bin="$staging/cx.exe"; else bin="$staging/cx"; fi
+    [[ -f "$bin" ]] || die "extracted archive did not contain $(basename "$bin")"
     chmod +x "$bin" 2>/dev/null || true
     printf '%s' "$bin"
 }
@@ -527,12 +491,7 @@ main() {
     # resolved release tag through download + checksum (TOCTOU-safe).
     _CX_STAGING="$(mktemp -d "${TMP_BASE%/}/cx-bootstrap.XXXXXX")" || die "could not create a staging directory"
     local staged resolved="" tag
-    if is_pinned_asset "$ASSET"; then
-        tag="$PINNED_CX_RELEASE_TAG"
-        log "Using pinned prerelease $tag (TEST pin — see the TEST PIN comment near the top of this script)"
-    else
-        tag="$(resolve_latest_tag)" || tag=""
-    fi
+    tag="$(resolve_latest_tag)" || tag=""
     staged="$(download_and_extract "$tag")"
 
     # Verify the STAGED binary (version + capability) BEFORE placing it or touching PATH, so a

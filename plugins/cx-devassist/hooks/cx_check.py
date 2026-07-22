@@ -35,7 +35,7 @@ def _log(event, **fields):
 # is a fast pre-filter: capability is decided by the probe below (_capabilities_present), not by
 # this number. Keep IDENTICAL to scripts/cx-min-version and scripts/cx-bootstrap.sh.
 # (search marker: CX_MIN_VERSION)
-_MIN_VERSION_FALLBACK = (2, 3, 56)
+_MIN_VERSION_FALLBACK = (2, 3, 57)
 
 # The cx executable the GATE invokes for its own probes, resolved by ABSOLUTE path where possible so
 # the gate works the instant cx is installed — even before it is on PATH. A freshly-installed cx in

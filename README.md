@@ -1,67 +1,59 @@
-# cxone-scanners
+# Checkmarx Agentic AI
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-A plugin marketplace (`cx-devassist-marketplace`) for **Checkmarx CxOne** security scanning, for both
-**Claude Code** and **GitHub Copilot CLI**.
+> Checkmarx application security, built for AI coding agents. This repository holds two ways to bring
+> [Checkmarx One](https://checkmarx.com/product/application-security-platform/) into an AI-assisted
+> workflow: an **MCP server** your assistant can call, and a **Claude Code plugin** that scans code as it
+> is written.
 
-## Plugins
+Use them together or separately — they solve different halves of the problem.
 
-| Plugin | Description |
-|---|---|
-| [**cx-devassist**](./plugins/cx-devassist) | A fail-closed security gate that scans Claude's file writes, shell commands, and MCP tool calls with the Checkmarx `cx` CLI **before** they happen, and exposes Checkmarx remediation tools over MCP. |
+## Checkmarx Security MCP
+
+
+A hosted [MCP](https://modelcontextprotocol.io) server that connects any MCP-capable AI client — Claude,
+Cursor, Copilot, Windsurf, Kiro — to Checkmarx One. It exposes scanning, findings, project management,
+and AI-generated remediation as tools your assistant can call in conversation.
+
+**Reach for this when** you want your assistant to scan projects, investigate findings, or fix them on
+request — in whichever AI client you already use. Configure it once (see
+[examples/](examples) for per-client config) and ask.
 
 ## How it works (at a glance)
 
-Each gated tool call runs a **two-stage PreToolUse chain**:
+For more details **→ [README-MCP.md](README-MCP.md)**
 
-1. **The gate** (`cx_check`) proves the scanner is trustworthy — cx is present, recent enough,
-   capable, and authenticated — or **blocks the action (exit 2)**.
-2. **The scanner** (native `cx hooks claude-*`) performs the actual SAST / SCA / policy analysis.
+## cx-devassist plugin
 
-| Tool event | Scans for |
-|---|---|
-| `Write` / `Edit` / `MultiEdit` / `NotebookEdit` | Vulnerabilities in the file content (SAST / ASCA) |
-| `Bash` / `PowerShell` | Risky commands & vulnerable dependencies (SCA) |
-| MCP tool calls | Policy violations before the call runs |
-| Session stop | Lifecycle checks |
+**→ [plugins/cx-devassist/README.md](plugins/cx-devassist/README.md)**
 
-The same gate protects **GitHub Copilot CLI**, wired to its equivalent tools (`bash`, `powershell`,
-`create`, `edit`, prompt-submit, stop) via `hooks/hooks-copilot-cli.json`.
+A fail-closed security gate for [Claude Code](https://claude.com/claude-code). Before Claude writes a
+file, runs a command, or calls a tool, the Checkmarx `cx` CLI scans the proposed action. Real
+vulnerabilities are **blocked rather than silently allowed** — and so is the case where the scanner
+itself can't be trusted to run. Findings are remediated through the bundled Checkmarx MCP server.
 
-Only an explicit `exit 2` (deny) blocks — everything else is non-blocking — so the gate is
-**fail-closed**: anything it can't prove safe is blocked rather than let through. Remediation runs
-through the bundled Checkmarx MCP server (`cx mcp bridge`). Full detail, the plugin structure, and the
-fail-closed/cross-OS design are in the **[cx-devassist README](./plugins/cx-devassist/README.md)**.
+**Reach for this when** you want the check to be automatic and non-optional rather than something
+someone remembers to ask for.
 
-## Install
+For more details **→ [plugins/cx-devassist/README.md](plugins/cx-devassist/README.md)**
 
-Register this repository as a local marketplace, then install the plugin:
+## Documentation
 
-```bash
-claude plugin marketplace add /path/to/cxone-scanners
-claude plugin install cx-devassist@cx-devassist-marketplace
-```
-
-Or load it directly for local testing:
-
-```bash
-claude --plugin-dir /path/to/cxone-scanners/plugins/cx-devassist
-```
-
-On first use the plugin walks you through installing and authenticating the `cx` CLI via the
-`cx-cli-setup` skill. See the [cx-devassist README](./plugins/cx-devassist/README.md#prerequisites) for
-host prerequisites (Git for Windows, Python 3, a downloader).
-
-## Repository layout
-
-```
-cxone-scanners/
-├── .claude-plugin/marketplace.json   # marketplace index (cx-devassist-marketplace)
-├── plugins/cx-devassist/             # the plugin (ships to users) — see its README
-├── tests/                            # test suite + runner (not shipped with the plugin)
-└── .github/workflows/                # tri-OS CI (Ubuntu / macOS / Windows)
-```
+- [docs/usage.md](docs/usage.md) — the MCP tool catalog and example workflows
+- [docs/authentication.md](docs/authentication.md) — API key and OAuth2 setup
+- [docs/troubleshooting.md](docs/troubleshooting.md) — connection, auth, and scan issues
 
 ## License
 
-MIT — see [plugins/cx-devassist/LICENSE](./plugins/cx-devassist/LICENSE).
+Apache 2.0 — see [LICENSE](LICENSE) for details. It governs everything in this repository, including the
+`cx-devassist` plugin.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, and [SECURITY.md](SECURITY.md) to report a
+vulnerability.
+
+Website: [Checkmarx](https://checkmarx.com/).
+
+
+© 2026 Checkmarx Ltd.
