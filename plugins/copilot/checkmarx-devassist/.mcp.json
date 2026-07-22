@@ -2,7 +2,7 @@
   "mcpServers": {
     "Checkmarx": {
       "command": "sh",
-      "args": ["$HOME/.copilot/installed-plugins/cx-devassist-marketplace/checkmarx-devassist/hooks/cx_run.sh", "mcp", "bridge"]
+      "args": ["$HOME/.copilot/installed-plugins/checkmarx-devassist-marketplace/checkmarx-devassist/hooks/cx_run.sh", "mcp", "bridge"]
     }
   }
 }
