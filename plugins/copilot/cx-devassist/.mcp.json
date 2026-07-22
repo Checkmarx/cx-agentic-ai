@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "Checkmarx": {
+      "command": "sh",
+      "args": ["$HOME/.copilot/installed-plugins/cx-devassist-marketplace/cx-devassist/hooks/cx_run.sh", "mcp", "bridge"]
+    }
+  }
+}
