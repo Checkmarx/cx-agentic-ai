@@ -4,7 +4,7 @@
     "name": "Checkmarx"
   },
   "metadata": {
-    "description": "Official Checkmarx MCP Plugin For Cursor IDE",
+    "description": "Official Checkmarx MCP Plugin For Cursor",
     "version": "1.0.0"
   },
   "plugins": [

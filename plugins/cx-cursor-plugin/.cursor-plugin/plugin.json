@@ -4,14 +4,12 @@
   "version": "1.0.0",
   "description": "Checkmarx-powered security scanning and fixing inside your coding loop. Real-time vulnerability detection with AI-powered remediation.",
   "author": {
-    "name": "Checkmarx",
-    "email": "support@checkmarx.com",
-    "url": "https://checkmarx.com"
+    "name": "Checkmarx"
   },
   "homepage": "https://checkmarx.com",
   "repository": "https://github.com/checkmarx/cx-agentic-ai",
   "license": "Apache-2.0",
-  "logo": "../assets/logo.png",
+  "logo": "assets/logo.png",
   "keywords": [
     "mcp",
     "checkmarx",
