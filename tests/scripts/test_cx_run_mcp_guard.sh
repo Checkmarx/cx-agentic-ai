@@ -8,7 +8,7 @@
 # machine. Run: bash tests/scripts/test_cx_run_mcp_guard.sh
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CXRUN="$DIR/../../plugins/cx-devassist/hooks/cx_run.sh"
+CXRUN="$DIR/../../plugins/copilot/checkmarx-devassist/hooks/cx_run.sh"
 
 pass=0; fail=0
 ok()  { pass=$((pass + 1)); printf 'ok   - %s\n' "$1"; }

@@ -14,7 +14,8 @@ import re
 import unittest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "cx-devassist"))
+_CLAUDE_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "cx-devassist"))
+_COPILOT_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "copilot", "checkmarx-devassist"))
 _REPO_ROOT = os.path.normpath(os.path.join(_HERE, ".."))
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
@@ -24,13 +25,13 @@ def _read(*parts):
         return f.read()
 
 
-def _plugin_manifest():
-    return json.loads(_read(_PLUGIN_ROOT, ".claude-plugin", "plugin.json"))
+def _claude_manifest():
+    return json.loads(_read(_CLAUDE_PLUGIN_ROOT, ".claude-plugin", "plugin.json"))
 
 
-class TestPluginManifest(unittest.TestCase):
+class TestClaudePluginManifest(unittest.TestCase):
     def test_valid_and_semver(self):
-        data = _plugin_manifest()
+        data = _claude_manifest()
         for key in ("name", "version", "description"):
             self.assertIn(key, data, "plugin.json missing %r" % key)
         self.assertEqual(data["name"], "cx-devassist")
@@ -39,12 +40,12 @@ class TestPluginManifest(unittest.TestCase):
     def test_no_redundant_mcpservers_field(self):
         # .mcp.json is auto-discovered at the plugin root; declaring it again in plugin.json
         # risks a double-register (undocumented merge semantics). Keep exactly one declaration.
-        self.assertNotIn("mcpServers", _plugin_manifest())
-        mcp = json.loads(_read(_PLUGIN_ROOT, ".mcp.json"))
+        self.assertNotIn("mcpServers", _claude_manifest())
+        mcp = json.loads(_read(_CLAUDE_PLUGIN_ROOT, ".mcp.json"))
         self.assertIn("Checkmarx", mcp.get("mcpServers", {}))
 
     def test_readme_present(self):
-        self.assertTrue(os.path.isfile(os.path.join(_PLUGIN_ROOT, "README.md")))
+        self.assertTrue(os.path.isfile(os.path.join(_CLAUDE_PLUGIN_ROOT, "README.md")))
 
 
 class TestMarketplace(unittest.TestCase):
@@ -55,36 +56,50 @@ class TestMarketplace(unittest.TestCase):
         src = os.path.normpath(os.path.join(_REPO_ROOT, entry["source"]))
         self.assertTrue(os.path.isdir(src), "marketplace source path missing: %s" % src)
 
+    def test_copilot_marketplace_references_plugin_with_real_source(self):
+        mp = json.loads(_read(_REPO_ROOT, ".github", "plugin", "marketplace.json"))
+        entry = next((p for p in mp.get("plugins", []) if p.get("name") == "checkmarx-devassist"), None)
+        self.assertIsNotNone(entry, ".github/plugin/marketplace.json has no checkmarx-devassist entry")
+        src = os.path.normpath(os.path.join(_REPO_ROOT, entry["source"]))
+        self.assertTrue(os.path.isdir(src), "copilot marketplace source path missing: %s" % src)
+
 
 class TestMinVersionSync(unittest.TestCase):
-    """The numeric floor lives in four synced sites (search marker: CX_MIN_VERSION)."""
+    """The numeric floor lives in four synced sites (search marker: CX_MIN_VERSION).
+    Both the Claude and Copilot plugin roots are checked independently."""
 
-    def _canonical(self):
-        for line in _read(_PLUGIN_ROOT, "scripts", "cx-min-version").splitlines():
+    def _canonical(self, plugin_root):
+        for line in _read(plugin_root, "scripts", "cx-min-version").splitlines():
             s = line.strip()
             if s and not s.startswith("#"):
                 return s
-        self.fail("no version line found in scripts/cx-min-version")
+        self.fail("no version line found in %s/scripts/cx-min-version" % plugin_root)
 
-    def test_four_sites_agree(self):
-        canon = self._canonical()
+    def _check_four_sites(self, plugin_root):
+        canon = self._canonical(plugin_root)
         self.assertRegex(canon, _SEMVER)
 
-        py = _read(_PLUGIN_ROOT, "hooks", "cx_check.py")
+        py = _read(plugin_root, "hooks", "cx_check.py")
         m = re.search(r"_MIN_VERSION_FALLBACK\s*=\s*\((\d+),\s*(\d+),\s*(\d+)\)", py)
         self.assertIsNotNone(m, "cx_check.py: _MIN_VERSION_FALLBACK not found")
         self.assertEqual(".".join(m.groups()), canon,
                          "cx_check.py fallback != cx-min-version")
 
-        sh = _read(_PLUGIN_ROOT, "scripts", "cx-bootstrap.sh")
+        sh = _read(plugin_root, "scripts", "cx-bootstrap.sh")
         m2 = re.search(r'MIN_CX_VERSION_FALLBACK="([^"]+)"', sh)
         self.assertIsNotNone(m2, "cx-bootstrap.sh: MIN_CX_VERSION_FALLBACK not found")
         self.assertEqual(m2.group(1), canon, "cx-bootstrap.sh fallback != cx-min-version")
 
-        guard = _read(_PLUGIN_ROOT, "scripts", "cx-mcp-guard.sh")
+        guard = _read(plugin_root, "scripts", "cx-mcp-guard.sh")
         m3 = re.search(r'_CXMCP_FALLBACK="\$\{2:-([^}]+)\}"', guard)
         self.assertIsNotNone(m3, "cx-mcp-guard.sh: cx_mcp_load_min_version fallback not found")
         self.assertEqual(m3.group(1), canon, "cx-mcp-guard.sh fallback != cx-min-version")
+
+    def test_claude_four_sites_agree(self):
+        self._check_four_sites(_CLAUDE_PLUGIN_ROOT)
+
+    def test_copilot_four_sites_agree(self):
+        self._check_four_sites(_COPILOT_PLUGIN_ROOT)
 
 
 class TestReleaseTag(unittest.TestCase):
@@ -95,14 +110,14 @@ class TestReleaseTag(unittest.TestCase):
             self.skipTest("CX_RELEASE_TAG not set (not a tag build)")
         m = re.search(r"(\d+\.\d+\.\d+)$", tag)
         self.assertIsNotNone(m, "release tag %r has no semver suffix" % tag)
-        self.assertEqual(m.group(1), _plugin_manifest()["version"],
+        self.assertEqual(m.group(1), _claude_manifest()["version"],
                          "release tag %s does not match plugin.json version" % tag)
 
 
 class TestShippedBytes(unittest.TestCase):
     """The shell scripts + the version-floor data file must ship LF-only, and cx-min-version must
-    be pure ASCII. A stray CR breaks the bootstrap on Linux/macOS (and can fail the gate OPEN);
-    a non-ASCII byte in cx-min-version can crash the gate under an ASCII/C locale = fail OPEN."""
+    be pure ASCII. Both plugin roots are checked. A stray CR breaks bootstrap on Linux/macOS (and
+    can fail the gate OPEN); a non-ASCII byte in cx-min-version can crash the gate = fail OPEN."""
 
     _LF_FILES = [
         ("scripts", "cx-bootstrap.sh"),
@@ -116,20 +131,25 @@ class TestShippedBytes(unittest.TestCase):
         ("hooks", "cx_log.py"),
     ]
 
-    def _bytes(self, *parts):
-        with open(os.path.join(_PLUGIN_ROOT, *parts), "rb") as f:
+    def _bytes(self, plugin_root, *parts):
+        with open(os.path.join(plugin_root, *parts), "rb") as f:
             return f.read()
 
     def test_no_carriage_returns(self):
-        for parts in self._LF_FILES:
-            self.assertNotIn(b"\r", self._bytes(*parts),
-                             "%s contains CR bytes — must be LF-only" % parts[-1])
+        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT):
+            for parts in self._LF_FILES:
+                self.assertNotIn(b"\r", self._bytes(plugin_root, *parts),
+                                 "%s/%s contains CR bytes — must be LF-only" % (
+                                     os.path.basename(plugin_root), parts[-1]))
 
     def test_cx_min_version_is_pure_ascii(self):
-        try:
-            self._bytes("scripts", "cx-min-version").decode("ascii")
-        except UnicodeDecodeError as e:
-            self.fail("cx-min-version is not pure ASCII (would crash the gate under LANG=C): %s" % e)
+        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT):
+            try:
+                self._bytes(plugin_root, "scripts", "cx-min-version").decode("ascii")
+            except UnicodeDecodeError as e:
+                self.fail("%s/scripts/cx-min-version is not pure ASCII "
+                          "(would crash the gate under LANG=C): %s" % (
+                              os.path.basename(plugin_root), e))
 
 
 class TestHookWiring(unittest.TestCase):
@@ -137,7 +157,7 @@ class TestHookWiring(unittest.TestCase):
     and the remediation MCP must stay a single `cx` server (activates after one /reload-plugins)."""
 
     def test_stage2_routes_through_cx_run(self):
-        hooks = json.loads(_read(_PLUGIN_ROOT, "hooks", "hooks.json"))
+        hooks = json.loads(_read(_CLAUDE_PLUGIN_ROOT, "hooks", "hooks.json"))
         cmds = [h["command"] for entry in hooks["hooks"]["PreToolUse"]
                 for h in entry["hooks"] if h.get("type") == "command"]
         scanner_cmds = [c for c in cmds if "hooks claude-pre" in c]
@@ -147,14 +167,21 @@ class TestHookWiring(unittest.TestCase):
             self.assertFalse(c.startswith("cx hooks"), "stage-2 must not call bare cx: %s" % c)
 
     def test_cx_run_wrapper_present(self):
-        self.assertTrue(os.path.isfile(os.path.join(_PLUGIN_ROOT, "hooks", "cx_run.sh")))
+        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT):
+            self.assertTrue(
+                os.path.isfile(os.path.join(plugin_root, "hooks", "cx_run.sh")),
+                "cx_run.sh missing in %s" % os.path.basename(plugin_root))
 
     def test_no_bare_cx_in_hook_commands(self):
         # Every cx invocation in the hook configs must route through cx_run.sh (absolute-path
         # resolution). A bare `cx …` fails on a locked-down / first-install machine and (for the
-        # scanners) fails OPEN. Regression guard for the clean-flow contract, incl. Stop + Copilot.
-        for cfg in ("hooks.json", "hooks-copilot-cli.json"):
-            data = json.loads(_read(_PLUGIN_ROOT, "hooks", cfg))
+        # scanners) fails OPEN. Regression guard for the clean-flow contract.
+        hook_configs = [
+            (_CLAUDE_PLUGIN_ROOT, "hooks.json"),
+            (_COPILOT_PLUGIN_ROOT, "hooks-copilot-cli.json"),
+        ]
+        for plugin_root, cfg in hook_configs:
+            data = json.loads(_read(plugin_root, "hooks", cfg))
             cmds = []
 
             def _walk(o):
@@ -176,15 +203,18 @@ class TestHookWiring(unittest.TestCase):
     def test_mcp_resolves_cx_via_cx_run(self):
         # The remediation MCP must resolve cx by absolute path (canonical store) through cx_run.sh —
         # NOT bare `cx` — so it can start on a locked-down / first-install machine after one
-        # /reload-plugins, with no restart.
-        mcp = json.loads(_read(_PLUGIN_ROOT, ".mcp.json"))
-        servers = mcp.get("mcpServers", {})
-        self.assertEqual(list(servers), ["Checkmarx"])
-        srv = servers["Checkmarx"]
-        self.assertEqual(srv["command"], "sh")
-        self.assertTrue(any("cx_run.sh" in a for a in srv["args"]),
-                        "MCP must invoke cx_run.sh, got args: %s" % srv["args"])
-        self.assertIn("bridge", srv["args"])
+        # /reload-plugins, with no restart. Checked for both plugin roots.
+        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT):
+            mcp = json.loads(_read(plugin_root, ".mcp.json"))
+            servers = mcp.get("mcpServers", {})
+            self.assertEqual(list(servers), ["Checkmarx"],
+                             "%s: unexpected MCP servers" % os.path.basename(plugin_root))
+            srv = servers["Checkmarx"]
+            self.assertEqual(srv["command"], "sh")
+            self.assertTrue(any("cx_run.sh" in a for a in srv["args"]),
+                            "MCP must invoke cx_run.sh in %s, got args: %s" % (
+                                os.path.basename(plugin_root), srv["args"]))
+            self.assertIn("bridge", srv["args"])
 
 
 if __name__ == "__main__":

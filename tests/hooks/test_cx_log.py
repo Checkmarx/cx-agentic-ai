@@ -12,7 +12,7 @@ import unittest
 
 # Source under test lives in the plugin's hooks/ (tests live at the repo root, outside the plugin).
 _HOOKS_DIR = os.path.normpath(os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "cx-devassist", "hooks"))
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "copilot", "checkmarx-devassist", "hooks"))
 sys.path.insert(0, _HOOKS_DIR)
 import cx_log  # noqa: E402
 
@@ -34,7 +34,7 @@ class _Base(unittest.TestCase):
 
     @property
     def logfile(self):
-        return os.path.join(self.dir, "cx-devassist.jsonl")
+        return os.path.join(self.dir, "checkmarx-devassist.jsonl")
 
     def raw(self):
         with open(self.logfile, encoding="utf-8") as f:
@@ -152,7 +152,7 @@ class TestRedaction(_Base):
         self.assertEqual(rec["version_min"], "2.3.54")
         self.assertEqual(
             rec["message"],
-            "cx v2.1.0 is below the required v2.3.54 — mcp bridge blocked; run /cx-cli-setup to upgrade.")
+            "cx v2.1.0 is below the required v2.3.54 — mcp bridge blocked; run /checkmarx-cli-setup to upgrade.")
 
     def test_mcp_connect_ignores_caller_supplied_message(self):
         # `message` is not in the mcp_connect schema at all — a caller passing one (accidentally or

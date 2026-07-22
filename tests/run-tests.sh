@@ -9,7 +9,7 @@
 set -uo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_ROOT="$(cd "$DIR/../plugins/cx-devassist" && pwd)"
+PLUGIN_ROOT="$(cd "$DIR/../plugins/copilot/checkmarx-devassist" && pwd)"
 
 # --- pick a Python 3 interpreter (mirrors the gate's own Py3 requirement) -------------------
 # PY is an ARRAY so the `py -3` launcher (two words) invokes correctly under `"${PY[@]}"`.

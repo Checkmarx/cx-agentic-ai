@@ -20,7 +20,7 @@ from contextlib import redirect_stdout, redirect_stderr
 
 # Source under test lives in the plugin's hooks/ (tests live at the repo root, outside the plugin).
 _HOOKS_DIR = os.path.normpath(os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "cx-devassist", "hooks"))
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "copilot", "checkmarx-devassist", "hooks"))
 sys.path.insert(0, _HOOKS_DIR)
 import cx_check  # noqa: E402
 
@@ -289,14 +289,14 @@ class TestBareCommandGuard(unittest.TestCase):
 class TestScannerPassthrough(unittest.TestCase):
     """The OAuth fail-open fix: when `cx auth validate` passes but the native scanner would run in
     pass-through (allow-everything, NO scan), the gate must FAIL CLOSED + VISIBLY — the same
-    /cx-cli-setup UX as the unauthenticated path — instead of silently allowing the write."""
+    /checkmarx-cli-setup UX as the unauthenticated path — instead of silently allowing the write."""
 
     def test_passthrough_denies_visibly_on_write(self):
         decision, code = run(write("Runtime.getRuntime().exec(userInput)"),
                              authed=True, scanner_state=cx_check._SCANNER_PASSTHROUGH)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
-        self.assertIn("/cx-cli-setup", LAST_OUTPUT["additionalContext"])
+        self.assertIn("/checkmarx-cli-setup", LAST_OUTPUT["additionalContext"])
         self.assertIn("authenticate", LAST_OUTPUT["additionalContext"].lower())
 
     def test_passthrough_blocks_bash_too(self):
@@ -956,7 +956,7 @@ class TestCxBinaryOverride(unittest.TestCase):
         # Terminal STOP wording: forbid the hand-place / cache-clear workaround, and don't loop.
         self.assertIn("TERMINAL", ctx)
         self.assertIn("hand-place", ctx)
-        self.assertNotIn("/cx-cli-setup (Upgrade)", ctx)
+        self.assertNotIn("/checkmarx-cli-setup (Upgrade)", ctx)
 
     def test_gate_probes_use_cx_binary(self):
         # _cx_version, _capabilities_present, _is_authenticated must all invoke CX_BINARY.
@@ -1306,7 +1306,7 @@ class TestLoggingWiring(unittest.TestCase):
         decision, code = run(bash("npm test"), which=None, env={"CX_LOG_DIR": tmp})
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 2)
-        logfile = os.path.join(tmp, "cx-devassist.jsonl")
+        logfile = os.path.join(tmp, "checkmarx-devassist.jsonl")
         self.assertTrue(os.path.exists(logfile))
         with open(logfile, encoding="utf-8") as fh:
             recs = [json.loads(line) for line in fh if line.strip()]
@@ -1322,7 +1322,7 @@ class TestLoggingWiring(unittest.TestCase):
         decision, code = run(bash("npm test"), version_state="ok", authed=True,
                              env={"CX_LOG_DIR": tmp})
         self.assertIsNone(decision)
-        with open(os.path.join(tmp, "cx-devassist.jsonl"), encoding="utf-8") as fh:
+        with open(os.path.join(tmp, "checkmarx-devassist.jsonl"), encoding="utf-8") as fh:
             recs = [json.loads(line) for line in fh if line.strip()]
         self.assertTrue(any(r.get("decision") == "pass" and r.get("reason_code") == "ok"
                             and r.get("version_state") == "ok" for r in recs))

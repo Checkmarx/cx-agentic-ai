@@ -7,7 +7,7 @@ Usage:
     python tests/hooks/make_test_payload.py auth        # cx auth login → DENY (below min) / ALLOW (ok cx)
 """
 import json, sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../plugins/cx-devassist/hooks'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../plugins/copilot/checkmarx-devassist/hooks'))
 import cx_check
 
 BS = cx_check._bootstrap_script_path().replace('\\', '/')
