@@ -11,7 +11,7 @@
     {
       "name": "checkmarx",
       "displayName": "Checkmarx",
-      "description": "Checkmarx-powered security scanning and fixing inside your coding loop. Checks the code you write and the code AI generates for vulnerabilities and risky dependencies, then returns precise, engine-backed fixes. Best invoked after writing or changing code, before commits, and around security-sensitive logic. Applies fixes inline so you can accept them without leaving your editor.",
+      "description": "The Checkmarx MCP Server acts as a translation layer that connects your AI assistant to Checkmarx One APIs, enabling developers and security teams to interact with security operations directly via natural language. It provides context-aware remediation tools for code vulnerabilities, secrets, and IaC misconfigurations, along with scan workflows and project management—eliminating context switching and enabling immediate action on security findings within your IDE or terminal.",
       "category": "security",
       "source": "./plugins/cx-cursor-plugin"
     }

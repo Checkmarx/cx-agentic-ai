@@ -7,7 +7,7 @@
     "source": "github"
   },
   "version": "1.0.0",
-  "websiteUrl": "https://docs.checkmarx.com/en/34965-591689-1-mcp-server---interacting-with-checkmarx-via-ai-assistant.html#UUID-040840ae-8e9d-1025-c148-afe2bd11d370",
+  "websiteUrl": "https://docs.checkmarx.com/en/34965-659697-1-mcp-server---interacting-with-checkmarx-one-via-ai-assistant.html",
   "remotes": [
     {
       "type": "streamable-http",
