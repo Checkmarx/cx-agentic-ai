@@ -197,22 +197,27 @@ if [ -n "$CX_RESOLVED" ]; then
         if [ "$_CXRUN_MCP_RESULT" = denied ]; then
             # Refuse to exec a subcommand this build can't run — that is what corrupts the stdio
             # transport into today's opaque -32000. stdout stays untouched (no partial MCP framing);
-            # the reason goes to stderr (captured in Claude Code's own MCP log, per references/mcp.md)
+            # the reason goes to stderr, surfaced to the Copilot agent as the MCP connection error.
             # AND to checkmarx-devassist.jsonl above, so a connect failure always has an exact cause on disk.
+            #
+            # For Copilot: this message is informational only. Enforcement happens via the preToolUse
+            # hook (cx_check.sh/cx_check.py) on the next file operation — that hook blocks the action
+            # and drives the agent to install/upgrade cx. The MCP reconnects after /restart.
             case "$_CXRUN_MCP_REASON" in
                 below)
-                    printf 'checkmarx-devassist: Checkmarx MCP bridge unavailable: cx v%s is below the required v%s. Run /checkmarx-cli-setup to upgrade.\n' \
+                    printf 'cx v%s is below the required v%s. The security hook will prompt you to upgrade automatically on your next file edit, or run /checkmarx-cli-setup now to upgrade immediately.\n' \
                         "$_CXRUN_MCP_HAVE" "$_CXRUN_MCP_MIN" >&2
                     ;;
                 incapable)
-                    printf "checkmarx-devassist: Checkmarx MCP bridge unavailable: cx v%s is missing the 'mcp bridge' subcommand (capability-incomplete build). Run /checkmarx-cli-setup.\\n" \
+                    printf 'cx v%s is missing the MCP capability. The security hook will prompt you to upgrade automatically on your next file edit, or run /checkmarx-cli-setup now to upgrade immediately.\n' \
                         "$_CXRUN_MCP_HAVE" >&2
                     ;;
                 unrunnable)
-                    printf 'checkmarx-devassist: Checkmarx MCP bridge unavailable: cx version did not run or returned no usable version. Run /checkmarx-cli-setup.\n' >&2
+                    printf 'cx CLI could not be run. The security hook will prompt you to reinstall cx automatically on your next file edit, or run /checkmarx-cli-setup now to reinstall immediately.\n' >&2
                     ;;
                 *)
-                    printf 'checkmarx-devassist: Checkmarx MCP bridge unavailable (%s). Run /checkmarx-cli-setup.\n' "$_CXRUN_MCP_REASON" >&2
+                    printf 'MCP not connected (%s). The security hook will guide you automatically on your next file edit, or run /checkmarx-cli-setup now.\n' \
+                        "$_CXRUN_MCP_REASON" >&2
                     ;;
             esac
             # CX_BINARY takes priority over the canonical store in this exact resolution — re-running
@@ -220,7 +225,7 @@ if [ -n "$CX_RESOLVED" ]; then
             # CX_BINARY-pinned denial. Say so explicitly instead of leaving a confusing "I upgraded
             # but it's still broken" loop.
             if [ "$_CX_RESOLVED_TIER" = "binary" ]; then
-                printf 'checkmarx-devassist: Note: CX_BINARY is pinned to this exact binary and takes priority over the canonical store, so running the bootstrap will NOT fix this. Unset CX_BINARY, replace the binary at that exact path, or repoint CX_BINARY at the canonical store after upgrading.\n' >&2
+                printf 'checkmarx-devassist: Note: CX_BINARY is pinned to this exact binary and takes priority over the canonical store, so running the bootstrap will NOT fix this. Unset CX_BINARY, replace the binary at that path, or repoint CX_BINARY at the canonical store after upgrading.\n' >&2
             fi
             exit 1
         fi
@@ -273,8 +278,10 @@ JSON
                 "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" mcp_connect \
                     "result=denied" "reason_code=cx_absent" >/dev/null 2>&1 && break
             done
+            printf 'cx CLI is not installed. The security hook will prompt you to install cx automatically on your next file edit, or run /checkmarx-cli-setup now to install immediately.\n' >&2
+        else
+            printf 'checkmarx-devassist: cx CLI not found (looked at CX_BINARY, the canonical store, and PATH). Run /checkmarx-cli-setup to install it.\n' >&2
         fi
-        printf 'checkmarx-devassist: cx CLI not found (looked at CX_BINARY, the canonical store, and PATH). Run /checkmarx-cli-setup to install it.\n' >&2
         exit 1
         ;;
 esac

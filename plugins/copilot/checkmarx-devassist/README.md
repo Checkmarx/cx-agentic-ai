@@ -184,7 +184,7 @@ claude --plugin-dir /path/to/cxone-scanners/plugins/checkmarx-devassist
 After updating hook scripts, reload them into the session:
 
 ```
-/reload-plugins
+/restart
 ```
 
 On first use the gate will detect that `cx` is missing and walk you through installing and

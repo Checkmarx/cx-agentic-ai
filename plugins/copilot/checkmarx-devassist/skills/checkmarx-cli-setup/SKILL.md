@@ -6,7 +6,7 @@ description: "Installs, configures, and authenticates the Checkmarx cx CLI (API 
 # CX CLI Setup
 
 Guides the developer through installing, upgrading, and authenticating the Checkmarx One `cx` CLI so
-the security plugin can operate. The OS is known from the Claude Code session — use the matching
+the security plugin can operate. The OS is known from the GitHub Copilot CLI (copilot-agent) session — use the matching
 path; no detection command is needed. Detailed steps live under `references/` (see Additional
 Resources); this router is the spine.
 
@@ -45,14 +45,14 @@ the **canonical store** (`%LOCALAPPDATA%\Checkmarx\cx\cx.exe` on Windows, `~/.ch
 Unix). It needs only `bash` (Git Bash on Windows) — no Python.
 
 > **In-session activation:** the gate resolves cx from the canonical store by **absolute path**, so it
-> clears on your **next tool call with no restart** — even though a running Claude Code captured its
+> clears on your **next tool call with no restart** — even though a running GitHub Copilot CLI (copilot-agent) captured its
 > PATH at startup and cannot see the newly-persisted PATH entry. You do **not** need to place cx into
 > an on-PATH folder or "activate" it, and you must **never hand-place a second copy**. (The
-> remediation MCP resolves cx by absolute path too, via `cx_run.sh`; it activates after one `/reload-plugins`.)
+> remediation MCP resolves cx by absolute path too, via `cx_run.sh`; it activates after one `/restart`.)
 
 When a hook blocked an operation, its deny message already contains the exact command by resolved
 absolute path — e.g. `bash "/…/plugins/checkmarx-devassist/scripts/cx-bootstrap.sh" install`. Use it
-verbatim. **Do not** substitute `${CLAUDE_PLUGIN_ROOT}` — it is injected only into hook execution
+verbatim. **Do not** substitute `${PLUGIN_ROOT}` — it is injected only into hook execution
 and is empty in the Bash shell, so a path built from it will not resolve.
 
 Ask the developer once: **"Install/upgrade Checkmarx CLI now? (Y/n)"** On **Y**, run the bootstrap
@@ -148,7 +148,7 @@ The hooks resolve `cx` in a separate process with a different PATH snapshot, so 
 1. **The gate clears** — the next gated tool call proceeds (no longer denied) and the `Stop` hook no
    longer errors with `cx: command not found`. After a bootstrap install this happens on the very next
    call with **no restart**, because the gate resolves the canonical store by absolute path.
-2. **The MCP is loaded** — run `/reload-plugins`, then `/mcp` shows `Checkmarx` Connected
+2. **The MCP is loaded** — run `/restart`, then `/mcp show Checkmarx` shows `Checkmarx` Connected
    (`references/mcp.md`).
 
 Only once the gate clears: "Setup complete. The `cx` CLI is installed, configured, and
@@ -176,7 +176,7 @@ developer originally used, then route: **API key →** generate a new key and re
 - `references/windows-path-activation.md` — Windows in-session placement + User-scope PATH persistence.
 - `references/oauth.md` — Path B browser sign-in, token safety, re-auth.
 - `references/upgrade.md` — upgrading a below-minimum CLI.
-- `references/mcp.md` — the remediation MCP and `/reload-plugins`.
+- `references/mcp.md` — the remediation MCP and `/restart`.
 - `references/troubleshooting.md` — cx-not-on-PATH, self-hosted URIs, gate-still-denied, `CX_BINARY`.
 
 ## Quick Reference

@@ -51,7 +51,7 @@ login`.** On a first-install session `cx` is **not on PATH**, so a **bare** `cx 
 path** (the canonical store — `~/.checkmarx/bin/cx` on Unix, `%LOCALAPPDATA%\Checkmarx\cx\cx.exe` on
 Windows — while cx isn't yet on PATH). Take that exact cx invocation and append the two login flags:
 
-**Bash tool (Claude Code / macOS / Linux):**
+**Bash tool (GitHub Copilot CLI (copilot-agent) / macOS / Linux):**
 ```bash
 # Use the resolved cx path from the deny message (bare `cx` works only once it is on PATH):
 "$HOME/.checkmarx/bin/cx" auth login --base-auth-uri <your Checkmarx One URL> --tenant <tenant> 1>/dev/null

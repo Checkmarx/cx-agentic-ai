@@ -14,7 +14,7 @@ This skill has two entry points:
 1. **On-demand scan** — User asks to scan a **source code file** for vulnerabilities (e.g., "scan this
    file", "check app.py for security issues"). If the target is a **dependency manifest/lockfile**
    (package.json, requirements.txt, go.mod, …), use `checkmarx-devassist-sca` instead.
-2. **Remediation** — User asks to fix ASCA findings, or Claude needs to fix SAST vulnerabilities detected by ASCA
+2. **Remediation** — User asks to fix ASCA findings, or GitHub Copilot CLI (copilot-agent) needs to fix SAST vulnerabilities detected by ASCA
 
 > **If ASCA findings are already present in context** (e.g., provided by a hook block or a prior scan result), **skip Flow 1 entirely** and proceed directly to Flow 2 using those findings. Do not re-run the scan.
 
@@ -140,13 +140,14 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
      canonical absolute path — `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) or
      `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth validate` (Windows), or a bare `cx auth validate` when
      cx is on PATH; if it fails (or reports no API key), run `/checkmarx-cli-setup`.
-  2. Then tell the user the **one** step only they can perform — Claude Code loads MCP servers at
-     startup, so the server can't become live in this running session on its own:
+  2. If auth validation **succeeds**, try calling an MCP tool (e.g. `mcp__Checkmarx__listProjects`)
+     — the MCP may already be connected in this session despite any earlier connection warning.
+     - If the tool responds → the MCP is live. Proceed with remediation immediately.
+     - If the tool is still unavailable → tell the user:
 
-     > "The Checkmarx remediation MCP isn't connected in this session. Please run `/mcp` and check
-     > whether `Checkmarx` shows Connected. If it's missing or still not connected, run
-     > `/reload-plugins` first, then `/mcp` again to reconnect it (or restart Claude Code) — then ask
-     > me to remediate again. I won't apply a non-Checkmarx fix in the meantime."
+     > "Authentication is valid. Please run `/restart` to reconnect the Checkmarx MCP, then
+     > run `/mcp show Checkmarx` to confirm it shows Connected — then ask me to remediate again.
+     > I won't apply a non-Checkmarx fix in the meantime."
 
   Then end the remediation flow without modifying any code.
 

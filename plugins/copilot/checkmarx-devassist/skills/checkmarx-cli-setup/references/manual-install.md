@@ -63,7 +63,7 @@ binary — stop and point the developer to the releases page or Checkmarx suppor
 
 ## Windows
 
-**Git for Windows is mandatory.** The gate launches through `sh`, and Claude Code needs Git Bash
+**Git for Windows is mandatory.** The gate launches through `sh`, and GitHub Copilot CLI (copilot-agent) needs Git Bash
 for its own Bash tool, so install it first from https://git-scm.com/download/win. Without it the
 gate cannot run at all.
 
@@ -87,7 +87,7 @@ from https://github.com/Checkmarx/ast-cli/releases/latest, extract `cx.exe`, and
 Install into the **canonical store** and you are done: the gate resolves cx by absolute path
 (`%LOCALAPPDATA%\Checkmarx\cx\cx.exe` on Windows, `~/.checkmarx/bin/cx` on Unix) on the **next
 tool call** — no PATH placement, symlink, or restart needed. Only the remediation MCP needs one
-`/reload-plugins` (see `references/mcp.md`).
+`/restart` (see `references/mcp.md`).
 
 ## Install integrity (`CX_REQUIRE_CHECKSUM`)
 

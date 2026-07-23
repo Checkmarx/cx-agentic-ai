@@ -107,8 +107,8 @@ _EVENTS = {
     },
     "mcp_connect": {
         # Every attempt by hooks/cx_run.sh to spawn/respawn `cx mcp bridge` (session start,
-        # /reload-plugins, /mcp reconnect) — success or denial — so a connect failure always has an
-        # exact, on-disk reason instead of only Claude Code's generic "-32000 / failed to reconnect".
+        # /restart, reconnect) — success or denial — so a connect failure always has an
+        # exact, on-disk reason instead of only Copilot's generic "-32000 / failed to reconnect".
         # No caller-supplied free text: `message` is synthesized below from `reason_code` (an
         # allowlisted enum) plus the already-token-validated version fields, so this event can never
         # carry raw subprocess output or anything else a caller might pass by mistake.

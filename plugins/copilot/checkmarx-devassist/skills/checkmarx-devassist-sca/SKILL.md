@@ -143,18 +143,19 @@ field naming.
      verify with `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) /
      `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth validate` (Windows), or a bare `cx auth validate` when
      cx is on PATH; if it fails, run `/checkmarx-cli-setup`.
-  2. Then tell the user the **one** step only they can perform (Claude Code loads MCP servers at
-     startup, so it can't become live in this running session on its own):
+  2. If auth validation **succeeds**, try calling an MCP tool (e.g. `mcp__Checkmarx__listProjects`)
+     — the MCP may already be connected in this session despite any earlier connection warning.
+     - If the tool responds → the MCP is live. Proceed with remediation immediately.
+     - If the tool is still unavailable → tell the user:
 
-     > "The Checkmarx remediation MCP isn't connected in this session. Please run `/mcp` and check
-     > whether `Checkmarx` shows Connected. If it's missing or still not connected, run
-     > `/reload-plugins` first, then `/mcp` again to reconnect it (or restart Claude Code) — then ask
-     > me to remediate again. I won't apply a non-Checkmarx fix in the meantime."
+     > "Authentication is valid. Please run `/restart` to reconnect the Checkmarx MCP, then
+     > run `/mcp show Checkmarx` to confirm it shows Connected — then ask me to remediate again.
+     > I won't apply a non-Checkmarx fix in the meantime."
 
   Then end the remediation flow without modifying any dependency.
 
   > Note: do **not** run any `cx_mcp_register.sh` script — this plugin registers its MCP via
-  > `.mcp.json`, and `/reload-plugins` is the correct recovery.
+  > `.mcp.json`, and `/restart` is the correct recovery.
 
 ### Step 3 — Apply the Fix
 

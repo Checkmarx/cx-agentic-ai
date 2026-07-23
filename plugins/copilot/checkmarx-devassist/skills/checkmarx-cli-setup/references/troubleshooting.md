@@ -11,7 +11,7 @@ to PATH permanently:
 - **Windows:** add the directory via System Properties → Environment Variables → Path, or use the
   User-scope persistence in `references/windows-path-activation.md`.
 
-A *newly* added PATH directory is not visible to the running Claude Code session — but the gate does
+A *newly* added PATH directory is not visible to the running GitHub Copilot CLI (copilot-agent) session — but the gate does
 **not** depend on PATH: it resolves the **canonical store**
 (`%LOCALAPPDATA%\Checkmarx\cx\cx.exe` on Windows, `~/.checkmarx/bin/cx` on Unix) by absolute path, so
 a `/cx-cli-setup` install unblocks it immediately, with no restart. To use a cx that lives
@@ -57,7 +57,7 @@ Install pointers:
 - **Windows** — install **Git for Windows** (https://git-scm.com/download/win) for `sh`, and
   **Python 3** from https://www.python.org/downloads/ (use the python.org installer, **not** the
   Microsoft Store stub). Git-Bash is a **hard prerequisite** on Windows: without it neither the
-  gate nor Claude Code's own Bash tool can run (Claude Code falls back to PowerShell, and the
+  gate nor GitHub Copilot CLI (copilot-agent)'s own Bash tool can run (Copilot falls back to PowerShell, and the
   `sh`-based gate then cannot launch).
 - **macOS** — `sh` is built in; install Python 3 with `xcode-select --install` or
   `brew install python3`.
@@ -66,7 +66,7 @@ Install pointers:
 
 ## `cx` is installed but INCAPABLE (missing the agent-security subcommands)
 
-If the deny says cx is installed but **missing `cx mcp bridge` / `cx hooks claude-*`**, the installed
+If the deny says cx is installed but **missing `cx mcp bridge` / `cx hooks copilot-*`**, the installed
 build predates the agent-security hooks. This is a **terminal** state: re-running install/upgrade just
 re-fetches the same incapable build, so it will not help. A capability-complete cx build is required,
 which **may not be publicly available yet**.
@@ -85,9 +85,9 @@ of the cx executable. The security gate then invokes **that** binary for all of 
 once it is configured:
 
 ```bash
-# macOS/Linux (set where Claude Code is launched, e.g. your shell profile):
+# macOS/Linux (set where GitHub Copilot CLI (copilot-agent) is launched, e.g. your shell profile):
 export CX_BINARY="/opt/checkmarx/cx"
-# Windows (User environment variable, so the Claude Code process inherits it):
+# Windows (User environment variable, so the GitHub Copilot CLI (copilot-agent) process inherits it):
 [Environment]::SetEnvironmentVariable('CX_BINARY', 'C:\Tools\Checkmarx\cx.exe', 'User')
 ```
 
@@ -102,6 +102,6 @@ Rules and guarantees:
 - **The stage-2 scanner and the remediation MCP honor it too** — both run through `hooks/cx_run.sh`,
   which uses the same precedence (CX_BINARY → canonical store → PATH), so scanning and remediation run
   the exact binary the gate validated. The MCP resolves cx by absolute path (no PATH placement, symlink,
-  or restart needed); it activates after one `/reload-plugins`. Do not hand-edit `.mcp.json`.
-- `CX_BINARY` must be set in the environment Claude Code is launched with (the hooks inherit it);
+  or restart needed); it activates after one `/restart`. Do not hand-edit `.mcp.json`.
+- `CX_BINARY` must be set in the environment Copilot is launched with (the hooks inherit it);
   setting it only inside an agent Bash command will not reach the gate.

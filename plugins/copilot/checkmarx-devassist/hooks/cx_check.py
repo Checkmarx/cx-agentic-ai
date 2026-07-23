@@ -45,7 +45,7 @@ _MIN_VERSION_FALLBACK = (2, 3, 57)
 # The stage-2 scanner runs through hooks/cx_run.sh, which uses the SAME precedence, so whatever the
 # gate validates (version/capability/auth) is exactly what scans — no PATH dependency, no fail-open.
 # (The remediation MCP resolves cx the SAME way, via hooks/cx_run.sh, so it is not a bare-PATH
-# consumer either; it activates after one /reload-plugins, no scan is bypassed.) CX_BINARY must be valid.
+# consumer either; it activates after one /restart, no scan is bypassed.) CX_BINARY must be valid.
 def _cx_binary():
     """Return (exe, error): exe is the validated CX_BINARY override, else 'cx'. error is a human
     string when CX_BINARY is set but invalid (not absolute / missing / not executable), else None."""
