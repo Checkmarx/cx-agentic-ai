@@ -18,8 +18,6 @@ Part of [Checkmarx Agentic AI](README.md).
 - [MCP Client Configuration](#mcp-client-configuration)
   - [Prerequisites](#prerequisites)
   - [JSON Configuration](#json-configuration)
-    - [Windsurf IDE](#windsurf-ide)
-    - [Claude Desktop / Claude Code](#claude-desktop--claude-code)
 - [Available Tools](#available-tools)
   - [Scanning](#scanning)
   - [Project management](#project-management)
@@ -93,7 +91,7 @@ Refer [Authentication](/docs/authentication.md) for detailed authentication inst
 Below are examples to add the server to your MCP client configuration. See the [examples/](examples) folder for ready-to-use client config files.
 
 
-**OAuth2 Authentication (Recommended)**
+**OAuth2 Authentication**
 
 ```json
 {
