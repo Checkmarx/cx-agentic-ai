@@ -491,7 +491,13 @@ main() {
     # resolved release tag through download + checksum (TOCTOU-safe).
     _CX_STAGING="$(mktemp -d "${TMP_BASE%/}/cx-bootstrap.XXXXXX")" || die "could not create a staging directory"
     local staged resolved="" tag
-    tag="$(resolve_latest_tag)" || tag=""
+    # tag="$(resolve_latest_tag)" || tag=""
+    # staged="$(download_and_extract "$tag")"
+    tag="2.3.57-prerelease"
+    # (e.g. ast-cli_2.3.57-prerelease_windows_x64.zip); bare os_arch names are latest-only.
+    if [[ -n "$tag" ]]; then
+        ASSET="ast-cli_${tag}_${OS}_${ASSET#ast-cli_${OS}_}"
+    fi
     staged="$(download_and_extract "$tag")"
 
     # Verify the STAGED binary (version + capability) BEFORE placing it or touching PATH, so a
