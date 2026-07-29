@@ -493,7 +493,7 @@ main() {
     local staged resolved="" tag
     # tag="$(resolve_latest_tag)" || tag=""
     # staged="$(download_and_extract "$tag")"
-    tag="2.3.57-prerelease"
+    tag="2.3.57-copilot-cli"
     # (e.g. ast-cli_2.3.57-prerelease_windows_x64.zip); bare os_arch names are latest-only.
     if [[ -n "$tag" ]]; then
         ASSET="ast-cli_${tag}_${OS}_${ASSET#ast-cli_${OS}_}"
