@@ -1,7 +1,6 @@
 {
   "mcpServers": {
     "Checkmarx": {
-      "type": "http",
       "url": "https://${CXONE_BASE_URL}/api/security-mcp/mcp/${CXONE_TENANT_ID}"
     }
   }

@@ -1,0 +1,44 @@
+{
+  "name": "checkmarx",
+  "displayName": "Checkmarx",
+  "version": "1.0.0",
+  "description": "The Checkmarx MCP Server acts as a translation layer that connects your AI assistant to Checkmarx One APIs, enabling developers and security teams to interact with security operations directly via natural language. It provides context-aware remediation tools for code vulnerabilities, secrets, and IaC misconfigurations, along with scan workflows and project management—eliminating context switching and enabling immediate action on security findings within your IDE or terminal.",
+  "author": {
+    "name": "Checkmarx"
+  },
+  "homepage": "https://docs.checkmarx.com/en/34965-659697-1-mcp-server---interacting-with-checkmarx-one-via-ai-assistant.html",
+  "repository": "https://github.com/checkmarx/cx-agentic-ai",
+  "license": "Apache-2.0",
+  "logo": "assets/logo.png",
+  "keywords": [
+    "mcp",
+    "checkmarx",
+    "security",
+    "vulnerability-remediation",
+    "realtime-scan",
+    "sast",
+    "iac",
+    "sca",
+    "secrets-detection"
+  ],
+  "variables": {
+    "type": "object",
+    "properties": {
+      "CXONE_BASE_URL": {
+        "type": "string",
+        "title": "Checkmarx One API Host",
+        "description": "Your Checkmarx One API host, e.g. ast.checkmarx.net"
+      },
+      "CXONE_TENANT_ID": {
+        "type": "string",
+        "title": "Tenant ID",
+        "description": "Your Checkmarx tenant identifier"
+      }
+    },
+    "required": ["CXONE_BASE_URL", "CXONE_TENANT_ID"]
+  },
+  "commands": [],
+  "rules": [],
+  "skills": [],
+  "agents": []
+}

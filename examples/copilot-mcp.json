@@ -1,7 +1,7 @@
 {
   "servers": {
     "Checkmarx": {
-      "url": "https://{api_host}/api/security-mcp/mcp/{tenant}",
+      "url": "https://{cxone_base_url}/api/security-mcp/mcp/{tenant}",
       "requestInit": {
         "headers": {
           "cx-origin": "Jetbrains",
