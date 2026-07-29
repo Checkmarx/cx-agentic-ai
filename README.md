@@ -37,6 +37,20 @@ someone remembers to ask for.
 
 For more details **→ [plugins/cx-devassist/README.md](plugins/cx-devassist/README.md)**
 
+## copilot-devassist
+
+**→ [plugins/copilot-devassist/README.md](plugins/copilot-devassist/README.md)**
+
+A fail-closed security gate for [GitHub Copilot CLI](https://github.com/features/copilot/cli). Before
+Copilot creates or edits a file, the Checkmarx `cx` CLI scans the proposed content. Real vulnerabilities
+are **blocked rather than silently allowed** — and so is the case where the scanner itself can't be
+trusted to run. Findings are remediated through the bundled Checkmarx MCP server.
+
+**Reach for this when** you want the check to be automatic and non-optional rather than something
+someone remembers to ask for.
+
+For more details **→ [plugins/copilot-devassist/README.md](plugins/copilot-devassist/README.md)**
+
 ## Documentation
 
 - [docs/usage.md](docs/usage.md) — the MCP tool catalog and example workflows
