@@ -164,6 +164,47 @@ authenticating it via the **`checkmarx-cli-setup`** skill (`/checkmarx-cli-setup
 
 ---
 
+## Updating
+
+Update the plugin to the latest version published on the marketplace:
+
+```
+/plugin update checkmarx-devassist@checkmarx-devassist-marketplace
+```
+
+Update the marketplace listing itself (picks up newly published plugin versions):
+
+```
+/plugin marketplace update checkmarx-devassist-marketplace
+```
+
+After updating hook scripts, reload them into the session:
+
+```
+/restart
+```
+
+---
+
+## Uninstalling
+
+Remove just the plugin (keeps the marketplace registered, so it can be reinstalled later):
+
+```
+/plugin uninstall checkmarx-devassist@checkmarx-devassist-marketplace
+```
+
+Remove the marketplace entirely (also removes any plugins installed from it):
+
+```
+/plugin marketplace remove checkmarx-devassist-marketplace
+```
+
+Uninstalling the plugin removes the hook wiring and skills, but does **not** remove the `cx` CLI itself
+or its credentials/logs under `~/.checkmarx/`; remove those manually if a full cleanup is needed.
+
+---
+
 ## Configuration
 
 All optional — sensible defaults apply.
