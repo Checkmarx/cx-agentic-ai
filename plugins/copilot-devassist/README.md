@@ -184,6 +184,8 @@ After updating hook scripts, reload them into the session:
 /restart
 ```
 
+> If update fails with an `Access is denied` error, see [Troubleshooting](#troubleshooting).
+
 ---
 
 ## Uninstalling
@@ -202,6 +204,23 @@ Remove the marketplace entirely (also removes any plugins installed from it):
 
 Uninstalling the plugin removes the hook wiring and skills, but does **not** remove the `cx` CLI itself
 or its credentials/logs under `~/.checkmarx/`; remove those manually if a full cleanup is needed.
+
+> If uninstall fails with an `Access is denied` error, see [Troubleshooting](#troubleshooting).
+
+---
+
+## Troubleshooting
+
+**Windows file lock during update / uninstall** — `/plugin update`, `/plugin marketplace update`,
+`/plugin uninstall`, or `/plugin marketplace remove` can fail with:
+
+```
+Failed to uninstall plugin: Failed to uninstall plugin: Access is denied. (os error 5)
+```
+
+This means another process is holding a file in the plugin directory open, so Windows won't let it be
+replaced or deleted. Close any background processes or IDEs that use Copilot (VS Code, Visual Studio,
+IntelliJ, Eclipse), then retry the update/uninstall.
 
 ---
 
