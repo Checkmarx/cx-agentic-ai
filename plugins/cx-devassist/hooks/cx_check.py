@@ -142,6 +142,24 @@ def _chmod_600(path):
         pass
 
 
+def _is_number(value):
+    """True for a real int/float — NOT bool (True == 1 in Python, so a bare isinstance check
+    would accept a boolean where a timestamp/mtime is expected)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _read_capped(path, max_bytes, encoding="utf-8"):
+    """The file's text, or None if it is unreadable, undecodable, or larger than max_bytes
+    (an implausibly large state file is refused rather than parsed). Never raises — the shared
+    read for every small state/config file the gate consumes fail-soft."""
+    try:
+        with open(path, "r", encoding=encoding) as f:
+            raw = f.read(max_bytes + 1)
+    except (OSError, ValueError):  # UnicodeDecodeError is a ValueError
+        return None
+    return None if len(raw) > max_bytes else raw
+
+
 def _agent_log_dir():
     """Per-user directory for the gate's caches and bypass audit (and, later, structured
     logs). Default ~/.checkmarx/agent-logs/claude/ — a user-owned 0700 dir, so these
@@ -193,11 +211,34 @@ _VERSION_CACHE_TTL = 30 * 60  # 30 minutes
 # Credential-recovery commands must be allowed even when unauthenticated — otherwise
 # the auth gate blocks the very command that fixes auth (a chicken-and-egg that forces
 # users to fall back to the shell `!` prefix). Matches a bare `cx auth ...` /
-# `cx configure ...` invocation. The shared _bare_bash_command guard then disqualifies chaining /
-# substitution metacharacters AND any redirect to a real file (a null-sink `1>/dev/null` is fine) —
-# so a benign prefix can neither smuggle another command nor exfiltrate the live token past the gate.
-_AUTH_RECOVERY_RE = re.compile(r"^\s*cx\s+(?:auth|configure)\b")
-_SHELL_CHAINING = (";", "|", "&", "`", "$(", "\n")
+# `cx configure ...` invocation (Windows agents sometimes type `cx.exe`), through EITHER the Bash
+# or the PowerShell tool. The shared _bare_shell_command guard then disqualifies chaining /
+# substitution metacharacters AND any redirect to a real file (only the shell's own null sink is
+# fine: `1>/dev/null` under Bash, `1>$null` under PowerShell) — so a benign prefix can neither
+# smuggle another command nor exfiltrate the live token past the gate.
+_CX_TOKEN = r"cx(?:\.exe)?"  # the accepted bare cx spellings, shared by every carve-out shape
+_AUTH_RECOVERY_RE = re.compile(r"^\s*" + _CX_TOKEN + r"\s+(?:auth|configure)\b")
+_SHELL_CHAINING = (";", "|", "&", "`", "$(", "\n", "\r")
+
+# Per-shell unsafe-token sets. PowerShell adds two code-execution constructs ON TOP of
+# _SHELL_CHAINING, neither of which has a bash equivalent that isn't already covered:
+#   `(` — in PowerShell ARGUMENT mode a bare `(` starts an expression that EXECUTES
+#         (`cx auth login --tenant (Remove-Item x)` runs Remove-Item). `@(…)` is covered by `(`.
+#   `{` — a script BLOCK, i.e. deferred code (the form Where-Object & friends evaluate).
+# No admitted command needs either: no allowlisted read-only cmdlet takes a script block, and a
+# pinned cx path never needs braces (the `${env:X}` spelling isn't expanded by _expand_agent_path
+# anyway, so it could never match a pinned path). Backtick (the PS escape char), `$(`, `;`, `|`, `&`
+# are in both sets.
+_SHELL_UNSAFE_TOKENS = {
+    "bash": _SHELL_CHAINING,
+    "powershell": _SHELL_CHAINING + ("(", "{"),
+}
+
+# A single LEADING PowerShell call operator immediately before a QUOTED path — the only `&` the
+# PowerShell carve-outs tolerate (`& "C:\…\cx.exe" auth …`; PowerShell cannot invoke a quoted path
+# without it). It is stripped before the chaining scan; any other `&` (chaining, `2>&1`,
+# background) still disqualifies the command.
+_PS_CALL_OPERATOR_RE = re.compile(r'^\s*&\s*(?=["\'])')
 
 # A bare `bash "<bootstrap>" <install|upgrade>` invocation — the ONLY command allowed to run
 # while the gate is blocking, because it's how the missing/outdated cx gets fixed. The mode is
@@ -212,12 +253,43 @@ _BOOTSTRAP_RE = re.compile(r'^\s*bash\s+"?(?P<path>[^"]+?)"?\s+(?:install|upgrad
 # substitution / unsafe redirect) whose FIRST token equals one of these. Programs with a write or exec
 # form are deliberately EXCLUDED — find (-exec/-delete), sed (-i), awk (system), sort (-o), tee, env /
 # command / type / xargs (run others), git (push/commit/config …) — so this can never smuggle a write
-# or a command. Bash-tool only (PowerShell stays fully gated). Disable with CX_GATE_ALL_COMMANDS=1.
+# or a command. Disable with CX_GATE_ALL_COMMANDS=1.
+# `which`/`where` are locators: they PRINT a resolved path and cannot execute it, which is why they
+# are allowed while `command`/`type`/`env` (shell builtins that CAN run the thing they resolve) are
+# not. `where` matters on Windows/Git-Bash, where it is the System32 locator; on Unix it simply
+# doesn't exist and the command fails harmlessly.
 _READONLY_COMMANDS = frozenset({
     "ls", "pwd", "cat", "head", "tail", "echo", "whoami", "id", "date", "hostname", "uname",
-    "wc", "which", "stat", "file", "basename", "dirname", "realpath", "readlink", "tree",
+    "wc", "which", "where", "stat", "file", "basename", "dirname", "realpath", "readlink", "tree",
     "df", "du", "ps", "grep", "rg", "cut", "uniq", "cmp", "cksum", "md5sum", "sha256sum",
 })
+
+# The PowerShell equivalent — a SEPARATE list, not a reuse of the POSIX names, because PowerShell
+# resolves these to cmdlets with their own parameter sets. Same rule: only verbs that cannot write to
+# disk or execute another program. Canonical cmdlet names plus their standard read-only aliases,
+# matched case-INSENSITIVELY (PowerShell command names are case-insensitive). Deliberately EXCLUDED —
+# anything with a write or exec form: Out-File / Set-Content / Add-Content / Tee-Object (write),
+# New-Item / Remove-Item / Copy-Item / Move-Item (mutate), Invoke-Expression / Invoke-Command /
+# Start-Process / Start-Job (run others), Invoke-WebRequest / Invoke-RestMethod (network + -OutFile),
+# Export-* / ConvertTo-* (write when redirected). Also excluded: the PIPELINE-ONLY cmdlets
+# (Where-Object / Select-Object / Sort-Object / Measure-Object). They can do nothing useful as the
+# FIRST word of a command — they need piped input, and pipes are rejected — and Where-Object accepts
+# a `{ script block }`, i.e. a code-execution construct. Zero function lost, less surface.
+# Get-Command IS included: like `which`, it only PRINTS where a command resolves; it cannot run it.
+# NB `where` (no .exe) is deliberately NOT listed for PowerShell — there it is an alias for
+# Where-Object, not the Windows locator. `where.exe` is the locator and is listed.
+_PS_READONLY_COMMANDS = frozenset({
+    "get-childitem", "get-content", "get-location", "get-item", "get-itemproperty",
+    "test-path", "resolve-path", "split-path", "join-path", "convert-path",
+    "select-string", "get-filehash", "get-date", "get-process", "get-host", "get-computerinfo",
+    "get-command", "where.exe",
+    # standard read-only aliases (ls/cat/pwd resolve to the cmdlets above in PowerShell)
+    "ls", "dir", "gci", "cat", "gc", "pwd", "gl", "gi", "gp", "sls", "gcm", "echo",
+})
+_SHELL_READONLY_COMMANDS = {
+    "bash": _READONLY_COMMANDS,
+    "powershell": _PS_READONLY_COMMANDS,
+}
 
 
 def _normalize_path(p):
@@ -246,24 +318,29 @@ def _bootstrap_command_str(mode):
     return 'bash "{0}" {1}'.format(_bootstrap_script_path(), mode)
 
 
-def _cx_bash_token():
-    """The gate's resolved cx as a single Bash-safe token, for embedding in deny messages the agent
-    runs in its OWN shell. On a first-install session cx sits in the canonical store but NOT on the
-    frozen PATH, so a bare `cx` would exit 127 — emit the resolved ABSOLUTE path instead (forward
-    slashes so Git-Bash doesn't treat backslashes as escapes; double-quoted so a path with spaces
-    survives). Falls back to bare 'cx' when only PATH resolution is available (later sessions / manual
-    install), so the guidance degrades cleanly with no regression."""
+def _cx_command_token(shell="bash"):
+    """The gate's resolved cx as a single token the agent can run IN `shell`, for embedding in deny
+    messages. On a first-install session cx sits in the canonical store but NOT on the frozen PATH,
+    so a bare `cx` would exit 127 — emit the resolved ABSOLUTE path instead, quoted so a path with
+    spaces survives. Per shell: Bash gets forward slashes (Git-Bash treats backslashes as escapes);
+    PowerShell gets native separators PLUS the call operator `&`, without which a quoted path is
+    just a string literal and does not execute. Falls back to bare 'cx' when only PATH resolution is
+    available (later sessions / manual install), so the guidance degrades cleanly."""
     exe = _cx_exe()
-    if os.path.isabs(exe):
-        return '"{0}"'.format(exe.replace("\\", "/"))
-    return "cx"
+    if not os.path.isabs(exe):
+        return "cx"
+    if shell == "powershell":
+        return '& "{0}"'.format(exe)
+    return '"{0}"'.format(exe.replace("\\", "/"))
 
 
-def _cx_recovery_command_str(args):
+def _cx_recovery_command_str(args, shell="bash"):
     """A ready-to-run `cx auth …` / `cx configure …` recovery command using the gate's resolved cx
-    (absolute path when cx isn't yet on PATH). Mirrors _bootstrap_command_str, which likewise embeds a
-    resolved absolute path so the agent never needs ${CLAUDE_PLUGIN_ROOT} / cx on PATH."""
-    return "{0} {1}".format(_cx_bash_token(), args)
+    (absolute path when cx isn't yet on PATH), shaped for the shell the agent will run it in — so the
+    agent copies a working command instead of transforming one. Mirrors _bootstrap_command_str, which
+    likewise embeds a resolved absolute path so the agent never needs ${CLAUDE_PLUGIN_ROOT} / cx on
+    PATH."""
+    return "{0} {1}".format(_cx_command_token(shell), args)
 
 
 def _load_min_version(path=None):
@@ -334,17 +411,13 @@ def _load_admin_config(path=None):
     try:
         if path is None:
             path = _admin_config_path()
-        try:
-            # utf-8-sig (not plain utf-8): an admin editing this file with Windows Notepad can prepend
-            # a UTF-8 BOM, which would otherwise corrupt the first key name (cx_base_auth_uri →
-            # ﻿cx_base_auth_uri → silently dropped). utf-8-sig strips a leading BOM and is a no-op
-            # when there isn't one.
-            with open(path, "r", encoding="utf-8-sig") as f:
-                raw = f.read(_ADMIN_CONFIG_MAX_BYTES + 1)
-        except (OSError, UnicodeDecodeError):
+        # utf-8-sig (not plain utf-8): an admin editing this file with Windows Notepad can prepend
+        # a UTF-8 BOM, which would otherwise corrupt the first key name (cx_base_auth_uri →
+        # ﻿cx_base_auth_uri → silently dropped). utf-8-sig strips a leading BOM and is a no-op
+        # when there isn't one.
+        raw = _read_capped(path, _ADMIN_CONFIG_MAX_BYTES, encoding="utf-8-sig")
+        if raw is None:
             return {}
-        if len(raw) > _ADMIN_CONFIG_MAX_BYTES:
-            return {}  # implausibly large for two values — refuse rather than parse
         result = {}
         for line in raw.splitlines():
             line = line.strip()
@@ -365,31 +438,62 @@ def _load_admin_config(path=None):
         return {}
 
 
-def _oauth_recovery_bullet(cfg):
+# The shared opening of every _oauth_recovery_bullet branch — one copy, so a wording change can't
+# silently miss a branch.
+_OAUTH_BULLET_LEAD = (
+    "- Browser sign-in (OAuth) — only if the developer picks this: you may run it yourself "
+    "(it opens the developer's browser with MFA; no secret passes through you; it resolves cx "
+    "by absolute path so it works before cx is on PATH). "
+)
+
+
+def _oauth_recovery_bullet(cfg, history=None, shell="bash"):
     """The 'Browser sign-in (OAuth)' bullet for an auth-recovery deny context, branched on whether the
     admin config supplied a VALIDATED base-auth-uri AND tenant. Both present → embed the real values
-    and tell the agent to use them as-is (skip the URL/tenant question). Otherwise → the original
-    ask-the-developer / never-guess guidance, now with the regional-URLs doc link. The embedded values
-    are pre-validated to a shell-inert charset, so the resulting `"<cx>" auth login …` command still
-    passes _is_auth_recovery_command's bare-command guard."""
+    and tell the agent to use them as-is (skip the URL/tenant question). Else, when the login history
+    holds previously used (URL, tenant) pairs → list them as CHOICES the developer must pick from
+    (AskUserQuestion; never auto-used). Otherwise → the original ask-the-developer / never-guess
+    guidance, now with the regional-URLs doc link. Every embedded value is pre-validated to a
+    shell-inert charset, so each resulting `"<cx>" auth login …` command still passes
+    _is_auth_recovery_command's bare-command guard. `history=None` (the production call) loads the
+    confirmed pairs lazily — only once the admin branch has NOT short-circuited — so the
+    admin-over-history precedence lives exactly once, as branch order; tests inject explicit lists.
+    Every embedded command is rendered for `shell` (the denied tool's shell), so the agent can run it
+    verbatim instead of translating it."""
     base = cfg.get("cx_base_auth_uri")
     tenant = cfg.get("cx_tenant")
     if base and tenant:
         cmd = _cx_recovery_command_str(
-            "auth login --base-auth-uri {0} --tenant {1}".format(base, tenant))
-        return (
-            "- Browser sign-in (OAuth) — only if the developer picks this: you may run it yourself "
-            "(it opens the developer's browser with MFA; no secret passes through you; it resolves cx "
-            "by absolute path so it works before cx is on PATH). The --base-auth-uri and --tenant "
+            "auth login --base-auth-uri {0} --tenant {1}".format(base, tenant), shell)
+        return _OAUTH_BULLET_LEAD + (
+            "The --base-auth-uri and --tenant "
             "below were PRECONFIGURED BY YOUR ADMINISTRATOR (the plugin's "
             "config/cx-onboarding.properties) — use them AS-IS and do NOT ask the developer for a URL "
             "or tenant:\n    " + cmd
         )
-    cmd = _cx_recovery_command_str("auth login --base-auth-uri <url> --tenant <tenant>")
-    return (
-        "- Browser sign-in (OAuth) — only if the developer picks this: you may run it yourself (it "
-        "opens the developer's browser with MFA; no secret passes through you; it resolves cx by "
-        "absolute path so it works before cx is on PATH). Only AFTER OAuth is chosen, ask for the "
+    if history is None:
+        history = _confirmed_login_pairs()
+    if history:
+        pairs = "".join(
+            "\n    [{0}] {1} @ {2}\n        {3}".format(
+                i + 1, t, b,
+                _cx_recovery_command_str(
+                    "auth login --base-auth-uri {0} --tenant {1}".format(b, t), shell))
+            for i, (b, t) in enumerate(history))
+        _log("login_history", action="offered", count=len(history))
+        return _OAUTH_BULLET_LEAD + (
+            "This developer PREVIOUSLY LOGGED IN "
+            "to the Checkmarx One environment(s) below (most recent first). Only AFTER OAuth is "
+            "chosen, present them with the AskUserQuestion tool — one option per environment, most "
+            "recent first; the tool's built-in \"Other\" lets the developer type a different URL + "
+            "tenant instead — and do NOT run any login until the developer explicitly picks one "
+            "(they may want a different tenant this time). If they pick \"Other\", ask for the "
+            "URL/tenant per the cx-cli-setup skill's oauth.md Question 2 (free-text form) — NEVER "
+            "guess or default values that are not listed. Ready-to-run command for each:" + pairs
+        )
+    cmd = _cx_recovery_command_str("auth login --base-auth-uri <url> --tenant <tenant>", shell)
+    return _OAUTH_BULLET_LEAD + (
+        "Only AFTER OAuth is chosen, ask for the "
         "URL/tenant — NEVER guess or default the --base-auth-uri or --tenant values (e.g. do not try "
         "'iam.checkmarx.net' or a tenant of 'checkmarx') — ask the developer, per the cx-cli-setup "
         "skill's oauth.md Question 2. Regional URL examples: US https://ast.checkmarx.net, "
@@ -400,6 +504,238 @@ def _oauth_recovery_bullet(cfg):
     )
 
 
+# --- OAuth login history (previously used base-URL/tenant pairs) -----------------------------------
+# The cx CLI deliberately never persists --base-auth-uri/--tenant, so every fresh OAuth login used to
+# re-ask the developer for both. The gate is the one deterministic observer of every login the agent
+# can run (the auth-recovery carve-out) AND of the subsequent auth success, so it remembers the pairs
+# itself: RECORD a pair as `pending` when a `cx auth login` is admitted through the carve-out
+# (snapshotting the credential-file mtime at that moment), PROMOTE it to `confirmed` once auth
+# validates AND the stored credential has CHANGED since the attempt was recorded, and OFFER only
+# confirmed pairs in the auth-recovery deny — as choices the developer must pick from
+# (AskUserQuestion), never silently auto-used. Admin pre-fill (cx-onboarding.properties) keeps
+# absolute precedence. Everything here is a CONVENIENCE, not a gate control: any read/write error,
+# tampered file, or missing state dir degrades to "no history" and never blocks or raises.
+_LOGIN_HISTORY_FILE = _state_path("cx_login_history.json")
+_LOGIN_HISTORY_MAX = 5        # entries kept on disk
+_LOGIN_HISTORY_OFFER_MAX = 3  # entries rendered in a deny (fits AskUserQuestion's 4-option limit)
+_LOGIN_HISTORY_MAX_BYTES = 16384
+_LOGIN_PENDING_TTL = 3600     # an unpromoted (failed/abandoned) attempt expires after an hour
+
+# Record ONLY `auth login` — the carve-out also admits `cx auth validate/logout` and `cx configure`
+# (the API-key path), none of which carry a URL/tenant pair worth remembering.
+_AUTH_LOGIN_RE = re.compile(r"\bauth\s+login\b")
+# Flag extraction, `--flag value` and `--flag=value` forms, one optional layer of matched quotes.
+# Lenient by design: the command already passed the bare-command guard (no chaining/substitution/
+# unsafe redirect), and extracted values must still pass the STRICT _ADMIN_URL_RE/_ADMIN_TENANT_RE
+# below — validation, not extraction, is the security boundary.
+_LOGIN_FLAG_RE = re.compile(
+    r'--(base-auth-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
+
+
+def _parse_login_flags(command):
+    """(base_auth_uri, tenant) from a `cx auth login …` command, or None. Both flags must be present
+    AND pass the strict admin-config validators — a half-parsed or invalid pair is never recorded.
+    A repeated flag takes the LAST occurrence, mirroring the CLI's own (cobra) last-flag-wins
+    semantics — recording the first would remember a pair the login never actually used."""
+    if not command or not _AUTH_LOGIN_RE.search(command):
+        return None
+    found = {}
+    for m in _LOGIN_FLAG_RE.finditer(command):
+        found[m.group(1)] = next(g for g in m.groups()[1:] if g is not None)  # later wins
+    base = found.get("base-auth-uri")
+    tenant = found.get("tenant")
+    if base is None or tenant is None:
+        return None
+    if not (_ADMIN_URL_RE.match(base) and _ADMIN_TENANT_RE.match(tenant)):
+        return None
+    return base, tenant
+
+
+def _valid_login_entry(entry):
+    """The normalized history entry dict, or None if ANY field fails re-validation — the same
+    strict regexes as the admin config, so a tampered file can at most lose entries; it can never
+    smuggle flags or free text into a deny message or a composed login command."""
+    if not isinstance(entry, dict):
+        return None
+    url, tenant = entry.get("base_auth_uri"), entry.get("tenant")
+    status, last_used, cred = entry.get("status"), entry.get("last_used"), entry.get("cred_before")
+    if not (isinstance(url, str) and _ADMIN_URL_RE.match(url)):
+        return None
+    if not (isinstance(tenant, str) and _ADMIN_TENANT_RE.match(tenant)):
+        return None
+    if status not in ("pending", "confirmed") or not _is_number(last_used):
+        return None
+    if cred is not None and not _is_number(cred):
+        return None
+    return {"base_auth_uri": url, "tenant": tenant, "status": status,
+            "last_used": last_used, "cred_before": cred}
+
+
+def _load_login_history(path=None):
+    """The validated entry list from cx_login_history.json (possibly empty), NEWEST FIRST and capped
+    at _LOGIN_HISTORY_MAX — this loader is the single owner of entry validation and ordering, so
+    every consumer can iterate as-is. FAIL SOFT: missing/oversized/corrupt file or any unexpected
+    error yields [] and never raises (an escaped exception would trip _fail_closed_on_crash).
+    `path` is a test hook."""
+    try:
+        if path is None:
+            path = _LOGIN_HISTORY_FILE
+        if not path:
+            return []
+        raw = _read_capped(path, _LOGIN_HISTORY_MAX_BYTES)
+        if raw is None:
+            return []
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            return []
+        version = data.get("version") if isinstance(data, dict) else None
+        if version != 1 or isinstance(version, bool):
+            return []
+        entries = data.get("entries")
+        if not isinstance(entries, list):
+            return []
+        result = [e for e in (_valid_login_entry(entry) for entry in entries) if e is not None]
+        if len(result) < len(entries):
+            # One capped event per load, not one per entry — a tampered file with hundreds of
+            # garbage entries must not turn every gated call into hundreds of log writes.
+            _log("login_history", action="invalid", count=min(len(entries) - len(result), 255))
+        result.sort(key=lambda e: e["last_used"], reverse=True)
+        return result[:_LOGIN_HISTORY_MAX]
+    except Exception:
+        return []
+
+
+def _save_login_history(entries, path=None):
+    """Best-effort ATOMIC write (temp file in the same dir + os.replace — atomic on NTFS too) so a
+    concurrent gate run never reads a torn file; last writer wins, which at worst loses one
+    convenience entry. Ordering is not this writer's concern — _load_login_history re-normalizes
+    (sorts newest-first) on every read. Never raises."""
+    try:
+        if path is None:
+            path = _LOGIN_HISTORY_FILE
+        if not path:
+            return
+        entries = entries[:_LOGIN_HISTORY_MAX]
+        directory = os.path.dirname(path) or "."
+        fd, tmp = tempfile.mkstemp(prefix=".cx_login_history-", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps({"version": 1, "entries": entries}))
+            _chmod_600(tmp)
+            os.replace(tmp, path)
+        except Exception:
+            # Broad on purpose: ANY failure after mkstemp (not just OSError) must not orphan the
+            # temp file in the state dir. Re-swallowed by the outer handler either way.
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
+# An admitted `cx configure set …` means the developer took the API-key path (or is repairing
+# config) — any in-flight pending OAuth attempt is abandoned, and keeping it would risk promoting a
+# FAILED login off the credential write the configure is about to make.
+_CX_CONFIGURE_SET_RE = re.compile(r"\bconfigure\s+set\b")
+
+
+def _record_login_attempt(command, path=None):
+    """Note an admitted recovery command in the login history. Two peer cases: an admitted
+    `cx configure set …` DROPS all pendings (see _CX_CONFIGURE_SET_RE); a parseable
+    `cx auth login …` upserts its (URL, tenant) pair as a PENDING entry, snapshotting the
+    credential-file mtime so promotion can require the credential to have CHANGED since this
+    attempt. Deduped case-insensitively; re-recording a pair that is already `confirmed` keeps it
+    confirmed (a re-login that merely fails on the network must not demote a known-good pair).
+    Anything else is a no-op. Never raises."""
+    try:
+        if command and _CX_CONFIGURE_SET_RE.search(command):
+            _drop_pending_logins(path)
+            return
+        parsed = _parse_login_flags(command)
+        if parsed is None:
+            return
+        base, tenant = parsed
+        key = (base.lower(), tenant.lower())
+        status = "pending"
+        entries = []
+        for entry in _load_login_history(path):
+            if (entry["base_auth_uri"].lower(), entry["tenant"].lower()) == key:
+                if entry["status"] == "confirmed":
+                    status = "confirmed"
+                continue
+            entries.append(entry)
+        entries.insert(0, {"base_auth_uri": base, "tenant": tenant, "status": status,
+                           "last_used": time.time(), "cred_before": _credential_mtime()})
+        _save_login_history(entries, path)
+        _log("login_history", action="recorded")
+    except Exception:
+        pass
+
+
+def _drop_pending_logins(path=None):
+    """Remove all PENDING entries (confirmed ones stay). No file write when nothing changes.
+    Never raises."""
+    try:
+        entries = _load_login_history(path)
+        kept = [e for e in entries if e["status"] != "pending"]
+        if len(kept) != len(entries):
+            _save_login_history(kept, path)
+            _log("login_history", action="pruned", count=len(entries) - len(kept))
+    except Exception:
+        pass
+
+
+def _promote_pending_login(path=None):
+    """Called once auth validates: promote the newest PENDING attempt whose credential-mtime
+    snapshot DIFFERS from the current one — i.e. the stored credential changed after that attempt
+    was recorded, which (together with auth now validating) is the best available evidence the
+    attempt succeeded. NOT a proof: a credential written out-of-band between record and promote
+    (e.g. the developer runs `cx configure set` in their OWN terminal, invisible to the gate) can
+    promote a failed pair — bounded by the developer having to confirm every offered pair before
+    use. Older pendings are superseded → dropped once something promotes; an untouched-credential
+    pending is still in-flight → kept until _LOGIN_PENDING_TTL. Cheap when idle: one stat when no
+    history file exists. Never raises."""
+    try:
+        if path is None:
+            path = _LOGIN_HISTORY_FILE
+        if not path or not os.path.exists(path):
+            return
+        entries = _load_login_history(path)  # newest first, per the loader's contract
+        if not any(e["status"] == "pending" for e in entries):
+            return
+        cred = _credential_mtime()
+        now = time.time()
+        kept = []
+        promoted = False
+        for entry in entries:
+            if entry["status"] != "pending":
+                kept.append(entry)
+            elif not promoted and cred is not None and cred != entry.get("cred_before"):
+                kept.append(dict(entry, status="confirmed", last_used=now))
+                promoted = True
+            elif not promoted and (now - entry["last_used"]) <= _LOGIN_PENDING_TTL:
+                kept.append(entry)  # still in-flight (login command may not have finished yet)
+            # else: superseded by the newer promoted attempt, or stale/abandoned → dropped
+        if promoted or len(kept) != len(entries):
+            _save_login_history(kept, path)
+            _log("login_history", action="promoted" if promoted else "pruned")
+    except Exception:
+        pass
+
+
+def _confirmed_login_pairs(path=None):
+    """The offerable (base_auth_uri, tenant) pairs: CONFIRMED entries only, most recent first (the
+    loader's order), capped at _LOGIN_HISTORY_OFFER_MAX. Never raises."""
+    try:
+        confirmed = [(e["base_auth_uri"], e["tenant"])
+                     for e in _load_login_history(path) if e["status"] == "confirmed"]
+        return confirmed[:_LOGIN_HISTORY_OFFER_MAX]
+    except Exception:
+        return []
+
+
 def _parse_semver(text):
     """Extract the first MAJOR.MINOR.PATCH from arbitrary text → (int, int, int) or None."""
     if not isinstance(text, str):
@@ -408,6 +744,19 @@ def _parse_semver(text):
     if not m:
         return None
     return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
+def _installed_version_note():
+    """' v2.4.0' for embedding in a version deny message, or '' when the version can't be read.
+    Costs one extra `cx version` spawn, but ONLY on the rare below-min deny path — worth it so the
+    deny states BOTH numbers ("cx v2.4.0 is older than the required v2.5.0"). Without it the message
+    names only the minimum, and the agent has to run `cx version` itself just to tell the developer
+    which build they actually have. Never raises."""
+    try:
+        have = _parse_semver(_cx_version() or "")
+        return " v{0}".format(".".join(str(n) for n in have)) if have else ""
+    except Exception:
+        return ""
 
 
 def _cx_version():
@@ -515,7 +864,7 @@ def _cached_probe(cache_file, ttl, key, probe, should_cache):
                 cached = json.loads(f.read())
             ts = cached.get("ts") if isinstance(cached, dict) else None
             if (isinstance(cached, dict) and "value" in cached
-                    and isinstance(ts, (int, float)) and not isinstance(ts, bool)
+                    and _is_number(ts)
                     and (time.time() - ts) < ttl
                     and all(cached.get(k) == v for k, v in key.items())):
                 return cached["value"]
@@ -767,75 +1116,223 @@ def _read_hook_input():
     return data if isinstance(data, dict) else {}
 
 
-def _bash_command(hook_input):
-    """The command string of a Bash tool call, or '' if this isn't a Bash call."""
-    if hook_input.get("tool_name") != "Bash":
-        return ""
+# The single tool-name → shell mapping. Every shell-aware decision (carve-out guards, null-sink
+# rules, read-only allowlist, deny-message command rendering) resolves through this one table, so a
+# tool's shell is never re-derived by comparing tool_name somewhere else.
+_TOOL_SHELLS = {"Bash": "bash", "PowerShell": "powershell"}
+
+
+def _shell_for_tool(tool):
+    """The shell a deny message should be written for: the denied tool's own shell, or 'bash' for a
+    non-shell tool (Write/Edit/mcp__*), whose recovery the agent runs in a shell anyway."""
+    return _TOOL_SHELLS.get(tool, "bash")
+
+
+def _shell_command(hook_input):
+    """(command, shell) of a Bash/PowerShell tool call — shell is 'bash' | 'powershell'.
+    ('', None) for any other tool or a non-string command."""
+    shell = _TOOL_SHELLS.get(hook_input.get("tool_name"))
+    if shell is None:
+        return "", None
     tool_input = hook_input.get("tool_input")
     command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
-    return command if isinstance(command, str) else ""
+    if not isinstance(command, str) or not command:
+        return "", None
+    return command, shell
 
 
-# The ONLY redirect SAFE inside an allow carve-out: suppression to the shell's null device,
-# `/dev/null` (the oauth.md-mandated `1>/dev/null`, with an optional fd or `>>`). The carve-out only
-# ever matches a Bash tool command, whose shell is bash / Git-Bash — where `/dev/null` is the null
-# device but `NUL` / `$null` are ORDINARY files, so those are NOT safe here. The null-device name must
-# be a complete shell token — `(?=\s|$)`, not `\b` — so a real file whose name merely STARTS with it
-# (`/dev/null.bak`) is not mistaken for suppression. ANY other redirect could write the command's
-# stdout — which for `cx auth login` is the LIVE token — to a real file, so it disqualifies the
-# carve-out. (fd-dups like `2>&1` contain `&` and are already rejected by _SHELL_CHAINING.)
+# The ONLY redirect SAFE inside an allow carve-out: suppression to the SHELL'S OWN null sink —
+# `/dev/null` under the Bash tool (the oauth.md-mandated `1>/dev/null`, with an optional fd or
+# `>>`), `$null` under the PowerShell tool. The sinks are NOT interchangeable: under Git-Bash,
+# `NUL` / `$null` are ORDINARY files; under PowerShell, `/dev/null` would create a real file on
+# Windows. The null-sink name must be a complete token — `(?=\s|$)`, not `\b` — so a real file
+# whose name merely STARTS with it (`/dev/null.bak`, `$null.txt`) is not mistaken for suppression.
+# ANY other redirect could write the command's stdout — which for `cx auth login` is the LIVE
+# token — to a real file, so it disqualifies the carve-out. (fd-dups like `2>&1` contain `&` and
+# are already rejected by _SHELL_CHAINING; `$null` is case-insensitive because PS variables are.)
 _NULL_REDIRECT_RE = re.compile(r'(?:&|\d)?(?:>>?|<)\s*/dev/null(?=\s|$)')
+_PS_NULL_REDIRECT_RE = re.compile(r'(?:\d|\*)?>>?\s*\$null(?=\s|$)', re.IGNORECASE)
+_SHELL_NULL_SINK_RE = {
+    "bash": _NULL_REDIRECT_RE,
+    "powershell": _PS_NULL_REDIRECT_RE,
+}
 
 
-def _has_unsafe_redirect(command):
-    """True if the command contains a redirect to anything OTHER than `/dev/null`. A redirect to a
-    real file could exfiltrate a command's stdout (e.g. the live token `cx auth login` prints) to an
-    attacker-chosen path. The sanctioned `1>/dev/null` suppression stays allowed; any residual `>`/`<`
-    after stripping the exact null-device redirects is unsafe."""
-    residual = _NULL_REDIRECT_RE.sub(" ", command)
+def _has_unsafe_redirect(command, shell):
+    """True if the command contains a redirect to anything OTHER than the shell's own null sink. A
+    redirect to a real file could exfiltrate a command's stdout (e.g. the live token `cx auth login`
+    prints) to an attacker-chosen path. The sanctioned suppression stays allowed; any residual
+    `>`/`<` after stripping the exact null-sink redirects is unsafe. No default shell on purpose —
+    a caller that forgot the argument must fail loudly, not silently get bash rules."""
+    residual = _SHELL_NULL_SINK_RE[shell].sub(" ", command)
+    if shell == "powershell" and os.name != "nt":
+        # PowerShell Core also runs on macOS/Linux, where /dev/null IS the real null device — so it
+        # is a safe sink there. On Windows it is NOT (it would create an ordinary file holding the
+        # token), which is why this tolerance is gated on the OS rather than granted outright.
+        residual = _NULL_REDIRECT_RE.sub(" ", residual)
     return ">" in residual or "<" in residual
 
 
-def _bare_bash_command(hook_input):
-    """The Bash command string IFF it is a single BARE command safe to consider for an allow carve-out:
-    a Bash tool call, with NO shell chaining/substitution (_SHELL_CHAINING) and NO unsafe redirect
-    (_has_unsafe_redirect). Returns None otherwise. This is the one audited guard the bootstrap and
-    auth-recovery carve-outs share, so a benign prefix can neither smuggle another command nor
+def _bare_shell_command(hook_input):
+    """(command, shell) IFF the call is a single BARE Bash/PowerShell command safe to consider for
+    an allow carve-out: NO shell chaining/substitution/expression tokens for that shell
+    (_SHELL_UNSAFE_TOKENS) and NO unsafe redirect for that shell. None otherwise. For PowerShell,
+    ONE leading call operator `&` immediately before a quoted path is stripped first (PowerShell
+    cannot invoke a quoted path without it); the returned command is the stripped form, and every
+    scan applies to the remainder, so any OTHER `&` still disqualifies. This is the one audited
+    guard all carve-outs share, so a benign prefix can neither smuggle another command nor
     exfiltrate a command's stdout past the gate."""
-    command = _bash_command(hook_input)
+    command, shell = _shell_command(hook_input)
     if not command:
         return None
-    if any(tok in command for tok in _SHELL_CHAINING):
+    if shell == "powershell":
+        command = _PS_CALL_OPERATOR_RE.sub("", command, count=1)
+    if any(tok in command for tok in _SHELL_UNSAFE_TOKENS[shell]):
         return None
-    if _has_unsafe_redirect(command):
+    if _has_unsafe_redirect(command, shell):
         return None
-    return command
+    return command, shell
+
+
+def _bare_bash_command(hook_input):
+    """The BARE Bash command string, or None — the Bash-only view of _bare_shell_command, kept for
+    the carve-outs that deliberately stay Bash-only (bootstrap, read-only allowlist)."""
+    bare = _bare_shell_command(hook_input)
+    if bare is None:
+        return None
+    command, shell = bare
+    return command if shell == "bash" else None
+
+
+# Documented ~/env-var prefixes an agent may type in a pinned cx path, scoped per shell — exactly
+# the spellings the plugin's own docs and deny messages use (Git-Bash on Windows exports
+# USERPROFILE/LOCALAPPDATA; PowerShell has $HOME and $env:*, case-insensitive). The value is the
+# env var to expand from the GATE's own environment; None means the user's home dir. An unset
+# variable or any other prefix is left unexpanded and then simply fails the pinned-path
+# comparison — expansion can never bless a path that isn't pinned.
+_AGENT_PATH_PREFIXES = {
+    "bash": (("$HOME", None), ("$USERPROFILE", "USERPROFILE"), ("$LOCALAPPDATA", "LOCALAPPDATA")),
+    "powershell": (("$env:USERPROFILE", "USERPROFILE"), ("$env:LOCALAPPDATA", "LOCALAPPDATA"),
+                   ("$HOME", None)),
+}
+
+
+def _expand_agent_path(token, shell):
+    """Expand ONLY a leading, whole-component `~` or documented env-var prefix (_AGENT_PATH_PREFIXES)
+    in an agent-typed executable token; return the token unchanged when nothing (safely) applies."""
+    def _with_rest(value, rest):
+        return value + rest if (rest == "" or rest[0] in "/\\") and value else None
+
+    if token.startswith("~"):
+        expanded = _with_rest(os.path.expanduser("~"), token[1:])
+        return expanded if expanded else token
+    if not token.startswith("$"):
+        return token
+    fold = str.lower if shell == "powershell" else (lambda s: s)  # PS var names are case-insensitive
+    for prefix, var in _AGENT_PATH_PREFIXES.get(shell, ()):
+        if fold(token).startswith(fold(prefix)):
+            value = os.environ.get(var) if var else os.path.expanduser("~")
+            expanded = _with_rest(value, token[len(prefix):])
+            if expanded:
+                return expanded
+    return token
+
+
+def _pinned_cx_paths():
+    """The normalized set of cx paths a carve-out may accept as the typed executable: the gate's
+    resolved cx (when absolute) PLUS the canonical store (when present). Accepting the canonical
+    store even under a CX_BINARY pin is deliberate — both are plugin-controlled install locations
+    that read/write the SAME credential file, and the docs/deny messages print the canonical form.
+    Never an arbitrary path."""
+    exe, tier = _cx_exe_with_tier()
+    paths = set()
+    if os.path.isabs(exe):
+        paths.add(_normalize_path(exe))
+    if tier != "canonical":  # else the canonical store IS `exe` — don't stat it twice
+        canon = _canonical_cx()
+        if canon:
+            paths.add(_normalize_path(canon))
+    paths.discard(None)
+    return paths
+
+
+_FIRST_TOKEN_RE = re.compile(r'^\s*(?:"([^"]+)"|\'([^\']+)\'|(\S+))\s+(?P<rest>\S.*)$')
+
+
+def _match_pinned_cx(command, shell):
+    """If `command` begins with a PINNED cx executable — quoted (double or single) or bare token,
+    with documented ~/env prefixes expanded, compared via _normalize_path so slash direction and
+    Windows case don't matter — return the remainder after it; else None. Requiring the EXPANDED
+    token to be an absolute path keeps ordinary commands (echo, ls, …) away from the filesystem
+    stats in _pinned_cx_paths() — and, unlike a first-character prefilter, cannot drift when a new
+    prefix spelling is added to _AGENT_PATH_PREFIXES."""
+    m = _FIRST_TOKEN_RE.match(command)
+    if not m:
+        return None
+    token = next(g for g in m.groups()[:3] if g is not None)
+    expanded = _expand_agent_path(token, shell)
+    if not os.path.isabs(expanded):
+        return None
+    candidate = _normalize_path(expanded)
+    if candidate is None or candidate not in _pinned_cx_paths():
+        return None
+    return m.group("rest")
+
+
+# The two carve-out shapes, as data: the bare form (`cx <sub> …`) and the pinned-path rest form
+# (`"<cx>" <sub> …`) are built from the SAME subcommand pattern, so the two forms cannot drift apart.
+_AUTH_RECOVERY_SUB = r"(?:auth|configure)\b"
+# `cx version` is the ONE read-only diagnostic admitted even on a build the version gate rejects,
+# because "which build is installed?" is the only question whose answer changes what the agent does
+# in a version-broken state — the remedy there is always the installer, never authentication. (This
+# is deliberately NOT a family: `cx auth validate` was tried here and removed, because in every
+# version-broken state the fix is an upgrade/reinstall regardless of auth, and in every OTHER state
+# `cx auth …` is already admitted by the auth-recovery carve-out at step 5. A fail-closed gate should
+# admit the narrowest set that works.) Anchored to `\s*$`: no extra arguments and no redirect, not
+# even a null sink — a diagnostic whose output is discarded is pointless.
+_CX_VERSION_SUB = r"version\s*$"
+_PINNED_AUTH_REST_RE = re.compile(_AUTH_RECOVERY_SUB)
+_CX_VERSION_BARE_RE = re.compile(r"^\s*" + _CX_TOKEN + r"\s+" + _CX_VERSION_SUB)
+_PINNED_VERSION_REST_RE = re.compile(_CX_VERSION_SUB)
+
+
+def _matches_cx_command(hook_input, bare_re, rest_re):
+    """The one carve-out matching algorithm, shared by every cx-command carve-out so the
+    security-critical ordering (bare-command guard → bare shape → pinned-path shape) exists once:
+    True IFF the call passes _bare_shell_command AND either the whole command matches `bare_re` or
+    it starts with a pinned cx executable whose remainder matches `rest_re`."""
+    bare = _bare_shell_command(hook_input)
+    if bare is None:
+        return False
+    command, shell = bare
+    if bare_re.match(command):
+        return True
+    rest = _match_pinned_cx(command, shell)
+    return rest is not None and rest_re.match(rest) is not None
 
 
 def _is_auth_recovery_command(hook_input):
     """True for a credential-recovery command (`cx auth …` / `cx configure …`) that passes the shared
     bare-command guard — the path that must run even when unauthenticated so the auth gate never blocks
-    the command that fixes auth. Accepts the BARE form (`cx auth …`, for later sessions / manual install
-    where cx is on PATH) AND the resolved ABSOLUTE-path form the deny messages emit (`"<cx>" auth …`) so
-    cx resolves on a first-install session before it is on PATH. The absolute form is pinned to the
-    gate's OWN resolved cx (_cx_exe) — never an attacker-chosen path."""
-    command = _bare_bash_command(hook_input)
-    if command is None:
-        return False
-    if _AUTH_RECOVERY_RE.match(command):
-        return True
-    # The only remaining accepted form is `"<resolved cx>" auth|configure …`, which begins with a
-    # quote or an absolute path — so ordinary commands (echo, ls, …) skip the _cx_exe() filesystem
-    # stat + dynamic-regex build below.
-    s = command.lstrip()
-    if not (s[:1] in ('"', "/") or (len(s) >= 2 and s[1] == ":")):
-        return False
-    exe = _cx_exe()
-    if os.path.isabs(exe):
-        tok = re.escape(exe.replace("\\", "/"))
-        if re.match(r'^\s*"?' + tok + r'"?\s+(?:auth|configure)\b', command):
-            return True
-    return False
+    the command that fixes auth. Works through the Bash AND PowerShell tools. Accepts the BARE form
+    (`cx auth …`, for later sessions / manual install where cx is on PATH) AND the pinned
+    ABSOLUTE-path form the deny messages and docs emit (`"<cx>" auth …`; PowerShell may prefix the
+    quoted path with a single call operator `&`; documented `~`/`$HOME`/`$env:*` spellings are
+    expanded) so cx resolves on a first-install session before it is on PATH. The absolute form is
+    pinned to the gate's OWN resolved cx or the canonical store (_pinned_cx_paths) — never an
+    attacker-chosen path."""
+    return _matches_cx_command(hook_input, _AUTH_RECOVERY_RE, _PINNED_AUTH_REST_RE)
+
+
+def _is_cx_version_command(hook_input):
+    """True for a bare `cx version` (or the pinned form `"<cx>" version`; PowerShell
+    `& "<cx>" version`) with NO extra arguments and NO redirect — see _CX_VERSION_SUB. This is the
+    one command allowed in ANY broken state past cx resolution (below-min, unrunnable-probe,
+    incapable, unauthenticated): it cannot write code or run another program, and reporting the
+    INSTALLED version is what lets the agent explain a version mismatch to the developer instead of
+    handing them a command to run (SKILL.md Phase 1a). Both shell tools; same bare-command guard as
+    the auth-recovery carve-out."""
+    return _matches_cx_command(hook_input, _CX_VERSION_BARE_RE, _PINNED_VERSION_REST_RE)
 
 
 def _is_bootstrap_command(hook_input):
@@ -865,18 +1362,24 @@ def _is_bootstrap_command(hook_input):
     return candidate is not None and candidate == expected
 
 
-def _is_readonly_command(hook_input, tool):
-    """True for a BARE Bash command whose first token is a known read-only program (_READONLY_COMMANDS)
-    — safe to run without the cx gate. Reuses the same shape-guard the auth/bootstrap carve-outs use, so
-    `ls; rm -rf x`, `cat $(evil)`, `> file` redirects, etc. are NOT matched. Bash-tool only; opt out
-    with CX_GATE_ALL_COMMANDS=1. A path form (e.g. /bin/rm) is not matched — only a plain program name."""
-    if tool != "Bash" or os.environ.get("CX_GATE_ALL_COMMANDS") == "1":
+def _is_readonly_command(hook_input):
+    """True for a BARE Bash/PowerShell command whose first token is a known read-only program for THAT
+    shell (_SHELL_READONLY_COMMANDS) — safe to run without the cx gate, since there is nothing to scan.
+    Reuses the same shape-guard the auth/bootstrap carve-outs use, so `ls; rm -rf x`, `cat $(evil)`,
+    `> file` redirects, `Get-ChildItem | Out-File x` etc. are NOT matched. The shell comes from the
+    payload via _shell_command — never from a second tool_name comparison here. Opt out with
+    CX_GATE_ALL_COMMANDS=1. A path form (e.g. /bin/rm) is not matched — only a plain program name."""
+    if os.environ.get("CX_GATE_ALL_COMMANDS") == "1":
         return False
-    command = _bare_bash_command(hook_input)
-    if not command:
+    bare = _bare_shell_command(hook_input)
+    if bare is None:
         return False
+    command, shell = bare
     parts = command.split()
-    return bool(parts) and parts[0] in _READONLY_COMMANDS
+    if not parts:
+        return False
+    first = parts[0].lower() if shell == "powershell" else parts[0]
+    return first in _SHELL_READONLY_COMMANDS[shell]
 
 
 def cx_check():
@@ -888,11 +1391,12 @@ def cx_check():
         _log("gate_decision", decision="allow", reason_code="bootstrap", tool_name=tool)
         return
 
-    # 2. Read-only Bash commands (ls, cat, grep, …) can't write code to disk or run another program,
-    #     so there is nothing to scan — allow them WITHOUT requiring cx to be installed/authed. Removes
-    #     the friction of gating a plain `ls` during setup. Allowlisted + shape-guarded so it can't be
-    #     used to smuggle a write/exec (`ls; rm …`, `cat $(…)`, `> file` are all rejected).
-    if _is_readonly_command(hook_input, tool):
+    # 2. Read-only shell commands (ls / cat / grep, Get-ChildItem / Get-Content / Select-String, …)
+    #     can't write code to disk or run another program, so there is nothing to scan — allow them
+    #     WITHOUT requiring cx to be installed/authed. Removes the friction of gating a plain `ls`
+    #     during setup, in EITHER shell. Per-shell allowlist + shape-guarded so it can't be used to
+    #     smuggle a write/exec (`ls; rm …`, `cat $(…)`, `> file`, `… | Out-File x` are all rejected).
+    if _is_readonly_command(hook_input):
         _log("gate_decision", decision="allow", reason_code="read_only", tool_name=tool)
         return
 
@@ -949,22 +1453,41 @@ def cx_check():
     # could let a stale 'authenticated'/'will-scan' ride a swapped cx).
     identity = _binary_identity(resolved)
 
+    # 3.5 `cx version` is a safe read-only DIAGNOSTIC allowed in ANY broken state past this point —
+    #     below-min, unrunnable, incapable, unauthenticated. It cannot write code or run another
+    #     program, and it answers the one question that changes what the agent DOES in a
+    #     version-broken state: which build is actually installed (SKILL.md Phase 1a). Without this,
+    #     the version gate at step 4 denies it before the auth-recovery carve-out at step 5 is even
+    #     reached, and the agent falls back to asking the DEVELOPER to run it. Placed AFTER step 3
+    #     deliberately: when cx is genuinely absent, the cx_absent deny (with its ready-to-run
+    #     bootstrap command) is strictly more useful than the raw exit-127 this would produce.
+    if _is_cx_version_command(hook_input):
+        _log("gate_decision", decision="allow", reason_code="cx_diagnostic", tool_name=tool)
+        return
+
     # 4. Version gate — BEFORE auth-recovery, so a below-min cx can't sneak through via
     #    `cx auth login`. A below-min build lacks `cx mcp bridge` / `cx auth login`.
     state = _version_state(identity)
     if state == "below":
         min_ver = ".".join(str(n) for n in _load_min_version())
+        have_note = _installed_version_note()
         _deny(
             reason=(
-                "The Checkmarx CLI (cx) is older than the required v{0} and cannot run the scanner "
-                "or the remediation MCP. This operation is BLOCKED until cx is upgraded.".format(min_ver)
+                "The installed Checkmarx CLI (cx{0}) is older than the required v{1} and cannot run "
+                "the scanner or the remediation MCP. This operation is BLOCKED until cx is "
+                "upgraded.".format(have_note, min_ver)
             ),
             context=(
-                "cx is below the minimum supported version (v{0}). All agent actions are blocked "
-                "fail-closed — including `cx auth login`, which this old build may not support — until "
-                "cx is upgraded. Invoke /cx-cli-setup (Phase 1b — Upgrade). To self-upgrade now, run "
-                "the plugin's bundled bootstrap by its resolved absolute path:\n    {1}{2}".format(
-                    min_ver, _bootstrap_command_str("upgrade"), _cx_binary_pin_note(effective_tier)
+                "cx{0} is below the minimum supported version (v{1}) — tell the developer BOTH "
+                "numbers so the mismatch is unambiguous. All agent actions are blocked fail-closed "
+                "— including `cx auth login`, which this old build may not support — until cx is "
+                "upgraded, so authentication is NOT the problem to solve here and there is no need "
+                "to check it. You may re-run `cx version` yourself (it is allowed even while "
+                "blocked, via the Bash or PowerShell tool); do not hand it to the developer. Invoke "
+                "/cx-cli-setup (Phase 1b — Upgrade). To self-upgrade now, run "
+                "the plugin's bundled bootstrap by its resolved absolute path:\n    {2}{3}".format(
+                    have_note, min_ver, _bootstrap_command_str("upgrade"),
+                    _cx_binary_pin_note(effective_tier)
                 )
             ),
             reason_code="below_min",
@@ -1022,8 +1545,12 @@ def cx_check():
     # state in ("ok", "dev") with required subcommands present → continue.
 
     # 5. Allow credential-recovery commands (cx auth / cx configure) through even when
-    #    unauthenticated, so the auth gate never blocks the command that fixes auth.
+    #    unauthenticated, so the auth gate never blocks the command that fixes auth — via the Bash
+    #    OR PowerShell tool. An admitted `cx auth login` also has its URL/tenant pair remembered
+    #    (as pending) so the next logged-out session can offer it instead of re-asking the
+    #    developer from scratch; an admitted `cx configure set` drops in-flight pendings instead.
     if _is_auth_recovery_command(hook_input):
+        _record_login_attempt(_shell_command(hook_input)[0])
         _log("gate_decision", decision="allow", reason_code="auth_recovery", tool_name=tool,
              version_state=state)
         return
@@ -1049,7 +1576,7 @@ def cx_check():
                     "RE-RUNNING `cx auth login` makes it WORSE: it revokes the token server-side and "
                     "issues a new one, resetting this wait — that is the loop to avoid. Wait ~30–60s, "
                     "then retry the ORIGINAL operation. You may confirm readiness once with:\n    "
-                    + _cx_recovery_command_str("auth validate")
+                    + _cx_recovery_command_str("auth validate", _shell_for_tool(tool))
                     + "\nAll agent actions remain blocked fail-closed until validate succeeds."
                 ),
                 reason_code="auth_pending_fresh_login",
@@ -1072,17 +1599,28 @@ def cx_check():
                 "ways to authenticate, and they differ in who runs them:\n"
                 "- API key (ask this first / simplest): the DEVELOPER runs this in their own terminal "
                 "(it is a plaintext secret — do not type an API key yourself):\n    "
-                + _cx_recovery_command_str("configure set --prop-name cx_apikey --prop-value <key>")
-                + "\n" + _oauth_recovery_bullet(_load_admin_config())
+                + _cx_recovery_command_str(
+                    "configure set --prop-name cx_apikey --prop-value <key>", _shell_for_tool(tool))
+                + "\n" + _oauth_recovery_bullet(_load_admin_config(), shell=_shell_for_tool(tool))
                 + "\n  It blocks until the developer finishes (~5 min) — run it with a long timeout or "
                 "in the background.\n"
-                "Only `cx auth …` / `cx configure …` recovery commands run until authentication "
-                "succeeds."
+                "Every command above is already shaped for the tool you called — run it VERBATIM with "
+                "that same tool. Only `cx auth …` / `cx configure …` recovery commands (plus the "
+                "`cx version` diagnostic) run until authentication succeeds; "
+                "both the Bash and PowerShell tools are accepted. When discarding the login's "
+                "secret-bearing stdout, use the sink for that shell — Bash `1>/dev/null`, PowerShell "
+                "`1>$null` (never `/dev/null` in PowerShell on Windows: it creates a real file)."
             ),
             reason_code="unauthenticated",
             tool_name=tool,
             version_state=state,
         )
+
+    # Auth verified — if a recorded `cx auth login` changed the stored credential, promote its
+    # URL/tenant pair to offerable. Unconditional on purpose: the first gated call after a login
+    # can come arbitrarily late (next-day session), so any freshness gate here would silently
+    # strand pendings forever. Steady-state cost is one stat (no history file → immediate return).
+    _promote_pending_login()
 
     # 6b. Scanner readiness. `cx auth validate` (step 6) and the native scanner authenticate
     #     DIFFERENTLY: validate accepts an OAuth refresh token, but `cx hooks claude-*` only
@@ -1148,9 +1686,13 @@ def cx_check():
                 "URL/tenant before this choice is made.\n"
                 "- API key (ask this first / simplest): the DEVELOPER runs this in their own terminal "
                 "(do not type an API key yourself):\n    "
-                + _cx_recovery_command_str("configure set --prop-name cx_apikey --prop-value <key>")
-                + "\n" + _oauth_recovery_bullet(_load_admin_config())
-                + "\nOnly `cx auth …` / `cx configure …` commands run until the scanner is authenticated."
+                + _cx_recovery_command_str(
+                    "configure set --prop-name cx_apikey --prop-value <key>", _shell_for_tool(tool))
+                + "\n" + _oauth_recovery_bullet(_load_admin_config(), shell=_shell_for_tool(tool))
+                + "\nEvery command above is already shaped for the tool you called — run it VERBATIM "
+                "with that same tool. Only `cx auth …` / `cx configure …` recovery commands (plus the "
+                "`cx version` diagnostic) run until the scanner is "
+                "authenticated; both the Bash and PowerShell tools are accepted."
             ),
             reason_code="scanner_passthrough",
             tool_name=tool,

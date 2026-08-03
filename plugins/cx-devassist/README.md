@@ -61,6 +61,18 @@ through):
 
 If cx is missing, below the minimum version, missing the required subcommands (`incapable`), or
 unauthenticated, the gate denies with a clear, actionable message pointing at `/cx-cli-setup`.
+While blocked, only four narrow carve-outs are admitted — everything else stays fail-closed:
+
+| Carve-out | Shell | Notes |
+|---|---|---|
+| The plugin's own bootstrap | Bash | the only way out of a missing/outdated cx |
+| Read-only commands | Bash **or PowerShell** | per-shell allowlist (`ls`/`cat`/`grep`; `Get-ChildItem`/`Get-Content`/`Select-String`) — nothing that can write or exec |
+| Auth recovery: `cx auth …` / `cx configure …` | Bash **or PowerShell** | bare, or by the pinned cx path (`~`, `$HOME`, `$env:LOCALAPPDATA` spellings accepted) |
+| Diagnostic: `cx version` | Bash **or PowerShell** | exact shape, no arguments — the one command that works even on a below-minimum build, so the agent can report which build is installed. (Auth recovery is blocked there: an outdated cx needs an upgrade, not a login.) |
+
+All four share one shape guard: no command chaining or substitution, and no output redirect other
+than the calling shell's own null sink (`1>/dev/null` under Bash, `1>$null` under PowerShell) — so a
+carve-out can neither smuggle a second command nor capture the login token to a file.
 
 ---
 
@@ -116,6 +128,24 @@ Edit the file in your **forked / internal marketplace copy** (the reviewed, vers
 in an end-user's live install, which is overwritten on plugin update. Values are strictly validated
 (https-only host for the URL; a shell-inert charset for the tenant); an invalid value is ignored and
 the developer is asked as usual. There is deliberately no out-of-tree (`~/.checkmarx` / env) override.
+
+### Remembered login environments (automatic)
+
+Without an admin pre-fill, the gate remembers the **URL + tenant** pairs each successful browser
+(OAuth) `cx auth login` used — per machine, in `~/.checkmarx/agent-logs/claude/cx_login_history.json`
+(the gate's private 0700 state dir; honors `CX_LOG_DIR`). On the next logged-out session the deny
+message lists up to 3 most recent pairs and the `cx-cli-setup` skill offers them as **choices** the
+developer picks from (or types new values) — a remembered pair is never used without confirmation,
+and the admin pre-fill always takes precedence. Entries are strictly re-validated on every read with
+the same rules as the admin config, so an edited/tampered file can at most lose entries — never
+inject anything. A pair becomes offerable only once authentication succeeds AND the stored
+credential changed after that login attempt was recorded — the best available evidence the attempt
+worked (not a proof: a credential written out-of-band between a failed attempt and the next check,
+e.g. an API key set in the developer's own terminal, can promote that failed pair; the
+pick-to-confirm step bounds the impact). Unpromoted attempts are pruned after an hour or when a
+newer login succeeds; an agent-run `cx configure set` clears them immediately. Delete the JSON file
+to clear the history. The audit log records history events (`login_history`: recorded / promoted /
+offered / invalid / pruned) but never the URL or tenant values themselves.
 
 ---
 

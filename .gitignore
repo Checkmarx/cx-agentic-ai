@@ -25,3 +25,8 @@ Thumbs.db
 # Temporary and log files
 *.log
 *.tmp
+
+# Python bytecode / test caches (the hooks are Python; running tests/ creates these)
+__pycache__/
+*.py[cod]
+.pytest_cache/

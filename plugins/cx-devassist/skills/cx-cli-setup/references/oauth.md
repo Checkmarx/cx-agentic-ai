@@ -13,17 +13,35 @@ step.
 a guessed host like `https://iam.checkmarx.net`) — both are org-specific and a wrong guess just
 burns a failed login round-trip.
 
-**First check whether the values are already provided — if so, SKIP Question 2:**
-- If the gate's deny recovery command already shows a **real** `--base-auth-uri <URL> --tenant
-  <tenant>` (concrete values, not the literal `<url>` / `<tenant>` placeholders), your administrator
-  preconfigured them in the plugin's `config/cx-onboarding.properties`. Use those values as-is: go
-  straight to running that login command and do **not** ask Question 2.
+**First check what the gate's deny message already provides — it decides which form of Question 2
+(if any) to use.** Precedence: admin pre-fill > remembered history > free text:
+- If the deny recovery command already shows a **real** `--base-auth-uri <URL> --tenant <tenant>`
+  (concrete values, not the literal `<url>` / `<tenant>` placeholders) marked **PRECONFIGURED BY
+  YOUR ADMINISTRATOR**, use those values as-is: go straight to running that login command and do
+  **not** ask Question 2 at all.
+- If the deny message lists environments marked **PREVIOUSLY LOGGED IN** (URL + tenant pairs this
+  developer used before — the gate remembers each successful `cx auth login` in
+  `~/.checkmarx/agent-logs/claude/cx_login_history.json`), ask Question 2 in its **history form**
+  below. Never silently auto-pick a listed pair — the developer may want a different tenant this
+  time.
 - Only when the flags are still **bare placeholders** (`<url>` / `<tenant>`) do you ask Question 2
-  below.
+  in its **free-text form** below.
 
-**Question 2 — ask in a plain chat message (NOT `AskUserQuestion`)**: the tenant is org-specific
-free text with no preset options, and one `AskUserQuestion` cannot return two independent free-text
-values. Collect both in a single reply:
+**Question 2 (history form) — ask with the `AskUserQuestion` tool**: the deny message's listed
+pairs ARE preset options, so the tool fits here (unlike the free-text form). Use
+`multiSelect: false`, header `Environment` (headers are capped at 12 characters), one option per
+listed pair — label
+`<tenant> @ <host>`, most recent first, in the deny message's order — and rely on the tool's
+built-in "Other" for a different URL + tenant (don't add your own "new values" option).
+- **Pick** → run that pair's ready-to-run login command from the deny message **verbatim**.
+- **"Other"** → fall through to the free-text form below; that follow-up is the single permitted
+  extra turn (it consumes the free-text form's one re-show).
+A successful login with new values is remembered automatically by the gate — you never write any
+history file yourself.
+
+**Question 2 (free-text form) — ask in a plain chat message (NOT `AskUserQuestion`)**: the tenant is
+org-specific free text with no preset options, and one `AskUserQuestion` cannot return two
+independent free-text values. Collect both in a single reply:
 
 > "Browser sign-in it is. Reply with **two things, comma-separated**, in one message — your URL,
 > then your tenant:
@@ -43,7 +61,9 @@ Derive the two flags from the reply:
   `/auth` redirect to IAM during OIDC discovery (cloud and on-prem).
 - **Tenant** → `--tenant`, passed verbatim.
 
-Keep it to **two questions total** — never split into a third turn. If the reply has only one
+Keep it to **two questions total** — never split into a third turn. The history-form
+`AskUserQuestion` IS Question 2; an "Other" pick followed by the free-text prompt still counts as
+Question 2 (it consumes the one re-show below). If the reply has only one
 value or no URL token, re-show the same combined prompt once. If `cx auth login` later fails with
 *"realm not found — check --tenant and --base-auth-uri"* (a rare deployment that doesn't redirect
 `/auth` to IAM), fall back to Path A.
@@ -60,16 +80,25 @@ path** (the canonical store — `~/.checkmarx/bin/cx` on Unix, `%LOCALAPPDATA%\C
 Windows — while cx isn't yet on PATH). Take that exact cx invocation and append the two login flags:
 
 ```bash
-# Use the resolved cx path from the deny message (bare `cx` works only once it is on PATH):
+# Bash tool — use the resolved cx path from the deny message (bare `cx` works only once it is on PATH):
 "$HOME/.checkmarx/bin/cx" auth login --base-auth-uri <your Checkmarx One URL> --tenant <tenant> 1>/dev/null
 ```
 
-**Run this YOURSELF with the Bash tool — do NOT hand it to the developer with the `!` prefix.** This
+```powershell
+# PowerShell tool — a quoted path needs the call operator `&`, and the null sink is `$null`:
+& "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" auth login --base-auth-uri <your Checkmarx One URL> --tenant <tenant> 1>$null
+```
+
+**Run this YOURSELF with the Bash or PowerShell tool — do NOT hand it to the developer with the `!`
+prefix.** This
 is the OAuth path: the agent runs the resolved login command itself (unlike an API key, which the
 *developer* sets because it is a plaintext secret). The security gate's auth-recovery carve-out admits
 `cx auth …` / `cx configure …` commands — including the resolved absolute-path form the deny message
-hands you — through even while it is blocking every other action (that is exactly why the carve-out
-exists), so you never need `!` here. The browser opens automatically on the developer's machine; they
+hands you (`$HOME`/`~`/`$env:LOCALAPPDATA` spellings of that same path also work) — through either
+shell tool even while it is blocking every other action (that is exactly why the carve-out
+exists), so you never need `!` here. **The deny message renders its command for the tool you called**
+(PowerShell gets the `&` call operator), so copy it verbatim and only append the null sink for that
+shell; do not translate it by hand. The browser opens automatically on the developer's machine; they
 only complete the login there. If an earlier Bash call was denied by the gate, that does NOT mean the
 resolved `cx auth login` will be — the recovery commands are allowed; run it.
 
@@ -85,8 +114,13 @@ resolved `cx auth login` will be — the recovery commands are allowed; run it.
 
 > **Security — never capture the token.** In default mode `cx auth login` prints
 > `CX_APIKEY=<token>` (a live refresh token) to **stdout** for scripting parity. Discard **stdout
-> only**, using the shell's null device — bash/zsh/Git Bash `1>/dev/null`, PowerShell `1>$null`,
-> cmd `1>NUL` — and leave stderr attached. The token is still written to the cx config on disk
+> only**, using the shell's OWN null sink — bash/zsh/Git Bash `1>/dev/null`, PowerShell `1>$null`,
+> cmd `1>NUL` — and leave stderr attached. The gate's carve-out admits only the sink that matches
+> the tool's shell: `/dev/null` for the Bash tool, `$null` for the PowerShell tool (plus
+> `/dev/null` for PowerShell Core on macOS/Linux, where it is the real null device — but never on
+> Windows, where it would create an ordinary file holding your token). The cmd `1>NUL` form is
+> advice for a human terminal only — never gate-admissible, and under Git-Bash or PowerShell `NUL`
+> is an ordinary file. The token is still written to the cx config on disk
 > (`~/.checkmarx/checkmarxcli.yaml`, the `cx_apikey` field), which is where every `cx` command and
 > the bundled remediation MCP read it from. Treat the login as fire-and-forget: never echo, capture,
 > or store the token's value, and do not use `--session local`/`global` (they change where the token
@@ -107,5 +141,8 @@ macOS/Linux) and exclude it from backups and version control.
 When credentials expired and the developer originally used browser sign-in, re-run the **same**
 `cx auth login --base-auth-uri <URL> --tenant <tenant>` command (both flags every time; stdout
 discarded; never capture the token). If a gate deny message triggered the re-auth, use the resolved
-cx invocation it embeds (absolute path while cx isn't on PATH) rather than a bare `cx`. No MCP action
+cx invocation it embeds (absolute path while cx isn't on PATH) rather than a bare `cx`. The deny
+message usually lists the developer's PREVIOUSLY LOGGED IN environment(s): offer them via the
+history form of Question 2 above — do **not** assume even the most recent one without the developer
+confirming. No MCP action
 is needed — the bundled remediation MCP re-reads the credential from cx config on its next call.
