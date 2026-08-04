@@ -2,7 +2,7 @@
   "mcpServers": {
     "Checkmarx": {
       "type": "http",
-      "url": "https://{api_host}/api/security-mcp/mcp/{tenant}",
+      "url": "https://{cxone_base_url}/api/security-mcp/mcp/{tenant}",
       "headers": {
         "cx-origin": "Claude",
         "Authorization": "{api_key}"
