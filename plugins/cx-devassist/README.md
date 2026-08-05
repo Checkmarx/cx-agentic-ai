@@ -151,8 +151,8 @@ numeric floor in `scripts/cx-min-version`; the real capability decision is a run
 **Local marketplace** (recommended for on-prem / team use):
 
 ```bash
-claude plugin marketplace add /path/to/cxone-scanners
-claude plugin install cx-devassist@cx-devassist-marketplace
+/plugin marketplace add Checkmarx/cx-agentic-ai
+/plugin install cx-devassist@cx-devassist-marketplace
 ```
 
 Verify:
@@ -175,6 +175,51 @@ After updating hook scripts, reload them into the session:
 
 On first use the gate will detect that `cx` is missing and walk you through installing and
 authenticating it via the **`cx-cli-setup`** skill (`/cx-cli-setup`).
+
+---
+
+## Uninstall
+
+To remove the plugin entirely:
+
+```bash
+claude plugin uninstall cx-devassist@cx-devassist-marketplace
+```
+
+This removes the plugin from Claude Code. The `cx` CLI binary itself remains on your system (in `~/.checkmarx` or
+your configured location). To remove it as well:
+
+```bash
+rm -rf ~/.checkmarx        # Unix / macOS / WSL
+rmdir %LOCALAPPDATA%\Checkmarx  # Windows PowerShell
+```
+
+Cached logs and state are stored in `~/.checkmarx/agent-logs/`; remove them separately if desired.
+
+---
+
+## Upgrade
+
+The plugin auto-updates through Claude Code's marketplace system. To manually check for updates:
+
+```bash
+/plugin update cx-devassist@cx-devassist-marketplace
+```
+
+After updating the plugin, reload it in your current session:
+
+```bash
+/reload-plugins
+```
+
+The `cx` CLI itself updates independently. Run `/cx-cli-setup` if prompted, or manually upgrade via:
+
+```bash
+sh scripts/cx-bootstrap.sh upgrade
+```
+
+from within the plugin directory. The bootstrap script will download and install the latest compatible
+version of the `cx` CLI, verify its checksum, and update your PATH if needed.
 
 ---
 

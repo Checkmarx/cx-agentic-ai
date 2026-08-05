@@ -1,0 +1,61 @@
+name: cx-one-scan
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
+  schedule:
+    - cron: '20 7 * * 0-4' # 7:20 AM UTC, Sunday to Thursday
+
+# Deny all GITHUB_TOKEN permissions by default; the job below grants only what it needs
+# (zizmor: excessive-permissions).
+permissions: {}
+
+# Only one scan per ref at a time; a newer commit supersedes an in-flight scan
+# (zizmor: concurrency-limits).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cx-one-scan:
+    name: cx-one-scan
+    runs-on: cx-private-ubuntu-x64
+    # Least-privilege permissions, scoped to this single job rather than the whole
+    # workflow (zizmor: excessive-permissions / undocumented-permissions).
+    permissions:
+      id-token: write        # OIDC — assume the AWS role to read scan credentials
+      contents: read         # check out the repository
+      pull-requests: write   # post Checkmarx scan results/decorations on the PR
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        with:
+          persist-credentials: false   # zizmor: artipacked — don't leave git creds on disk
+
+      - name: Fetch Checkmarx scan credentials from AWS Secrets Manager
+        uses: CheckmarxDev/gh-actions-library/workflows/common/get-secrets@9833f199243df2796a2ff932b9e7d585139cb966
+        with:
+          account-id: '058264154640'
+          secret-role-name: 'cx-one-scan-read-secret'
+          aws-region: eu-west-1
+          secret-name: 'gh-secrets-cx-one-scan'
+
+      - name: Checkmarx One CLI Scan
+        uses: checkmarx/ast-github-action@9fda4ab4c1b67c35de380552a972a82997d97731 # 2.0.42
+        with:
+          base_uri: ${{ env.GH_SECRETS_CX_ONE_SCAN_AST_RND_SCANS_BASE_URI }}
+          cx_tenant: ${{ env.GH_SECRETS_CX_ONE_SCAN_AST_RND_SCANS_TENANT }}
+          cx_client_id: ${{ env.GH_SECRETS_CX_ONE_SCAN_AST_RND_SCANS_CLIENT_ID }}
+          cx_client_secret: ${{ env.GH_SECRETS_CX_ONE_SCAN_AST_RND_SCANS_CLIENT_SECRET }}
+          additional_params: >-
+            --tags ${{ github.event.repository.name }}
+            --scan-timeout 60
+            --scan-types sast,sca,iac-security
+            --threshold "sca-critical=1;sca-high=1;sca-medium=1;sca-low=1;
+            sast-critical=1;sast-high=1;sast-medium=1;sast-low=1;
+            iac-security-critical=1;iac-security-high=1;iac-security-medium=1;iac-security-low=1"
