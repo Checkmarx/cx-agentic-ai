@@ -6,7 +6,7 @@
       {
         "matcher": "create|edit|powershell|bash|shell",
         "type": "command",
-        "command": "sh \"$HOME/.copilot/installed-plugins/checkmarx-devassist-marketplace/checkmarx-devassist/hooks/cx_check.sh\" --copilot-cli",
+        "command": "sh \"$HOME/.copilot/installed-plugins/cx-devassist-marketplace/cx-devassist/hooks/cx_check.sh\" --copilot-cli",
         "timeoutSec": 45,
         "statusMessage": "Checking cx CLI is available...",
         "env": {"CX_ASSISTANT": "copilot-cli"}
@@ -14,7 +14,7 @@
       {
         "matcher": "create|edit",
         "type": "command",
-        "command": "sh \"$HOME/.copilot/installed-plugins/checkmarx-devassist-marketplace/checkmarx-devassist/hooks/cx_run.sh\" hooks copilot-cli-pre-file-write",
+        "command": "sh \"$HOME/.copilot/installed-plugins/cx-devassist-marketplace/cx-devassist/hooks/cx_run.sh\" hooks copilot-cli-pre-file-write",
         "timeoutSec": 60,
         "statusMessage": "Checking file write against security policy...",
         "env": {"CX_ASSISTANT": "copilot-cli"}
