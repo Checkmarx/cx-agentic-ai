@@ -1435,7 +1435,7 @@ def _expand_plugin_root_placeholder(raw_path):
 
 def _is_plugin_script_command(hook_input):
     """True for a bare `bash`/`sh` invocation of ANY script physically located inside THIS plugin's
-    own directory tree (plugins/cx-devassist-cursor/**) — broader than the narrow cx-bootstrap.sh
+    own directory tree (/plugins/cursor-devassist/**) — broader than the narrow cx-bootstrap.sh
     install/upgrade shape _is_bootstrap_command matches (which stays in place as the most-tested
     carve-out for that one script). The plugin's bundled scripts (scripts/*.sh, and this hooks/
     directory's own *.sh) are first-party, SHIPPED content — not agent- or user-authored — so an

@@ -6,7 +6,7 @@
 # ONLY — never put that literal string in plugin hooks/hooks.json; Cursor does not
 # expand it. Plugin hooks.json should use ${CURSOR_PLUGIN_ROOT} (runtime injection).
 #
-#   bash plugins/cx-devassist-cursor/scripts/install-hooks.sh
+#   bash /plugins/cursor-devassist/scripts/install-hooks.sh
 #
 # Optional:
 #   CX_CURSOR_HOOKS_TARGET=project  → write .cursor/hooks.json in cwd

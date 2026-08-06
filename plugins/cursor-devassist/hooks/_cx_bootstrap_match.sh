@@ -623,7 +623,7 @@ cx_is_checkmarx_ignore_prep_command() {
 
 # cx_is_bootstrap_command <hook_json_file> <hooks_dir>
 #   $1 = path to the hook JSON file Cursor sent on stdin
-#   $2 = the sourcing launcher's OWN directory (…/plugins/cx-devassist-cursor/hooks), used to resolve
+#   $2 = the sourcing launcher's OWN directory (…/plugins/cursor-devassist/hooks), used to resolve
 #        the plugin's own scripts/ and hooks/ directories by absolute path so a foreign script
 #        elsewhere on disk cannot match.
 #   returns 0 (allow — it is a sanctioned plugin-owned script) or 1 (not a match → caller denies).
