@@ -1,0 +1,64 @@
+---
+description: Scan and remediate SAST vulnerabilities in source code files using Checkmarx ASCA and the Checkmarx MCP codeRemediation tool.
+alwaysApply: false
+globs: "**/*.{py,js,ts,tsx,jsx,java,go,rb,php,cs,c,cpp,h,hpp,kt,swift,rs,scala,sh,bash}"
+---
+
+# CX DevAssist ASCA (SAST)
+
+Use for **source code** vulnerability scan/fix. For dependency manifests/lockfiles, use `cx-devassist-sca` instead.
+
+## Routing
+
+| Target | Use |
+|--------|-----|
+| Source file (.py, .js, .java, …) | This rule / `/cx-devassist-asca` |
+| Manifest/lockfile (package.json, go.mod, …) | `cx-devassist-sca` |
+| Whole repo / cloud scans | Checkmarx MCP scan tools |
+
+If findings are already in context (hook deny `agent_message`, `CHECKMARX_HOOK_DENY` block, prior scan, stop-hook `followup_message`), **skip scan — go straight to remediation**. Never retry a blocked Write/StrReplace or paste blocked code in chat.
+
+## Scan
+
+```bash
+# Unix:
+"$HOME/.checkmarx/bin/cx" scan asca -s "<file-path>"
+# Windows:
+"$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan asca -s "<file-path>"
+```
+
+Report findings (rule_name, severity, line, description). Ask the user whether to **remediate** (fix) or **suppress** (false positive) each finding before proceeding.
+
+## Remediation (MCP-only)
+
+For each finding, call **`mcp__Checkmarx__codeRemediation`** with `type: "sast"` and metadata from the scan.
+
+- **MCP available** → apply `remediation_steps` in order; change only code at/near the problematic line
+- **MCP unavailable** → **STOP.** No manual fixes. Run `/cx-cli-setup` if auth fails; ask developer to **Developer: Reload Window** for MCP
+
+After fixes, re-scan. Remediate **only in-scope findings** (your changes or the original target); leave pre-existing findings unfixed.
+
+## Skill compliance (mandatory)
+
+**Follow the full skill workflow in `skills/cx-devassist-asca/SKILL.md` exactly — do not skip, abbreviate, or reorder any step.**
+
+The **Step 5 Remediation Summary** is mandatory output — always produce it after remediation completes, even for a single finding:
+
+```
+Remediation Summary
+
+Rule:             [rule_name]
+Severity:         [severity]
+Issue Type:       SAST Security Vulnerability
+Problematic Line: [line]
+
+Files Modified:
+1. [file]
+   - Line [n]: [description of change]
+
+Pre-existing findings (NOT fixed — outside the scope of this remediation):
+- [rule_name] — line [n] — [severity]
+- (omit this section entirely when the re-scan reports none)
+```
+
+Final status line is required: ✅ completed / ⚠️ partially completed / ❌ failed.

@@ -1,0 +1,15 @@
+{
+  "name": "cx-devassist-cursor",
+  "displayName": "Checkmarx DevAssist for Cursor",
+  "version": "1.0.0",
+  "description": "Checkmarx-powered security scanning and fixing inside your Cursor coding loop. Fail-closed shell/MCP gates and post-write file scanning with remediation via the Checkmarx MCP server.",
+  "author": {
+    "name": "Checkmarx"
+  },
+  "license": "Apache-2.0",
+  "keywords": ["security", "checkmarx", "cxone", "sast", "sca", "cursor"],
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./mcp.json",
+  "skills": "./skills/",
+  "rules": "./rules/"
+}
