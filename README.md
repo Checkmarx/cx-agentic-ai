@@ -19,6 +19,7 @@ and AI-generated remediation as tools your assistant can call in conversation.
 request — in whichever AI client you already use. Configure it once (see
 [examples/](examples) for per-client config) and ask.
 
+## How it works (at a glance)
 
 For more details **→ [README-MCP.md](README-MCP.md)**
 
@@ -35,6 +36,29 @@ itself can't be trusted to run. Findings are remediated through the bundled Chec
 someone remembers to ask for.
 
 For more details **→ [plugins/cx-devassist/README.md](plugins/cx-devassist/README.md)**
+
+## cx-cursor-plugin
+
+Plugin for [Cursor](https://cursor.com/) that integrates the Checkmarx MCP server directly through the [Cursor's marketplace](https://cursor.com/marketplace) mechanism.
+
+Refer **→ [README-MCP.md](README-MCP.md)** for more details on the MCP server.
+
+For more details **→ [plugins/cx-cursor-plugin/README.md](plugins/cx-cursor-plugin/README.md)**
+
+## copilot-devassist
+
+**→ [plugins/copilot-devassist/README.md](plugins/copilot-devassist/README.md)**
+
+A fail-closed security gate for [GitHub Copilot CLI](https://github.com/features/copilot/cli). Before
+Copilot creates or edits a file, the Checkmarx `cx` CLI scans the proposed content. Real vulnerabilities
+are **blocked rather than silently allowed** — and so is the case where the scanner itself can't be
+trusted to run. Findings are remediated through the bundled Checkmarx MCP server.
+
+**Reach for this when** you want the check to be automatic and non-optional rather than something
+someone remembers to ask for.
+
+For more details **→ [plugins/copilot-devassist/README.md](plugins/copilot-devassist/README.md)**
+
 
 ## Documentation
 

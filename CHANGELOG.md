@@ -4,6 +4,20 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 
 ---
 
+### Added in cx-cursor-plugin v1.0 (23-07-2026)
+
+#### Cursor Plugin
+- Initial release of `cx-cursor-plugin`, a Checkmarx MCP integration for [Cursor IDE](https://cursor.com/)
+- MCP server registration through Cursor's plugin marketplace mechanism
+- Distributed via Cursor Marketplace under the `security` category
+
+#### Features
+- Cursor IDE integration with Checkmarx MCP server.
+- Seamless configuration with Checkmarx One API credentials (API Key or OAuth2)
+- Support for local development installation from repository
+
+---
+
 ### Added in cx-devassist v1.0 (17-07-2026)
 
 #### Claude Code Plugin
