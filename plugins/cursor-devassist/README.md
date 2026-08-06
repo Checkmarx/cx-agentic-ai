@@ -128,7 +128,7 @@ so `cx auth login` cannot leak its token). Everything outside this set is gated 
 ## Plugin structure
 
 ```
-plugins/cx-devassist-cursor/
+/plugins/cursor-devassist/
 ├── .cursor-plugin/
 │   └── plugin.json              # Cursor manifest (hooks → hooks/hooks.json, mcp → mcp.json)
 ├── mcp.json                     # Checkmarx MCP server (${CURSOR_PLUGIN_ROOT})
@@ -222,7 +222,7 @@ Copy or symlink this plugin folder there, then run the install script (below) an
 **User-level hooks** (recommended for visibility + belt-and-suspenders):
 
 ```bash
-bash plugins/cx-devassist-cursor/scripts/install-hooks.sh
+bash /plugins/cursor-devassist/scripts/install-hooks.sh
 # or from the local plugin copy:
 CX_PLUGIN_ROOT=~/.cursor/plugins/local/cx-devassist-cursor bash scripts/install-hooks.sh
 ```

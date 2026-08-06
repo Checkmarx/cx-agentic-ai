@@ -69,7 +69,7 @@ Unix). It needs only `bash` (Git Bash on Windows) — no Python.
 > Reload Window**.)
 
 When a hook blocked an operation, its deny message already contains the exact command by resolved
-absolute path — e.g. `bash "/…/plugins/cx-devassist-cursor/scripts/cx-bootstrap.sh" install`. Use it
+absolute path — e.g. `bash "/…/plugins/cursor-devassist/scripts/cx-bootstrap.sh" install`. Use it
 verbatim. **Do not** substitute `${CURSOR_PLUGIN_ROOT}` — it is injected only into hook execution
 and is empty in the Bash shell, so a path built from it will not resolve.
 

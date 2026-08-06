@@ -2,8 +2,8 @@
 # Copy (or symlink) this plugin from the repo into Cursor's local plugin directory.
 #
 # Usage (from anywhere):
-#   bash plugins/cx-devassist-cursor/scripts/sync-local-plugin.sh
-#   bash plugins/cx-devassist-cursor/scripts/sync-local-plugin.sh --symlink
+#   bash /plugins/cursor-devassist/scripts/sync-local-plugin.sh
+#   bash /plugins/cursor-devassist/scripts/sync-local-plugin.sh --symlink
 #
 # After sync: Developer → Reload Window in Cursor (or restart Cursor).
 
