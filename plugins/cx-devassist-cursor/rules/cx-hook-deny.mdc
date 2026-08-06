@@ -1,0 +1,78 @@
+---
+description: When Checkmarx hooks deny a tool call, follow only the hook's agent_message — no improvisation or workarounds.
+alwaysApply: true
+---
+
+# Checkmarx Hook Deny Compliance
+
+When any Checkmarx security hook returns a **deny** — `"permission": "deny"`, `"permissionDecision": "deny"`, or equivalent — the **`agent_message` field is the sole authoritative instruction set** for what you do next.
+
+This rule applies on **every** Cursor session where the cx-devassist-cursor plugin is installed.
+
+## How to recognize a hook deny (mandatory parsing)
+
+A hook deny may arrive in any of these shapes. **All of them require the same response:**
+
+| Signal | Where it appears | What to treat as `agent_message` |
+|--------|------------------|----------------------------------|
+| Structured JSON | Hook stdout | The `agent_message` field verbatim |
+| Tool block error | Write/StrReplace/Shell/MCP failure | Text after `CHECKMARX_HOOK_DENY — MANDATORY agent_message` |
+| ASCA block | Tool block error | Everything from `CHECKMARX_HOOK_DENY` through remediation steps (includes findings + instructions) |
+| Findings-only block | `ASCA security scan detected vulnerabilities` + `Findings:` | The full block is the deny; remediation steps follow the findings list |
+| Stop hook | Session end | `followup_message` — same authority as `agent_message` for remediation |
+
+**If you see `CHECKMARX_HOOK_DENY` anywhere in a tool error, that entire message (from that marker onward) IS the `agent_message`. Follow it exactly.**
+
+**If you see `Agent note: Do not suggest workarounds to the blocked tool` — that is a constraint, NOT the full instruction set. The remediation steps above or below it ARE the instruction set.**
+
+## Mandatory behavior (never skip)
+
+1. **STOP immediately.** Do not continue unrelated work.
+2. **Read `agent_message` first** (see parsing table above). It contains the precise recovery steps, commands, and constraints.
+3. **Do not substitute your own plan.** Do not infer shortcuts, skip steps, or pick a different approach because `user_message` is shorter or the user's original request seems more important.
+4. **Treat `user_message` as developer-facing only.** It summarizes why the action was blocked; it is not a replacement for `agent_message`.
+5. **Run commands from `agent_message` verbatim** when they appear there (bootstrap install/upgrade, `cx auth`/`cx configure`, `cx ignore-vulnerability`, MCP calls). Do not rewrite paths with `${CURSOR_PLUGIN_ROOT}` — that variable is empty in the agent shell.
+   - When a command is listed **per shell** (`PowerShell:` / `bash / sh:` / `cmd.exe:` under "Run the line for YOUR shell"), pick the line matching your shell and run **that line unchanged**. Do not translate a line into another shell's syntax, and do not merge lines. All listed forms are allowed by the gate, so a correct copy is never blocked.
+   - A quoted absolute path needs PowerShell's `&` call operator to execute at all; without it PowerShell just prints the path. Syntax table: `skills/cx-cli-setup/references/shells.md`.
+   - A `cx ignore-vulnerability --data <json>` command must always double-quote the JSON value and escape every inner `"` (doubled for PowerShell/cmd, backslash-escaped for bash/sh) — **never single-quote it**, even though that's the normal literal-string form on PowerShell/bash. Cursor's own command-execution layer can reformat a single-quoted argument into a double-quoted one before the real shell runs it, which strips the embedded `"` around the JSON keys and sends `cx` invalid JSON. See `skills/cx-cli-setup/references/shells.md` ("JSON arguments") for the exact per-shell forms.
+   - **If a command from `agent_message` still fails, do not improvise an alternate escaping or wrapping** — do not backtick-escape it, do not re-wrap it in `bash -c '...'` or `cmd /c "..."`, and do not retry it with a different quoting style you invent yourself. Those forms are more likely to be blocked by the security gate (its wrapper/chaining checks specifically scrutinize `bash -c`/`cmd /c`/backtick-laden commands) than to fix a quoting problem. Stop and report the exact failure to the user instead.
+6. **Do not bypass the gate.** Do not hand-place cx binaries, edit PATH, clear caches, use shell echo/redirect to write blocked files, use shell `!` prefix tricks, or **retry the same blocked tool call** hoping it will pass.
+7. **Do not deliver blocked content as a workaround.** Never paste the blocked code in chat, suggest manual file creation, or tell the user to copy-paste what the hook rejected.
+8. **Wait for explicit developer direction** before writing intentionally vulnerable code that the scanner blocked — the hook deny overrides the original user request until resolved.
+
+## ASCA / SAST finding on Write or StrReplace (mandatory workflow)
+
+When a Write/StrReplace/EditNotebook is blocked with ASCA findings:
+
+1. **Do NOT retry the write.**
+2. **Do NOT paste the vulnerable code in chat.**
+3. **Ask the user**: "A security vulnerability was detected. Would you like to **remediate** it (apply an MCP-driven code fix) or **suppress** it (mark as a confirmed false positive and unblock the write)?" — wait for the answer before proceeding.
+4. **If remediate**: Invoke the `cx-devassist-asca` skill — findings are already in context, so **skip the scan** and go directly to **Flow 2: Remediation**.
+   - For each real finding, call **`mcp__Checkmarx__codeRemediation`** with `type: "sast"` and metadata from the finding (`ruleId`, `description`, `remediationAdvice`).
+   - Apply **`remediation_steps` from MCP only** — no manual fixes, no LLM-improvised patches.
+   - If MCP is unavailable, follow the skill's MCP recovery steps — do not improvise a fix.
+   - After remediation, **retry the original write once**.
+5. **If suppress** (confirmed false positive only): Run the `cx ignore-vulnerability` command from `agent_message`, then retry the write.
+
+## Other deny types
+
+| Deny reason | Required action |
+|-------------|-----------------|
+| cx not installed / gate cannot run | Run the **exact** bootstrap command from `agent_message` (absolute path), then retry the blocked operation |
+| cx not authenticated | Ask developer which auth method first (API key vs OAuth) as `agent_message` instructs; run only recovery commands until auth succeeds |
+| Fresh-login window | Wait 30–60s; **do NOT** re-run `cx auth login`; retry the original operation |
+| cx below minimum / incapable | Run bootstrap **upgrade** from `agent_message`; do not bypass |
+| KICS / IaC finding | Call `imageRemediation` per `agent_message`; fix every finding; retry write |
+| SCA / manifest finding | **Ask the user**: "A vulnerable/malicious package was detected. Would you like to **remediate** it (upgrade/remove via MCP) or **suppress** it (accept the risk)?" — then call `packageRemediation` or follow `agent_message` steps; retry write |
+
+## If `agent_message` is missing
+
+Fall back to `user_message` only when no `agent_message` is present and no `CHECKMARX_HOOK_DENY` marker exists. If both are present, **`agent_message` wins**.
+
+## Examples
+
+- Deny says run `bash "C:\Users\...\scripts\cx-bootstrap.sh" install` → run that exact command, not a generic `cx` install. (This form is valid in every shell — `bash` is the program being invoked.)
+- Deny lists `PowerShell: & "C:\...\cx.exe" auth validate` and `bash / sh: "C:/.../cx.exe" auth validate` → in a PowerShell session run the PowerShell line **including the leading `&`**; do not drop it and do not use the bash line.
+- Deny says invoke `cx-devassist-asca` → read and follow the skill immediately; do not paste blocked code instead.
+- Deny says do NOT re-run `cx auth login` → wait and retry the original operation.
+- User asked for vulnerable lab code but ASCA blocked the write → follow remediation or ask developer to confirm intentional vulnerability before bypassing.

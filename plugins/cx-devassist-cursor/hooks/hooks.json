@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "sh \"${CURSOR_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+        "timeout": 45,
+        "failClosed": true
+      },
+      {
+        "command": "sh \"${CURSOR_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks cursor-before-shell",
+        "timeout": 30,
+        "failClosed": true
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "sh \"${CURSOR_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+        "timeout": 45,
+        "failClosed": true
+      },
+      {
+        "command": "sh \"${CURSOR_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks cursor-before-mcp",
+        "timeout": 30,
+        "failClosed": true
+      }
+    ],
+    "preToolUse": [
+      {
+        "matcher": "Write|StrReplace|EditNotebook",
+        "command": "sh \"${CURSOR_PLUGIN_ROOT}/hooks/cx_check.sh\"",
+        "timeout": 45,
+        "failClosed": true
+      },
+      {
+        "matcher": "Write|StrReplace|EditNotebook",
+        "command": "sh \"${CURSOR_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks cursor-before-file-write",
+        "timeout": 60,
+        "failClosed": true
+      }
+    ],
+    "stop": [
+      {
+        "command": "sh \"${CURSOR_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks cursor-stop",
+        "timeout": 10
+      }
+    ]
+  }
+}
