@@ -41,6 +41,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # to scripts/cx-min-version and the fallback in hooks/cx_check.py. (search marker: CX_MIN_VERSION)
 MIN_CX_VERSION_FALLBACK="2.3.57"
 
+# Pinned GitHub release tag to download (prerelease builds use versioned asset names). Keep IDENTICAL
+# to scripts/cx-release-tag. (search marker: CX_RELEASE_TAG)
+RELEASE_TAG_FALLBACK="2.3.57-copilot-cli-prerelease"
+
 GITHUB_RELEASES="https://github.com/Checkmarx/ast-cli/releases"
 GITHUB_LATEST="$GITHUB_RELEASES/latest/download"
 
@@ -89,6 +93,31 @@ load_min_version() {
         done < "$f"
     fi
     printf '%s' "$MIN_CX_VERSION_FALLBACK"
+}
+
+# ---------------------------------------------------------------------------------------
+# Release tag (single source of truth: scripts/cx-release-tag; first non-comment line).
+# ---------------------------------------------------------------------------------------
+load_release_tag() {
+    local f="$SCRIPT_DIR/cx-release-tag" line
+    if [[ -r "$f" ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line#"${line%%[![:space:]]*}"}"   # ltrim
+            [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+            printf '%s' "$line"
+            return 0
+        done < "$f"
+    fi
+    printf '%s' "$RELEASE_TAG_FALLBACK"
+}
+
+# Version-tagged releases publish assets as ast-cli_<tag>_<os>_<arch>.<ext> (not the unversioned
+# ast-cli_<os>_<arch>.<ext> aliases on some public releases). Rewrite ASSET after detect_os_arch
+# when a tag is known so download + checksum use the same versioned filename on every OS.
+apply_tagged_asset() {
+    local tag="$1"
+    [[ -n "$tag" ]] || return 0
+    ASSET="ast-cli_${tag}_${OS}_${ASSET#ast-cli_${OS}_}"
 }
 
 # ---------------------------------------------------------------------------------------
@@ -482,14 +511,14 @@ main() {
     else
         mode="install"
     fi
-    log "Mode: $mode  |  asset: $ASSET  |  min version: $min"
-
     # Create the staging dir HERE (in main's scope, so the EXIT trap actually sees it — an assignment
     # inside the download_and_extract command-substitution subshell would not), then thread the
-    # resolved release tag through download + checksum (TOCTOU-safe).
+    # pinned release tag through download + checksum (TOCTOU-safe).
     _CX_STAGING="$(mktemp -d "${TMP_BASE%/}/cx-bootstrap.XXXXXX")" || die "could not create a staging directory"
     local staged resolved="" tag
-    tag="$(resolve_latest_tag)" || tag=""
+    tag="$(load_release_tag)"
+    apply_tagged_asset "$tag"
+    log "Mode: $mode  |  release tag: $tag  |  asset: $ASSET  |  min version: $min"
     staged="$(download_and_extract "$tag")"
 
     # Verify the STAGED binary (version + capability) BEFORE placing it or touching PATH, so a

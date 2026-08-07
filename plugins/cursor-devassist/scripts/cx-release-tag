@@ -1,0 +1,6 @@
+# Pinned ast-cli GitHub release tag for cx-bootstrap.sh to download and install.
+# Prerelease builds publish versioned assets (ast-cli_<tag>_<os>_<arch>.<ext>) — bootstrap rewrites
+# the asset name from this tag on every OS. Synced fallback: scripts/cx-bootstrap.sh
+# (search marker: CX_RELEASE_TAG).
+# Format: a single tag line (the first non-comment, non-empty line wins).
+2.3.57-copilot-cli-prerelease
