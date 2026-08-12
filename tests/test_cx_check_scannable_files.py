@@ -620,13 +620,21 @@ class SessionPostureAgreesWithGate(unittest.TestCase):
                 for field in (code, msg, ctx):
                     self.assertIsInstance(field, str)
                     self.assertTrue(field)
-                self.assertTrue(msg.startswith(("Checkmarx One |", "Powered by Checkmarx One |")))
+                self.assertIn("Checkmarx One |", msg)
                 self.assertIn("powered by Checkmarx One", ctx)
-                # "Powered by" is reserved for the branch where scanning really runs — anything else
-                # would announce protection the gate is not providing.
-                if msg.startswith("Powered by"):
+                # The ASCII banner and the words "Powered by" are reserved for the branch where
+                # scanning really runs — anywhere else they would dress up a warning as protection.
+                if "Powered by Checkmarx One |" in msg:
                     self.assertTrue(active)
                     self.assertIn("scanning active", msg)
+                else:
+                    self.assertNotIn(cx_check._SESSION_ART, msg)
+
+    def test_banner_art_fits_a_standard_terminal(self):
+        """A hook cannot read the terminal width, so the art has to fit unconditionally. Past ~80
+        columns it wraps and becomes noise rather than failing visibly."""
+        widths = [len(line) for line in cx_check._SESSION_ART.split("\n")]
+        self.assertLessEqual(max(widths), 80, "banner art would wrap on a default terminal")
 
 
 class CxAbsentStageTwo(unittest.TestCase):

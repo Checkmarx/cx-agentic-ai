@@ -1754,6 +1754,20 @@ def cx_record_login():
 # attribution) is accurate where "this session is guarded/protected" (a coverage promise) would not be.
 _SESSION_LEAD = "This session is powered by Checkmarx One (cx-devassist)."
 
+# Terminal banner, shown ONLY on the healthy branch — see the note at that return. Written as explicit
+# per-line literals rather than a triple-quoted block so the leading spaces cannot be eaten by a
+# reformatter and the art cannot be broken by re-indentation.
+#
+# 57 columns wide, deliberately: the full "Powered by checkmarx" rendering is 119, and a hook cannot
+# discover the terminal width (no TTY, and $COLUMNS is not exported to hooks), so anything past ~80
+# would wrap into noise on a default terminal instead of failing visibly.
+_SESSION_ART = (
+    "       __                __\n"
+    ".----.|  |--.-----.----.|  |--.--------.---.-.----.--.--.\n"
+    "|  __||     |  -__|  __||    <|        |  _  |   _|_   _|\n"
+    "|____||__|__|_____|____||__|__|__|__|__|___._|__| |__.__|"
+)
+
 # The behavioural half — the only part that changes what the assistant DOES. Field-observed problem it
 # addresses: when a scannable write is denied, the natural next move is to rebuild the file with a
 # shell redirect, which succeeds and lands the same bytes UNSCANNED (shell is deliberately ungated).
@@ -1858,10 +1872,13 @@ def _session_posture():
     detail = "cx %s (%s tier), signed in, ASCA/KICS/SCA scanning ACTIVE on file writes." % (build, tier)
     if scanner == _SCANNER_UNKNOWN:
         detail += " (Readiness probe inconclusive; the stage-2 scanner is authoritative.)"
-    # "Powered by" appears ONLY here, on the one branch where scanning is genuinely running. Every
-    # other branch leads with a bare "Checkmarx One |" — claiming the session is powered by a scanner
-    # that is inactive or in pass-through would be the overclaim the wording rule exists to prevent.
-    return (True, "ok", "Powered by Checkmarx One | cx %s, signed in, scanning active" % build,
+    # The art and the words "Powered by" appear ONLY here, on the one branch where scanning is genuinely
+    # running. Every degraded branch stays plain text with a bare "Checkmarx One |": a banner over
+    # "NOT active" would dress up a warning, and claiming a session is powered by a scanner that is
+    # inactive or in pass-through is the overclaim the wording rule exists to prevent. The status line
+    # is kept below the art — the art carries no posture, and the posture is the point.
+    return (True, "ok",
+            "%s\nPowered by Checkmarx One | cx %s, signed in, scanning active" % (_SESSION_ART, build),
             "%s\nPosture: %s%s" % (_SESSION_LEAD, detail, _SESSION_RULES))
 
 
