@@ -46,26 +46,11 @@ jobs:
           MCP_DOMAIN: ${{ inputs.mcp-domain }}
           PEM_CONTENT: ${{ secrets.MCP_TOKEN }}
         run: |
-          if [ -z "${PEM_CONTENT}" ]; then
-            echo "::error::MCP_TOKEN secret is empty or not set"
-            exit 1
-          fi
-
-          # openssl's STORE-based loader needs a seekable input to auto-detect
-          # the key format, so write to a temp file rather than piping via stdin.
-          KEY_FILE=$(mktemp)
-          trap 'rm -f "${KEY_FILE}"' EXIT
-          printf '%s\n' "${PEM_CONTENT}" > "${KEY_FILE}"
-
           # Extract Ed25519 private key bytes as hex — format required by mcp-publisher dns login
-          PRIVATE_KEY_HEX=$(openssl pkey -in "${KEY_FILE}" -noout -text \
+          PRIVATE_KEY_HEX=$(printf '%s' "${PEM_CONTENT}" \
+            | openssl pkey -noout -text \
             | grep -A3 "priv:" | tail -n +2 | tr -d ' :\n')
           echo "::add-mask::${PRIVATE_KEY_HEX}"
-
-          if [ -z "${PRIVATE_KEY_HEX}" ]; then
-            echo "::error::Failed to extract private key hex from MCP_TOKEN"
-            exit 1
-          fi
 
           ./mcp-publisher login dns \
             --domain "${MCP_DOMAIN}" \
