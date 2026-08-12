@@ -13,6 +13,6 @@ concurrency:
 jobs:
   publish:
     name: Publish MCP Server
-    uses: CheckmarxDev/gh-actions-library/.github/workflows/publish-mcp-server.yaml@cccf47f10f33bdf9a0efc264c3537c39e56c263c
+    uses: Checkmarx/github-actions-library/.github/workflows/publish-mcp-server.yaml@cccf47f10f33bdf9a0efc264c3537c39e56c263c
     secrets:
       MCP_TOKEN: ${{ secrets.MCP_TOKEN }}
