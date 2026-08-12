@@ -17,10 +17,12 @@
 # the payload, and a `sed` extraction that truncated at the first quote), each letting real source code
 # reach disk unscanned, and each slipping past a parity test that had just been widened.
 #
-# So the shell matcher was deleted. Those two branches now simply deny every file write, which is the
-# pre-1.1 behaviour. The cost is narrow: cx PRESENT but unauthenticated — the state developers actually
-# hit — still allows unscannable writes, because the gate evaluates this file normally there. Only
-# "cx not installed at all" and "no Python 3" block everything, and both require setup anyway.
+# So the shell matcher was deleted — and neither branch turned out to need one. cx_run.sh's cx-ABSENT
+# branch now DEFERS on a file write, because stage 1 has already applied this rule to that same call
+# and got it right (deny a scannable file, allow an unscannable one); denying again only blocked the
+# writes stage 1 had just allowed. Verified on a cx-less VM: a one-line list_files.sh was blocked
+# despite `allow / unscannable_file` in the log. Only "no working Python 3" now blocks every file
+# write, which is unavoidable — without Python this file cannot be read, let alone evaluated.
 #
 # If you are tempted to add a second reader in another language: don't. Have it ask cx_check.py.
 #

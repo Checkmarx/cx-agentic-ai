@@ -448,5 +448,85 @@ class EngineDriftGuards(unittest.TestCase):
                          table["txtprefix"])
 
 
+class CxAbsentStageTwo(unittest.TestCase):
+    """cx_run.sh's cx-UNRESOLVABLE branch: a file write must DEFER to stage 1, an MCP call must DENY.
+
+    Regression test for a bug the Python-only tests could not see. _is_scannable_file was correct and
+    logged `allow / unscannable_file`, but stage 2 denied the same call unconditionally — so on a
+    cx-less machine a one-line `list_files.sh` was still BLOCKED. Verdicts merge most-restrictive-wins
+    across the matcher, so stage 1 being right is not enough: BOTH stages must agree. Found only by
+    running the real plugin on a VM with no cx.
+
+    Nothing here re-implements the file-type rule; the assertion is that stage 2 stays silent for
+    file writes and lets stage 1's decision stand.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.sh = shutil.which("sh")
+        if not cls.sh:
+            raise unittest.SkipTest("POSIX sh unavailable")
+        cls.run_sh = os.path.join(_HOOKS_DIR, "cx_run.sh")
+        cls.check_sh = os.path.join(_HOOKS_DIR, "cx_check.sh")
+
+    def _env_without_cx(self):
+        """Defeat all three resolution tiers (CX_BINARY -> canonical store -> PATH) so cx is genuinely
+        unresolvable, mirroring a machine where it was never installed."""
+        env = dict(os.environ, CX_LOG_DISABLE="1")
+        env.pop("CX_BINARY", None)
+        self._store = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self._store, True)
+        env["LOCALAPPDATA"] = self._store          # Windows canonical store
+        env["HOME"] = self._store                  # Unix canonical store (~/.checkmarx/bin/cx)
+        env["USERPROFILE"] = self._store
+        keep = []
+        for d in env.get("PATH", "").split(os.pathsep):
+            if not d:
+                continue
+            if any(os.path.exists(os.path.join(d, n)) for n in ("cx", "cx.exe")):
+                continue                           # drop any dir that supplies cx
+            keep.append(d)
+        env["PATH"] = os.pathsep.join(keep)
+        return env
+
+    def _stage(self, script, args, payload):
+        p = subprocess.run([self.sh, script] + args, input=json.dumps(payload).encode(),
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           env=self._env_without_cx(), timeout=60)
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+
+    def _stage2_write(self, path):
+        return self._stage(self.run_sh, ["hooks", "claude-pre-file-write"], _write(path))
+
+    def test_stage2_defers_on_unscannable_write(self):
+        for path in ("/kode/list_files.sh", "/kode/README.md", "/kode/notes.css"):
+            with self.subTest(path=path):
+                code, out = self._stage2_write(path)
+                self.assertEqual(0, code, "stage 2 must not deny a file write when cx is absent")
+                self.assertNotIn("deny", out)
+
+    def test_stage2_also_defers_on_scannable_write(self):
+        """Stage 2 defers for EVERY file type — stage 1 is what denies a scannable one."""
+        code, out = self._stage2_write("/kode/app.py")
+        self.assertEqual(0, code)
+        self.assertNotIn("deny", out)
+
+    def test_stage1_still_denies_scannable_write_when_cx_absent(self):
+        """The other half of the contract: deferring is only safe because stage 1 holds the line."""
+        for path, expect_deny in (("/kode/app.py", True), ("/kode/main.tf", True),
+                                  ("/kode/list_files.sh", False), ("/kode/README.md", False)):
+            with self.subTest(path=path):
+                code, _ = self._stage(self.check_sh, [], _write(path))
+                self.assertEqual(2 if expect_deny else 0, code)
+
+    def test_stage2_still_denies_mcp_when_cx_absent(self):
+        """Only the file-write case defers; a Checkmarx MCP call has no stage-1-equivalent fallback
+        behaviour worth relaxing and stays fail-closed here."""
+        payload = {"tool_name": "mcp__Checkmarx__codeRemediation", "tool_input": {}}
+        code, out = self._stage(self.run_sh, ["hooks", "claude-pre-tool-use"], payload)
+        self.assertEqual(2, code)
+        self.assertIn("deny", out)
+
+
 if __name__ == "__main__":
     unittest.main()
