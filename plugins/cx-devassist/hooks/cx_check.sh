@@ -17,10 +17,10 @@ PY_SCRIPT="$SCRIPT_DIR/cx_check.py"
 # Capture stdin once: we inspect it (carve-out below) and replay it to Python.
 INPUT=$(cat)
 
-# The shell-level bootstrap carve-out now lives INSIDE the no-Python branch below (search:
-# NO-PYTHON CARVE-OUT). When Python 3 IS present (the normal case on all three OSes),
-# cx_check.py's strict _is_bootstrap_command is the AUTHORITATIVE matcher, so this coarse shell
-# matcher is neither needed nor run then — which also removes the old unconditional-bypass risk.
+# The shell-level bootstrap carve-out lives INSIDE the no-Python branch below (search:
+# NO-PYTHON CARVE-OUT), and is itself unreachable while hooks.json keeps Bash off this launcher — the
+# bootstrap is a Bash command. It is kept so that re-wiring shell here cannot deadlock the install.
+# When Python 3 is present (the normal case), cx_check.py's _is_bootstrap_command is authoritative.
 
 # On Windows/Git Bash, convert the POSIX path to a native Windows path for python.exe.
 if command -v cygpath >/dev/null 2>&1; then
@@ -89,10 +89,20 @@ if [ -z "$PYTHON_BIN" ]; then
         . "$SCRIPT_DIR/_cx_bootstrap_match.sh"
         cx_is_bootstrap_command "$INPUT" "$SCRIPT_DIR" && exit 0
     fi
-    # No working Python 3 ⇒ the gate cannot evaluate ⇒ fail CLOSED (deny + exit 2). A plain
-    # exit 1 would be treated as non-blocking by Claude Code and silently fail OPEN.
+    # NO file-type carve-out here, deliberately. The scannable-file rule lives in exactly ONE place —
+    # cx_check.py's _is_scannable_file — and cannot be evaluated without Python. An earlier revision
+    # reimplemented it in POSIX shell so a Python-less host would not be "more restricted than a
+    # working one"; that produced three separate fail-open divergences from the Python matcher (a
+    # leading-dot basename, an escaped quote anywhere in the payload, and a truncated sed extraction),
+    # each of which let real source code reach disk unscanned. Fairness in a degraded state is not
+    # worth a second implementation of a security decision.
+    #
+    # So: no Python 3 ⇒ the gate cannot evaluate ⇒ fail CLOSED (deny + exit 2), for every file type.
+    # That is the pre-1.1 behaviour and the correct default. A plain exit 1 would be treated as
+    # non-blocking by Claude Code and silently fail OPEN. Shell commands are unaffected (they no
+    # longer reach this launcher at all), so the developer can install Python 3 and cx from here.
     cat <<'JSON'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security gate could not run: no working Python 3 interpreter was found, so the scanner is inactive. This operation is BLOCKED fail-closed.","additionalContext":"Install Python 3, then retry. Windows: install from https://python.org (NOT the Microsoft Store stub). macOS: `xcode-select --install` or `brew install python3`. Linux: `apt install python3` / `dnf install python3` / `apk add python3`. The plugin's bundled bootstrap (scripts/cx-bootstrap.sh) installs the cx CLI and itself needs NO Python, but this version/auth gate does. All agent actions remain blocked until a Python 3 interpreter is available."}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security gate could not run: no working Python 3 interpreter was found, so the scanner is inactive. This operation is BLOCKED fail-closed.","additionalContext":"Install Python 3, then retry. Windows: install from https://python.org (NOT the Microsoft Store stub). macOS: `xcode-select --install` or `brew install python3`. Linux: `apt install python3` / `dnf install python3` / `apk add python3`. The plugin's bundled bootstrap (scripts/cx-bootstrap.sh) installs the cx CLI and itself needs NO Python, but this version/auth gate does. Without Python 3 the gate cannot tell which files Checkmarx can scan, so ALL file writes and Checkmarx MCP calls are blocked. Shell commands are never blocked, so you can install Python 3 and cx from here."}}
 JSON
     exit 2
 fi
