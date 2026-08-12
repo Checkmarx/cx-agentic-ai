@@ -4,6 +4,77 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 
 ---
 
+### Changed in cx-devassist (unreleased)
+
+#### The readiness gate now blocks only what Checkmarx can actually scan
+
+Previously the gate denied **every** tool call — every shell command and every file write — whenever
+`cx` was missing, outdated, unauthenticated or unlicensed. In practice that blocked ordinary
+development (`git status`, `npm test`, `mvn verify`, `pytest`, `docker build`) while protecting
+nothing: the native shell handler only checks an admin blacklist and dependency installs and **never
+inspects file content**, so shell-written code (`cat > app.py`) was already unscanned on a healthy
+`cx`. Field logs bore this out — every gate deny observed was "cx not ready", none was a security
+finding, and every real finding came from `Write`/`Edit`.
+
+- **Shell commands are no longer gated.** The `Bash|PowerShell` matcher no longer runs the readiness
+  gate or the native scanner. Per-command hook cost drops from ~3400 ms to ~170 ms.
+- **File writes are gated only for file types an engine can scan** — ASCA (source), KICS (IaC) and SCA
+  (dependency manifests). The list is the new `config/cx-scannable-files`, mirroring the engines' own
+  filters in `ast-cli`. Writes to `.md`, `.css`, `.sql`, `.html` and the like now proceed, because no
+  engine would have scanned them. Note `.json` / `.yaml` **are** gated (KICS scans them), and a plain
+  `.tfvars` is **not** (KICS lists only `.auto.tfvars` / `.terraform.tfvars`).
+- **Unchanged for scannable files:** the full chain still runs — `CX_BINARY` validation, presence,
+  version, capability, authentication, licensing, scanner-readiness, then ASCA/KICS/SCA plus
+  blast-radius and file-size policy. Checkmarx MCP calls remain gated, and the install/upgrade
+  bootstrap, `cx auth` / `cx configure` recovery and the `cx version` diagnostic all still work.
+- **Rollback:** `CX_GATE_ALL_FILES=1` gates every file type again.
+- Two degraded states deny **every** file write, not just scannable ones: cx unresolvable entirely, and
+  no Python 3. Both are pre-1.1 behaviour and both require setup anyway. The state that matters in
+  practice — cx present but unauthenticated — allows unscannable writes normally.
+
+#### Added — remembered login environments
+
+`cx auth login` takes two paths (`auth_login.go:57-86` in `ast-cli`). Given connection flags it skips
+its prompt and persists **only** the refresh token (`auth_login.go:102`), leaving `cx_base_auth_uri` /
+`cx_tenant` off disk; run bare and interactively it prompts via `PromptAuthConnection` and **does**
+persist all three (`configuration.go:98-119`). An agent cannot answer a prompt, so an agent-issued
+login is always the flag form — the one that persists nothing. Observing the command as it is issued
+is therefore how those values are captured, and the `Bash|PowerShell` matcher keeps exactly one hook,
+a **non-blocking observer**:
+
+- `hooks/cx_record_login.sh` — records the URL + tenant of a `cx auth login` as *pending*
+  (snapshotting the credential timestamp **before** the login runs, which is what later promotion
+  requires), then exits 0 on every path. It emits no permission decision and cannot block a command.
+  A pure-shell prefilter keeps ordinary commands from spawning Python at all.
+- The gate promotes a pending pair to *confirmed* on the next successful authenticated call, and a
+  later logged-out deny offers up to 3 confirmed pairs as choices the developer picks from.
+  OAuth only — an API-key setup carries no URL/tenant to record.
+
+#### Added
+- `config/cx-scannable-files` — the scannable file types, with exactly one reader
+  (`cx_check.py`'s `_is_scannable_file`).
+- `tests/test_cx_check_scannable_files.py` and `tests/test_cx_check_login_history.py`, plus the shared
+  `tests/_gatelib.py` harness. These run via `python -m unittest discover -s tests`; the older suites
+  under `tests/hooks/`, `tests/scripts/` and `tests/test_packaging.py` target the copilot plugin and
+  currently fail on a stale `plugins/copilot/checkmarx-devassist` path (pre-existing).
+
+#### Notes
+- The file-type rule is implemented **once**, in `cx_check.py`. A shell mirror was written so the
+  cx-absent and no-Python deny branches could apply it too, then removed: keeping two implementations
+  of one security decision in agreement produced three fail-open divergences. Those branches now deny
+  every file write (the pre-1.1 behaviour). cx present-but-unauthenticated still allows unscannable
+  writes, which is the case that matters in practice.
+- `cx_check.py`'s Bash-only carve-outs (steps 1, 2, 5) and `CX_GATE_ALL_COMMANDS` are unreachable while
+  shell is unrouted. They are annotated in place rather than deleted, so re-wiring shell onto the gate
+  cannot silently open it.
+
+#### Fixed
+- `hooks/cx_check.sh` and `hooks/cx_run.sh` had CRLF line endings in the working tree despite
+  `.gitattributes` pinning `*.sh` to LF (repo blobs were already LF). A stray `\r` breaks `sh` on
+  Windows Git Bash, which the gate treats as a fail-open hole. `cx-scannable-files` is now pinned too.
+
+---
+
 ### Added in cx-cursor-plugin v1.0 (23-07-2026)
 
 #### Cursor Plugin

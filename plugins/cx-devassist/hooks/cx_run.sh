@@ -245,8 +245,18 @@ case "${1:-} ${2:-}" in
             . "$_CXRUN_DIR/_cx_bootstrap_match.sh"
             cx_is_bootstrap_command "$_CXRUN_INPUT" "$_CXRUN_DIR" && exit 0
         fi
+        # NO file-type carve-out here, deliberately — see the matching note in cx_check.sh. The
+        # scannable-file rule lives ONLY in cx_check.py's _is_scannable_file; reimplementing it in
+        # POSIX shell so this branch could apply it produced three fail-open divergences from the
+        # Python matcher, each letting real source code reach disk unscanned.
+        #
+        # Consequence, stated plainly: when cx cannot be resolved AT ALL, every file write is blocked,
+        # including file types no engine can scan. That is narrower than it sounds — cx PRESENT but
+        # unauthenticated (the state developers actually hit) still allows unscannable writes, because
+        # stage 1 allows at step 2b and this branch is not reached. cx-absent means "not installed
+        # yet", where /cx-cli-setup is the required next step anyway and shell is ungated so it can run.
         cat <<'JSON'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.","additionalContext":"Run /cx-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. All agent actions remain blocked until cx is available."}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.","additionalContext":"Run /cx-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. Shell commands and writes to file types Checkmarx cannot scan still run, so you can install cx from here."}}
 JSON
         exit 2
         ;;
