@@ -52,9 +52,27 @@ jobs:
             | grep -A3 "priv:" | tail -n +2 | tr -d ' :\n')
           echo "::add-mask::${PRIVATE_KEY_HEX}"
 
-          ./mcp-publisher login dns \
+          # Capture login output instead of streaming it, so the derived public
+          # key and any IP addresses can be masked/redacted before anything is printed.
+          # (set +e: a failing command substitution would otherwise abort the script
+          # here under bash -e, before we get a chance to redact and print the output.)
+          set +e
+          LOGIN_OUTPUT=$(./mcp-publisher login dns \
             --domain "${MCP_DOMAIN}" \
-            --private-key "${PRIVATE_KEY_HEX}"
+            --private-key "${PRIVATE_KEY_HEX}" 2>&1)
+          LOGIN_STATUS=$?
+          set -e
+
+          PUBLIC_KEY=$(printf '%s' "${LOGIN_OUTPUT}" | grep -oE 'p=[A-Za-z0-9+/=]+' | sed 's/^p=//')
+          if [ -n "${PUBLIC_KEY}" ]; then
+            echo "::add-mask::${PUBLIC_KEY}"
+          fi
+
+          printf '%s\n' "${LOGIN_OUTPUT}" | sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/[REDACTED_IP]/g'
+
+          if [ "${LOGIN_STATUS}" -ne 0 ]; then
+            exit "${LOGIN_STATUS}"
+          fi
 
           ./mcp-publisher publish
 
