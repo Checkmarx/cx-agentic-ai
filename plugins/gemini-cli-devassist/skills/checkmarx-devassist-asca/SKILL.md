@@ -1,6 +1,6 @@
 ---
-name: cx-devassist-asca
-description: "Runs a Checkmarx ASCA (AI Security Code Assistant) SAST scan on SOURCE CODE files and remediates SAST findings via MCP. Activate when the user explicitly asks to scan or audit a source file, OR when a hook deny blocked a source-file write with SAST findings (triage first — ask remediate vs suppress before MCP). Do NOT activate for normal code creation or edits. For dependency manifests use cx-devassist-sca. Invoke as: cx-devassist:cx-devassist-asca"
+name: checkmarx-devassist-asca
+description: "Runs a Checkmarx ASCA SAST scan on SOURCE CODE files and remediates SAST findings via MCP. Activate when the user explicitly asks to scan or audit a source file, OR when a hook deny blocked a source-file write with SAST findings (triage first — ask remediate vs suppress before MCP). Do NOT activate for normal code creation or edits. For dependency manifests use checkmarx-devassist-sca. Invoke as: cx-devassist:checkmarx-devassist-asca"
 ---
 
 # CX Security ASCA
@@ -14,12 +14,12 @@ This skill has two entry points:
 1. **On-demand scan** — User **explicitly** asks to scan a **source code file** for security
    vulnerabilities (e.g., "scan app.py for security issues", "audit this file for SAST findings"). If
    the target is a **dependency manifest/lockfile** (package.json, requirements.txt, go.mod, …), use
-   `cx-devassist-sca` instead.
+   `checkmarx-devassist-sca` instead.
 2. **Hook triage** — A hook deny blocked a source-file write with SAST findings (activate to present
    findings and ask remediate vs suppress; **do not** auto-call MCP).
 
 **Do NOT activate** when the user is writing or editing source code as part of normal development —
-those writes are already scanned by the automatic `PreToolUse` hook.
+those writes are already scanned by the automatic `BeforeTool` hook.
 
 > **If ASCA findings are already present from an on-demand scan (Flow 1)** — after reporting
 > findings, ask whether to remediate before Flow 2.
@@ -34,11 +34,11 @@ Pick by the target, and ask if it is ambiguous:
 | The user wants to scan… | Use |
 |---|---|
 | A **source code file** (`.py`, `.js`, `.java`, `.go`, `.ts`, …) for code vulnerabilities | **this skill** (SAST/ASCA) |
-| A **dependency manifest / lockfile** (package.json, requirements.txt, go.mod, pom.xml, …) | `cx-devassist-sca` (SCA/OSS) |
+| A **dependency manifest / lockfile** (package.json, requirements.txt, go.mod, pom.xml, …) | `checkmarx-devassist-sca` (SCA/OSS) |
 | An **entire project / repository** at cloud scale, or existing platform scan results | the Checkmarx MCP (Cx1 cloud) tools |
 
 A bare "scan this file" refers to whatever file is in context: source code → this skill; a
-manifest/lockfile → `cx-devassist-sca`. If it is unclear which, ask the user.
+manifest/lockfile → `checkmarx-devassist-sca`. If it is unclear which, ask the user.
 
 ## Prerequisites
 
@@ -63,15 +63,22 @@ Ask the user which file(s) to scan if not already specified.
 
 ### Step 2 — Run the ASCA Scan
 
-Run the scan on each file. Invoke cx by its canonical absolute path so it resolves even when cx isn't
-on the agent shell's PATH (a first-install session); use a bare `cx` only when cx is already on PATH:
+Run the scan on each file. **Gemini CLI on Windows uses PowerShell for `run_shell_command` / Shell** —
+a quoted path alone is NOT a command; you must use the `&` call operator. On Unix/macOS use bash-style
+invocation. Use a bare `cx` only when it is already on PATH:
 
 ```bash
-# Unix (macOS/Linux):
+# Unix (macOS/Linux) or Git Bash:
 "$HOME/.checkmarx/bin/cx" scan asca -s "<file-path>"
-# Windows (Git Bash):
-"$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan asca -s "<file-path>"
 ```
+
+```powershell
+# Windows (Gemini CLI Shell = PowerShell — & is mandatory):
+& "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" scan asca -s "<file-path>"
+```
+
+**Do NOT** run `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan asca ...` on Windows — PowerShell treats the
+quoted path as a string expression and then fails on `scan` (`Unexpected token 'scan'`).
 
 ### Step 3 — Process Results
 
@@ -108,7 +115,7 @@ The scan returns a JSON response:
   - `remediationAdvise` — how to fix it
 
   Then ask the user: **"Would you like me to remediate these findings?"**
-  If yes, proceed to Flow 2.
+  If yes, proceed to Flow 2 below.
 
 ---
 
@@ -170,14 +177,15 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
      the bridge can't derive the URL or auth header without a valid key. Verify with cx by its
      canonical absolute path — `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) or
      `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth validate` (Windows), or a bare `cx auth validate` when
-     cx is on PATH; if it fails (or reports no API key), run `/cx-cli-setup`.
-  2. Then tell the user the **one** step only they can perform — Claude Code loads MCP servers at
-     startup, so the server can't become live in this running session on its own:
+     cx is on PATH; if it fails (or reports no API key), run `/checkmarx-cli-setup`.
+  2. If auth validation **succeeds**, try calling an MCP tool (e.g. `mcp__Checkmarx__listProjects`)
+     — the MCP may already be connected in this session despite any earlier connection warning.
+     - If the tool responds → the MCP is live. Proceed with remediation immediately.
+     - If the tool is still unavailable → tell the user:
 
-     > "The Checkmarx remediation MCP isn't connected in this session. Please run `/mcp` and check
-     > whether `Checkmarx` shows Connected. If it's missing or still not connected, run
-     > `/reload-plugins` first, then `/mcp` again to reconnect it (or restart Claude Code) — then ask
-     > me to remediate again. I won't apply a non-Checkmarx fix in the meantime."
+     > "Authentication is valid. Please run `/restart` to reconnect the Checkmarx MCP, then
+     > run `/mcp show Checkmarx` to confirm it shows Connected — then ask me to remediate again.
+     > I won't apply a non-Checkmarx fix in the meantime."
 
   Then end the remediation flow without modifying any code.
 
@@ -193,14 +201,16 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
 
 ### Step 4 — Re-scan
 
-After all fixes are applied, re-run (same canonical absolute-path invocation as Flow 1 Step 2;
-bare `cx` only when it is on PATH):
+After all fixes are applied, re-run (same shell rules as Flow 1 Step 2; bare `cx` only when on PATH):
 
 ```bash
-# Unix (macOS/Linux):
+# Unix (macOS/Linux) or Git Bash:
 "$HOME/.checkmarx/bin/cx" scan asca -s "<file-path>"
-# Windows (Git Bash):
-"$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan asca -s "<file-path>"
+```
+
+```powershell
+# Windows (Gemini CLI Shell = PowerShell):
+& "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" scan asca -s "<file-path>"
 ```
 
 The scan reads the WHOLE file, so it also reports findings in code you never touched. **Remediate only

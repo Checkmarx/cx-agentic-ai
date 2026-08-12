@@ -1,12 +1,12 @@
 ---
-name: cx-devassist-sca
-description: "Runs a Checkmarx SCA (OSS) scan on dependency manifests/lockfiles and remediates SCA findings via MCP. Activate when the user explicitly asks to scan or audit dependencies, OR when a hook deny blocked a manifest write with SCA findings (triage first — ask remediate vs suppress before MCP). Do NOT activate for normal manifest create/edit. Invoke as: cx-devassist:cx-devassist-sca"
+name: checkmarx-devassist-sca
+description: "Runs a Checkmarx SCA (OSS) scan on dependency manifests/lockfiles and remediates SCA findings via MCP. Activate when the user explicitly asks to scan or audit dependencies, OR when a hook deny blocked a manifest write with SCA findings (triage first — ask remediate vs suppress before MCP). Do NOT activate for normal manifest create/edit. Invoke as: cx-devassist:checkmarx-devassist-sca"
 ---
 
 # CX DevAssist SCA
 
 Detects and remediates vulnerable / malicious open-source dependencies using Checkmarx SCA (OSS
-realtime). This is the **dependency / package** counterpart to `cx-devassist-asca` (which scans source
+realtime). This is the **dependency / package** counterpart to `checkmarx-devassist-asca` (which scans source
 code for SAST vulnerabilities).
 
 ## When to Use
@@ -21,7 +21,7 @@ This skill has two entry points:
 
 **Do NOT activate** when the user is creating, editing, scaffolding, or adding dependencies to a
 manifest — e.g. "create package.json", "add validator 13.12.0", "bump lodash". Those writes are
-already scanned by the automatic `PreToolUse` hook; activating this skill is redundant and wrong.
+already scanned by the automatic `BeforeTool` hook; activating this skill is redundant and wrong.
 
 > **If SCA findings are already present from an on-demand scan (Flow 1)** — after reporting
 > findings, ask whether to remediate before Flow 2.
@@ -35,12 +35,12 @@ The plugin exposes three scan surfaces; pick by the target, and ask if it is amb
 
 | The user wants to scan… | Use |
 |---|---|
-| A **source code file** (`.py`, `.js`, `.java`, `.go`, …) for code vulnerabilities | `cx-devassist-asca` (SAST) |
+| A **source code file** (`.py`, `.js`, `.java`, `.go`, …) for code vulnerabilities | `checkmarx-devassist-asca` (SAST) |
 | A **dependency manifest / lockfile** (package.json, requirements.txt, go.mod, pom.xml, …) | **this skill** (SCA/OSS) |
 | An **entire project / repository** at cloud scale, or existing platform scan results | the Checkmarx MCP (Cx1 cloud) tools |
 
 A bare "scan this file" refers to whatever file is in context: a manifest/lockfile → this skill; source
-code → `cx-devassist-asca`. If it is unclear which, ask the user.
+code → `checkmarx-devassist-asca`. If it is unclear which, ask the user.
 
 ## Prerequisites
 
@@ -66,15 +66,17 @@ Ask the user which manifest/lockfile to scan if not already specified. Recognize
 
 ### Step 2 — Run the SCA (OSS realtime) Scan
 
-Invoke cx by its canonical absolute path so it resolves even when cx isn't on the agent shell's PATH
-(a first-install session); use a bare `cx` only when cx is already on PATH. `-s` accepts a single file
-or several files separated by commas.
+Invoke cx by its canonical absolute path (see shell rules below). `-s` accepts a single file or
+several files separated by commas. Use a bare `cx` only when it is already on PATH:
 
 ```bash
-# Unix (macOS/Linux):
+# Unix (macOS/Linux) or Git Bash:
 "$HOME/.checkmarx/bin/cx" scan oss-realtime -s "<manifest-path>"
-# Windows (Git Bash):
-"$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan oss-realtime -s "<manifest-path>"
+```
+
+```powershell
+# Windows (Gemini CLI Shell = PowerShell — & is mandatory):
+& "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" scan oss-realtime -s "<manifest-path>"
 ```
 
 ### Step 3 — Process Results
@@ -174,19 +176,20 @@ field naming.
      enabled. If the tool is missing, the usual cause is that cx is not configured/authenticated —
      verify with `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) /
      `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth validate` (Windows), or a bare `cx auth validate` when
-     cx is on PATH; if it fails, run `/cx-cli-setup`.
-  2. Then tell the user the **one** step only they can perform (Claude Code loads MCP servers at
-     startup, so it can't become live in this running session on its own):
+     cx is on PATH; if it fails, run `/checkmarx-cli-setup`.
+  2. If auth validation **succeeds**, try calling an MCP tool (e.g. `mcp__Checkmarx__listProjects`)
+     — the MCP may already be connected in this session despite any earlier connection warning.
+     - If the tool responds → the MCP is live. Proceed with remediation immediately.
+     - If the tool is still unavailable → tell the user:
 
-     > "The Checkmarx remediation MCP isn't connected in this session. Please run `/mcp` and check
-     > whether `Checkmarx` shows Connected. If it's missing or still not connected, run
-     > `/reload-plugins` first, then `/mcp` again to reconnect it (or restart Claude Code) — then ask
-     > me to remediate again. I won't apply a non-Checkmarx fix in the meantime."
+     > "Authentication is valid. Please run `/restart` to reconnect the Checkmarx MCP, then
+     > run `/mcp show Checkmarx` to confirm it shows Connected — then ask me to remediate again.
+     > I won't apply a non-Checkmarx fix in the meantime."
 
   Then end the remediation flow without modifying any dependency.
 
   > Note: do **not** run any `cx_mcp_register.sh` script — this plugin registers its MCP via
-  > `.mcp.json`, and `/reload-plugins` is the correct recovery.
+  > `.mcp.json`, and `/restart` is the correct recovery.
 
 ### Step 3 — Apply the Fix
 

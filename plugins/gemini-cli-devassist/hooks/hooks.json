@@ -1,0 +1,69 @@
+{
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": "run_shell_command|mcp_.*|WriteFile|write_file|write_.*|replace",
+        "hooks": [
+          {
+            "name": "cx-gate",
+            "type": "command",
+            "command": "sh -c \"CX_ASSISTANT=gemini-cli sh '${extensionPath}/hooks/cx_check.sh' --gemini-cli\"",
+            "timeout": 45000,
+            "description": "Checking Checkmarx CLI is available..."
+          }
+        ]
+      },
+      {
+        "matcher": "run_shell_command|mcp_.*",
+        "hooks": [
+          {
+            "name": "cx-guard-tool",
+            "type": "command",
+            "command": "sh -c \"CX_ASSISTANT=gemini-cli sh '${extensionPath}/hooks/cx_run.sh' hooks gemini-before-tool\"",
+            "timeout": 10000,
+            "description": "Checking command against security policy..."
+          }
+        ]
+      },
+      {
+        "matcher": "WriteFile|write_file|write_.*|replace",
+        "hooks": [
+          {
+            "name": "cx-guard-file",
+            "type": "command",
+            "command": "sh -c \"CX_ASSISTANT=gemini-cli sh '${extensionPath}/hooks/cx_run.sh' hooks gemini-before-file-tool\"",
+            "timeout": 60000,
+            "description": "Checking file write against security policy..."
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "cx-guard-prompt",
+            "type": "command",
+            "command": "sh -c \"CX_ASSISTANT=gemini-cli sh '${extensionPath}/hooks/cx_run.sh' hooks gemini-before-agent\"",
+            "timeout": 10000,
+            "description": "Scanning prompt for sensitive content..."
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "cx-guard-stop",
+            "type": "command",
+            "command": "sh -c \"CX_ASSISTANT=gemini-cli sh '${extensionPath}/hooks/cx_run.sh' hooks gemini-after-agent\"",
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  }
+}
