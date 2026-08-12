@@ -5,13 +5,13 @@
 #   bash tests/scripts/test_cx_mcp_guard.sh
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GUARD="$DIR/../../plugins/copilot/checkmarx-devassist/scripts/cx-mcp-guard.sh"
+GUARD="$DIR/../../plugins/copilot-devassist/scripts/cx-mcp-guard.sh"
 
 pass=0; fail=0
 ok()  { pass=$((pass + 1)); printf 'ok   - %s\n' "$1"; }
 bad() { fail=$((fail + 1)); printf 'FAIL - %s\n' "$1"; }
 
-# shellcheck source=../../plugins/copilot/checkmarx-devassist/scripts/cx-mcp-guard.sh
+# shellcheck source=../../plugins/copilot-devassist/scripts/cx-mcp-guard.sh
 . "$GUARD"
 
 # --- cx_mcp_parse_semver -----------------------------------------------------------------------

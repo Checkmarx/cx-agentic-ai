@@ -11,7 +11,7 @@ import unittest
 
 # Import the shipped gate module from the plugin's hooks/ directory (repo root is one level up).
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_HOOKS_DIR = os.path.join(_REPO_ROOT, "plugins", "copilot", "checkmarx-devassist", "hooks")
+_HOOKS_DIR = os.path.join(_REPO_ROOT, "plugins", "copilot-devassist", "hooks")
 sys.path.insert(0, _HOOKS_DIR)
 import cx_check  # noqa: E402
 

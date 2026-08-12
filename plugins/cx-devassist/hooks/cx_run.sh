@@ -20,12 +20,29 @@
 #
 # When cx CANNOT be resolved at all, the fail mode depends on the sub-command so a missing cx is
 # never a silent fail-OPEN on the scan path:
-#   - Blocking PreToolUse scanners (…pre-tool-use / …pre-file-write) -> emit a deny JSON + exit 2
-#     (fail CLOSED, mirroring cx_check.sh's no-Python deny) so the tool call is BLOCKED, unscanned.
+#   - …pre-tool-use (a Checkmarx MCP call) -> emit a deny JSON + exit 2 (fail CLOSED, mirroring
+#     cx_check.sh's no-Python deny) so the tool call is BLOCKED, unscanned.
+#   - …pre-file-write -> exit 0, DEFERRING to stage 1 (cx_check.sh -> cx_check.py), which has already
+#     decided this same call and correctly: it denies a scannable file when cx is absent and allows an
+#     unscannable one. Denying again here cannot make a scannable write safer (verdicts merge
+#     most-restrictive-wins, so stage 1's deny already stands) and DOES block the unscannable writes
+#     stage 1 just allowed. Full reasoning, and the degraded-state safety matrix, at the branch itself.
 #   - Advisory lifecycle hooks (…stop / …idle / …prompt-submit) -> exit 0 (non-blocking by design;
 #     a fail-closed prompt-submit would deadlock the user before they could even install cx).
 #   - Anything else (mcp bridge, scan, auth, configure, version, …) -> stderr error + exit 1.
 set -u
+
+# The plugin's hooks/ directory, resolved ONCE for every site that needs it: the audit logger, the MCP
+# guard / min-version paths, and the bootstrap matcher. `${0%/*}` rather than
+# `$(cd "$(dirname "$0")" && pwd)` — the latter is a subshell plus a `dirname` exec (~86ms measured on
+# Git-Bash Windows) to rebuild a path hooks.json already passes absolutely. The sibling
+# cx_record_login.sh documents the same choice. Zero forks, so hoisting it to the top costs the
+# advisory `exec` fast path nothing, and none of the three consumers needs cd-normalisation — they only
+# join a suffix onto it.
+case "$0" in
+    */*) _CXRUN_DIR=${0%/*} ;;
+    *)   _CXRUN_DIR=. ;;
+esac
 
 # OS detection mirrors cx_check.py's `os.name == "nt"`: on Windows the canonical store is under
 # %LOCALAPPDATA%; on Unix it is ~/.checkmarx/bin. Keeping the two adapters OS-consistent avoids the
@@ -101,6 +118,27 @@ case "${1:-} ${2:-}" in
     *)            _CXRUN_MCP=0 ;;
 esac
 
+# Write ONE cx_log.py audit record using the first WORKING Python 3: python3 -> python -> py -3.
+# Keep this candidate list in step with cx_check.sh's — a Windows host reachable only through the `py`
+# launcher is a normal python.org install, and omitting it drops records silently. It reaches this
+# file's three log sites only; cx_record_login.sh still carries its own copy of the same list.
+# Best-effort by contract: every failure is swallowed and callers ignore the status.
+#   $@ = cx_log.py arguments, event name first
+_cxrun_log() {
+    for _cxrun_py in python3 python "py -3"; do
+        # Candidates may be two words (`py -3`): probe the command word only, then run the value
+        # UNQUOTED so it word-splits. Safe from globbing — all three are literals. `set --` can't do
+        # the split: it would clobber this function's own "$@", i.e. the cx_log.py arguments.
+        command -v "${_cxrun_py%% *}" >/dev/null 2>&1 || continue
+        # Require a REAL success before returning: on Windows "python3" can resolve to the Microsoft
+        # Store App Execution Alias stub, which is ON PATH but exits non-zero without running
+        # anything, so the loop must be free to continue to "python".
+        # shellcheck disable=SC2086
+        $_cxrun_py "$_CXRUN_DIR/cx_log.py" "$@" >/dev/null 2>&1 && return 0
+    done
+    return 0
+}
+
 if [ -n "$CX_RESOLVED" ]; then
     if [ "$_CXRUN_SCAN" = 1 ]; then
         # Capture (rather than exec) ONLY for the blocking scan decision, so this wrapper can observe
@@ -133,24 +171,13 @@ if [ -n "$CX_RESOLVED" ]; then
         esac
         _CXRUN_TOOL=$(printf '%s' "$_CXRUN_INPUT" | sed -n 's/.*"tool_name" *: *"\([A-Za-z0-9_.:-]*\)".*/\1/p' | head -1)
 
-        # Best-effort log — never let a missing/slow python or a logging failure affect the relay.
-        _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
-        for _CXRUN_PY in python3 python; do
-            command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
-            # `break` only on a real success: on Windows, "python3" can resolve to the Microsoft
-            # Store's App Execution Alias stub, which is ON PATH but exits non-zero without running
-            # anything (no Python actually installed under that name) — falling through to "python"
-            # in that case is what makes this work on such machines.
-            "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" scan_decision \
-                "decision=$_CXRUN_DECISION" "tool_name=$_CXRUN_TOOL" "reason_code=$_CXRUN_REASON" \
-                >/dev/null 2>&1 && break
-        done
+        _cxrun_log scan_decision \
+            "decision=$_CXRUN_DECISION" "tool_name=$_CXRUN_TOOL" "reason_code=$_CXRUN_REASON"
 
         printf '%s\n' "$_CXRUN_OUTPUT"
         exit "$_CXRUN_STATUS"
     fi
     if [ "$_CXRUN_MCP" = 1 ]; then
-        _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
         _CXRUN_GUARD="$_CXRUN_DIR/../scripts/cx-mcp-guard.sh"
         _CXRUN_MIN_FILE="$_CXRUN_DIR/../scripts/cx-min-version"
         _CXRUN_MCP_STATE=""
@@ -180,19 +207,13 @@ if [ -n "$CX_RESOLVED" ]; then
                 ;;
         esac
 
-        # Best-effort log — same python3/python fallback loop as the scan_decision log above; never
-        # let a missing/slow python or a logging failure affect the connection outcome. `tier`
-        # records which resolution tier supplied $CX_RESOLVED, so the log can explain (via
-        # cx_log.py's message synthesis) why a CX_BINARY-pinned denial won't self-heal from a
-        # bootstrap upgrade — see the matching stderr note below.
-        for _CXRUN_PY in python3 python; do
-            command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
-            "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" mcp_connect \
-                "result=$_CXRUN_MCP_RESULT" "reason_code=$_CXRUN_MCP_REASON" \
-                "version_have=$_CXRUN_MCP_HAVE" "version_min=$_CXRUN_MCP_MIN" \
-                "tier=$_CX_RESOLVED_TIER" \
-                >/dev/null 2>&1 && break
-        done
+        # `tier` records which resolution tier supplied $CX_RESOLVED, so the log can explain (via
+        # cx_log.py's message synthesis) why a CX_BINARY-pinned denial won't self-heal from a bootstrap
+        # upgrade — see the matching stderr note below.
+        _cxrun_log mcp_connect \
+            "result=$_CXRUN_MCP_RESULT" "reason_code=$_CXRUN_MCP_REASON" \
+            "version_have=$_CXRUN_MCP_HAVE" "version_min=$_CXRUN_MCP_MIN" \
+            "tier=$_CX_RESOLVED_TIER"
 
         if [ "$_CXRUN_MCP_RESULT" = denied ]; then
             # Refuse to exec a subcommand this build can't run — that is what corrupts the stdio
@@ -240,8 +261,7 @@ case "${1:-} ${2:-}" in
         # never exec'd (resolution failed above), so nothing downstream consumes it. The shared matcher
         # (mirroring cx_check.sh / cx_check.py) keeps the two shell stages from drifting.
         _CXRUN_INPUT=$(cat)
-        _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
-        if [ -n "$_CXRUN_DIR" ] && [ -f "$_CXRUN_DIR/_cx_bootstrap_match.sh" ]; then
+        if [ -f "$_CXRUN_DIR/_cx_bootstrap_match.sh" ]; then
             . "$_CXRUN_DIR/_cx_bootstrap_match.sh"
             cx_is_bootstrap_command "$_CXRUN_INPUT" "$_CXRUN_DIR" && exit 0
         fi
@@ -280,12 +300,7 @@ JSON
         ;;
     *)
         if [ "$_CXRUN_MCP" = 1 ]; then
-            _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
-            for _CXRUN_PY in python3 python; do
-                command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
-                "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" mcp_connect \
-                    "result=denied" "reason_code=cx_absent" >/dev/null 2>&1 && break
-            done
+            _cxrun_log mcp_connect "result=denied" "reason_code=cx_absent"
         fi
         printf 'cx-devassist: cx CLI not found (looked at CX_BINARY, the canonical store, and PATH). Run /cx-cli-setup to install it.\n' >&2
         exit 1
