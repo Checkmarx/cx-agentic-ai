@@ -28,9 +28,9 @@ finding, and every real finding came from `Write`/`Edit`.
   blast-radius and file-size policy. Checkmarx MCP calls remain gated, and the install/upgrade
   bootstrap, `cx auth` / `cx configure` recovery and the `cx version` diagnostic all still work.
 - **Rollback:** `CX_GATE_ALL_FILES=1` gates every file type again.
-- Two degraded states deny **every** file write, not just scannable ones: cx unresolvable entirely, and
-  no Python 3. Both are pre-1.1 behaviour and both require setup anyway. The state that matters in
-  practice — cx present but unauthenticated — allows unscannable writes normally.
+- **One** degraded state denies every file write regardless of type: no working Python 3, without which
+  the gate cannot evaluate the file-type rule at all. cx present-but-unauthenticated and cx missing
+  entirely both allow unscannable writes normally.
 
 #### Added — remembered login environments
 
@@ -61,14 +61,23 @@ a **non-blocking observer**:
 #### Notes
 - The file-type rule is implemented **once**, in `cx_check.py`. A shell mirror was written so the
   cx-absent and no-Python deny branches could apply it too, then removed: keeping two implementations
-  of one security decision in agreement produced three fail-open divergences. Those branches now deny
-  every file write (the pre-1.1 behaviour). cx present-but-unauthenticated still allows unscannable
-  writes, which is the case that matters in practice.
+  of one security decision in agreement produced three fail-open divergences. Neither branch needed a
+  copy in the end — see the cx-absent fix below; the no-Python branch cannot run Python by definition
+  and so denies every file write.
 - `cx_check.py`'s Bash-only carve-outs (steps 1, 2, 5) and `CX_GATE_ALL_COMMANDS` are unreachable while
   shell is unrouted. They are annotated in place rather than deleted, so re-wiring shell onto the gate
   cannot silently open it.
 
 #### Fixed
+- **A cx-less machine still blocked every file write.** `cx_run.sh`'s cx-unresolvable branch denied all
+  `pre-file-write` calls, overriding stage 1 — which had already evaluated the same call correctly and
+  logged `allow / unscannable_file`. Because verdicts merge most-restrictive-wins, stage 1 being right
+  was not enough. Found by running the plugin on a VM with no cx: writing a one-line `list_files.sh`
+  was refused with "the cx CLI could not be resolved … BLOCKED fail-closed", i.e. the original
+  "it blocks everything" complaint relocated from shell to file writes. That branch now defers on a
+  file write and keeps denying Checkmarx MCP calls. No file-type logic was added to shell to do it.
+  Regression-tested in `tests/test_cx_check_scannable_files.py::CxAbsentStageTwo`, which drives the
+  real scripts with all three cx resolution tiers defeated.
 - `hooks/cx_check.sh` and `hooks/cx_run.sh` had CRLF line endings in the working tree despite
   `.gitattributes` pinning `*.sh` to LF (repo blobs were already LF). A stray `\r` breaks `sh` on
   Windows Git Bash, which the gate treats as a fail-open hole. `cx-scannable-files` is now pinned too.

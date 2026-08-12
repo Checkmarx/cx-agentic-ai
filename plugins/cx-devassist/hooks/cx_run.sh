@@ -245,16 +245,29 @@ case "${1:-} ${2:-}" in
             . "$_CXRUN_DIR/_cx_bootstrap_match.sh"
             cx_is_bootstrap_command "$_CXRUN_INPUT" "$_CXRUN_DIR" && exit 0
         fi
-        # NO file-type carve-out here, deliberately — see the matching note in cx_check.sh. The
-        # scannable-file rule lives ONLY in cx_check.py's _is_scannable_file; reimplementing it in
-        # POSIX shell so this branch could apply it produced three fail-open divergences from the
-        # Python matcher, each letting real source code reach disk unscanned.
+        # A FILE WRITE defers to stage 1 here; only an MCP call (pre-tool-use) denies below.
         #
-        # Consequence, stated plainly: when cx cannot be resolved AT ALL, every file write is blocked,
-        # including file types no engine can scan. That is narrower than it sounds — cx PRESENT but
-        # unauthenticated (the state developers actually hit) still allows unscannable writes, because
-        # stage 1 allows at step 2b and this branch is not reached. cx-absent means "not installed
-        # yet", where /cx-cli-setup is the required next step anyway and shell is ungated so it can run.
+        # There is still NO file-type rule in this file — that rule lives ONLY in cx_check.py's
+        # _is_scannable_file, and reimplementing it in POSIX shell produced three fail-open
+        # divergences. But it does not need reimplementing: with cx unresolvable, stage 1
+        # (cx_check.sh -> cx_check.py) has ALREADY decided this exact call, and correctly —
+        # step 2b allows an unscannable file, and the cx-presence check denies a scannable one.
+        # Denying again here cannot make a scannable write safer (stage 1 already denied it; the
+        # most-restrictive verdict wins) and DOES block the unscannable writes stage 1 just allowed.
+        # Observed in testing: a one-line `list_files.sh` on a cx-less VM was denied here after
+        # stage 1 logged `allow / unscannable_file` — the "blocks everything" complaint, relocated
+        # from shell to file writes rather than fixed.
+        #
+        # Safe because every degraded state is still covered by stage 1:
+        #   cx absent + Python present -> stage 1 denies scannable, allows unscannable   (correct)
+        #   Python absent              -> cx_check.sh's no-Python branch denies ALL writes (exit 2)
+        #   `sh` unusable              -> neither stage runs; this stage could not have denied either
+        # Residual, accepted: if hooks.json is customised to drop cx_check.sh from the file-write
+        # matcher while keeping this stage, a cx-absent write is no longer gated. With cx PRESENT
+        # this stage still execs the real scanner, so the gap is cx-absent + a hand-edited matcher.
+        case "${1:-} ${2:-}" in
+            *pre-file-write*) exit 0 ;;
+        esac
         cat <<'JSON'
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.","additionalContext":"Run /cx-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. Shell commands and writes to file types Checkmarx cannot scan still run, so you can install cx from here."}}
 JSON

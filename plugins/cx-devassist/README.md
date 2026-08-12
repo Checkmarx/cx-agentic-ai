@@ -107,9 +107,10 @@ cx, so blocking it was friction rather than protection. Two consequences worth k
 The file has exactly one reader — `cx_check.py`'s `_is_scannable_file`. An earlier revision mirrored
 the rule in POSIX shell so the two shell deny paths could apply it too; keeping two implementations of
 one security decision in agreement proved unworkable (three fail-open divergences shipped), so the
-shell copy was removed. Those paths — cx missing entirely, or no Python 3 — now deny every file write,
-which is the pre-1.1 behaviour. **cx present but unauthenticated, the state developers actually hit,
-still allows unscannable writes.** If the file is unreadable or empty, every write is gated again:
+shell copy was removed. Neither path needed one: when cx is missing entirely, stage 2 **defers** to
+stage 1, which has already applied the rule correctly (it denies a scannable write on cx-absence and
+allows an unscannable one). Only **no working Python 3** denies every file write, since the rule cannot
+be evaluated at all without it. If the config file is unreadable or empty, every write is gated again:
 fail-closed, never fail-open.
 
 Editing it is how an administrator adjusts coverage; distribute it in your forked/internal copy of the
