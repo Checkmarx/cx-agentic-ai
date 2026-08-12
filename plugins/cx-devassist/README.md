@@ -34,7 +34,41 @@ Every gated tool call runs a **two-stage PreToolUse chain**:
 | `Write` / `Edit` / … — any other file type | — | — | Nothing: no engine can scan it, so the write proceeds |
 | `Bash` / `PowerShell` | — | — | **Not gated.** One non-blocking observer runs (`cx_record_login`) — see below |
 | MCP calls (`mcp__Checkmarx__*`) | `cx_check` | `cx hooks claude-pre-tool-use` | Policy check before the MCP call is allowed |
+| Session start (`startup` / `resume`) | — | — | **Not a gate.** Announces posture (`cx_session_start`) — see below |
 | Session stop | — | `cx hooks claude-stop` | Session-end hook |
+
+### Session posture announcement
+
+On `startup` and `resume` (not on every compaction), `hooks/cx_session_start.sh` states where things
+stand — one line for the developer via `systemMessage`, and a fuller note for the assistant via
+`additionalContext`:
+
+```
+Checkmarx One | cx v2.3.59+, signed in, scanning active
+Checkmarx One | NOT active: cx is installed but NOT signed in. Run /cx-cli-setup
+Checkmarx One | NOT active: CX_BINARY is set but invalid. Unset CX_BINARY (setup will NOT fix it)
+Checkmarx One | NOT active: you just signed in and Checkmarx is still accepting the token.
+                Wait ~30-60s, do NOT re-login
+Checkmarx One | cx signed in but UNLICENSED - writes proceed UNSCANNED (CX_ALLOW_UNLICENSED=1)
+```
+
+The remedy is per-reason, and each one mirrors the gate's own branch rather than defaulting to
+`/cx-cli-setup`: setup cannot fix a dead `CX_BINARY` pin (the bootstrap only writes the canonical store
+the pin shadows), and during the post-login propagation window re-running `cx auth login` *revokes* the
+token and restarts the wait. The last line is the case where writes are **not** blocked — with
+`CX_ALLOW_UNLICENSED=1` the gate allows them unscanned, and the banner has to say so.
+
+The wording is **"powered by Checkmarx One"**, deliberately not "guarded" or "protected": the gate
+inspects writes to scannable file types, but it does not see content written by a shell command and does
+not scan file types no engine claims. A blanket claim would be false, and a test keeps the overclaiming
+phrasings out. The assistant-facing note also asks it not to rebuild a blocked file through the shell —
+**guidance, not a control**, since nothing can enforce it, but it makes declining the default.
+
+It reuses the gate's cached version/auth/scanner probes, so a warm posture costs **0.9 ms and no `cx`
+spawn at all** — it deliberately does not shell out for the exact build number, reporting `v<floor>+` or
+`dev build` from the cached state instead. A contract test drives every branch and asserts the banner
+agrees with what the gate would do, because two divergences shipped before that test existed. It cannot
+block anything: `SessionStart` has no permission decision, and every path exits 0.
 
 **Shell commands are never blocked.** They previously ran the full readiness gate, which blocked
 `git status`, `npm test`, `mvn verify` and the like whenever cx was missing or unauthenticated — while

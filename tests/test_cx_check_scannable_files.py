@@ -448,6 +448,182 @@ class EngineDriftGuards(unittest.TestCase):
                          table["txtprefix"])
 
 
+class SessionStartAnnouncer(unittest.TestCase):
+    """`cx_session_start.sh` / `cx_check.py session-start` — announces posture, never blocks.
+
+    Two properties. Stdout must be a clean JSON object, because Claude Code reads it AS the
+    announcement, and any stray interpreter output (sitecustomize, PYTHONSTARTUP, a conda banner, a
+    corporate wrapper) would become the banner. And the posture must never claim more than the gate
+    delivers: an inactive scanner has to read as inactive, and the wording must stay scoped.
+
+    One subprocess is shared by the read-only assertions — they inspect a single announcement rather
+    than supplying independent stimuli, and a cold run pays the real auth + scanner probes.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.sh = shutil.which("sh")
+        if not cls.sh:
+            raise unittest.SkipTest("POSIX sh unavailable")
+        # Forward slashes, matching how hooks.json invokes it ("${CLAUDE_PLUGIN_ROOT}/hooks/...").
+        # A bare os.path.join would hand sh a pure-backslash path that no real caller produces.
+        cls.launcher = os.path.join(_HOOKS_DIR, "cx_session_start.sh").replace(os.sep, "/")
+        cls.default = cls._invoke(cls)
+
+    def _invoke(self, extra_env=None):
+        env = dict(os.environ, CX_LOG_DISABLE="1")
+        env.pop("CX_BINARY", None)
+        env.pop("CX_ALLOW_UNLICENSED", None)
+        if extra_env:
+            env.update(extra_env)
+        return subprocess.run(
+            [self.sh, self.launcher],
+            input=b'{"hook_event_name":"SessionStart","source":"startup"}',
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=120)
+
+    def _json(self, proc):
+        return json.loads(proc.stdout.decode("utf-8", "replace"))
+
+    def test_exits_zero_and_emits_only_a_json_object(self):
+        """The regression guard: exit 0, and stdout is pure JSON with no interpreter chatter ahead of
+        it. A non-zero exit would render a hook-error notice on every single session start."""
+        self.assertEqual(0, self.default.returncode)
+        out = self.default.stdout.decode("utf-8", "replace").strip()
+        self.assertTrue(out.startswith("{"), "stdout must be pure JSON, got: %r" % out[:200])
+        json.loads(out)
+
+    def test_declares_session_start_and_both_channels(self):
+        d = self._json(self.default)
+        self.assertEqual("SessionStart", d["hookSpecificOutput"]["hookEventName"])
+        self.assertIn("systemMessage", d)
+        self.assertIn("additionalContext", d["hookSpecificOutput"])
+
+    def test_never_emits_a_permission_decision(self):
+        """SessionStart has no permission decision; emitting one would be meaningless at best."""
+        self.assertNotIn("permissionDecision", self.default.stdout.decode("utf-8", "replace"))
+
+    def test_wording_stays_scoped_and_promises_no_blanket_protection(self):
+        """The gate does not see shell-written files and does not scan unscannable types, so the
+        announcement must not assert session-wide protection."""
+        ctx = self._json(self.default)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("powered by Checkmarx One", ctx)
+        for overclaim in ("guarded by", "protected by", "fully secure", "all files are scanned"):
+            self.assertNotIn(overclaim, ctx.lower())
+
+    def test_tells_the_agent_not_to_bypass_via_shell(self):
+        """The one behavioural line. Guidance, not a control — but it must be present, because the
+        observed default was to silently rebuild a blocked file with a shell redirect."""
+        ctx = self._json(self.default)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("shell", ctx.lower())
+        self.assertIn("BLOCKED", ctx)
+
+    def test_invalid_cx_binary_is_reported_without_blaming_setup(self):
+        """The remedy must be per-reason. `/cx-cli-setup` cannot fix a dead CX_BINARY pin — the
+        bootstrap only writes the canonical store, which the pin shadows."""
+        d = self._json(self._invoke(
+            {"CX_BINARY": os.path.join(tempfile.gettempdir(), "no-such-cx.exe")}))
+        msg = d["systemMessage"]
+        self.assertIn("NOT active", msg)
+        self.assertIn("CX_BINARY", msg)
+        self.assertNotIn("/cx-cli-setup", msg)
+
+    def test_missing_cx_check_py_is_diagnosed_on_stderr_not_stdout(self):
+        """Every dir-resolution failure must be visible AND must not corrupt stdout, which is the
+        announcement channel. Simulated with a copy of the launcher that has no sibling cx_check.py."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        lone = os.path.join(tmp, "cx_session_start.sh").replace(os.sep, "/")
+        shutil.copyfile(self.launcher, lone)
+        p = subprocess.run([self.sh, lone], input=b"{}", stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,
+                           env=dict(os.environ, CX_LOG_DISABLE="1"), timeout=60)
+        self.assertEqual(0, p.returncode)
+        self.assertEqual(b"", p.stdout.strip())
+        self.assertIn(b"cx_check.py not found", p.stderr)
+
+
+class SessionPostureAgreesWithGate(unittest.TestCase):
+    """_session_posture() must never describe a state the gate would handle differently.
+
+    Both walk the same chain over the same probes, so the seam is testable by stubbing them. This is
+    the contract test for a deliberate second implementation — the same approach
+    tests/scripts/test_cx_resolution_contract.sh takes for the cx-resolution seam. Two divergences
+    shipped before it existed: CX_ALLOW_UNLICENSED (the gate allows, the banner said writes were
+    blocked) and the fresh-credential window (the gate says do NOT re-login, the banner said run setup).
+    """
+
+    def setUp(self):
+        self._saved = {name: getattr(cx_check, name) for name in
+                       ("_is_authenticated", "_scanner_state", "_version_state",
+                        "_credential_is_fresh")}
+        os.environ.pop("CX_ALLOW_UNLICENSED", None)
+
+    def tearDown(self):
+        for name, fn in self._saved.items():
+            setattr(cx_check, name, fn)
+        os.environ.pop("CX_ALLOW_UNLICENSED", None)
+
+    def _stub(self, version="ok", authed=True, scanner=None, fresh=False):
+        cx_check._version_state = lambda identity=None: version
+        cx_check._is_authenticated = lambda identity=None: authed
+        cx_check._scanner_state = lambda identity=None: (
+            scanner if scanner is not None else cx_check._SCANNER_SCAN)
+        cx_check._credential_is_fresh = lambda within_seconds=180: fresh
+
+    def test_unlicensed_override_is_active_and_never_claims_writes_are_blocked(self):
+        """The gate calls _allow_with_warning here, so writes DO proceed — unscanned."""
+        self._stub(scanner=cx_check._SCANNER_UNLICENSED)
+        os.environ["CX_ALLOW_UNLICENSED"] = "1"
+        active, code, msg, ctx = cx_check._session_posture()
+        self.assertTrue(active, "the gate allows with CX_ALLOW_UNLICENSED=1")
+        self.assertNotIn("BLOCKED until", ctx)
+        self.assertIn("UNSCANNED", ctx + msg)
+
+    def test_unlicensed_without_override_uses_the_gates_reason_code(self):
+        """A session_start/gate_decision join on reason_code must not break."""
+        self._stub(scanner=cx_check._SCANNER_UNLICENSED)
+        active, code, _, _ = cx_check._session_posture()
+        self.assertFalse(active)
+        self.assertEqual("scanner_unlicensed", code)
+
+    def test_fresh_credential_window_warns_against_relogin(self):
+        """The gate's auth_pending_fresh_login branch exists because re-running `cx auth login`
+        revokes the token and restarts the wait. The banner must not prescribe that loop."""
+        self._stub(authed=False, fresh=True)
+        active, code, msg, ctx = cx_check._session_posture()
+        self.assertFalse(active)
+        self.assertEqual("auth_pending_fresh_login", code)
+        self.assertNotIn("/cx-cli-setup", msg)
+        self.assertIn("REVOKES", ctx)
+
+    def test_plain_unauthenticated_still_points_at_setup(self):
+        self._stub(authed=False, fresh=False)
+        active, code, msg, _ = cx_check._session_posture()
+        self.assertFalse(active)
+        self.assertEqual("unauthenticated", code)
+        self.assertIn("/cx-cli-setup", msg)
+
+    def test_every_branch_returns_four_strings_and_a_bool(self):
+        """Drives the branches rather than sampling whichever one this host happens to be in."""
+        cases = (
+            dict(version="below"), dict(version="incapable"), dict(version="unrunnable"),
+            dict(authed=False), dict(authed=False, fresh=True),
+            dict(scanner=cx_check._SCANNER_UNLICENSED),
+            dict(scanner=cx_check._SCANNER_PASSTHROUGH),
+            dict(scanner=cx_check._SCANNER_UNKNOWN), dict(),
+        )
+        for kwargs in cases:
+            with self.subTest(**kwargs):
+                self._stub(**kwargs)
+                active, code, msg, ctx = cx_check._session_posture()
+                self.assertIsInstance(active, bool)
+                for field in (code, msg, ctx):
+                    self.assertIsInstance(field, str)
+                    self.assertTrue(field)
+                self.assertTrue(msg.startswith("Checkmarx One |"))
+                self.assertIn("powered by Checkmarx One", ctx)
+
+
 class CxAbsentStageTwo(unittest.TestCase):
     """cx_run.sh's cx-UNRESOLVABLE branch: a file write must DEFER to stage 1, an MCP call must DENY.
 

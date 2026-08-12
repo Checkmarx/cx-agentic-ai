@@ -1747,6 +1747,141 @@ def cx_record_login():
         _record_login_attempt(_bash_command(hook_input))
 
 
+# --- SessionStart posture announcement ------------------------------------------------------------
+# Wording rule for everything below: state what is TRUE and SCOPED, never a blanket guarantee. The
+# gate inspects writes to file types an engine can scan; it does NOT see content written by a shell
+# command, and it does not scan file types no engine claims. So "powered by Checkmarx One" (an
+# attribution) is accurate where "this session is guarded/protected" (a coverage promise) would not be.
+_SESSION_LEAD = "This session is powered by Checkmarx One (cx-devassist)."
+
+# The behavioural half — the only part that changes what the assistant DOES. Field-observed problem it
+# addresses: when a scannable write is denied, the natural next move is to rebuild the file with a
+# shell redirect, which succeeds and lands the same bytes UNSCANNED (shell is deliberately ungated).
+# In testing that happened silently for one file and was queried for another — model judgement, not a
+# control. This makes declining to bypass the default. It is guidance, NOT a security boundary: no
+# instruction here can enforce anything, so nothing else may rely on it.
+_SESSION_RULES = (
+    "\n- Writes to scannable types (source, IaC, dependency manifests) are scanned before reaching "
+    "disk; a finding blocks the write and returns remediation guidance."
+    "\n- If a write is BLOCKED, do NOT reproduce the file through a shell command — shell writes are "
+    "not scanned, so that bypasses the check entirely. Fix the finding, or run /cx-cli-setup if the "
+    "gate reports a setup problem."
+    "\n- Available: /cx-cli-setup, /cx-devassist-asca, /cx-devassist-sca"
+)
+
+
+def _session_posture():
+    """(active, reason_code, system_message, context) — the finished SessionStart announcement.
+
+    Walks the SAME readiness chain as cx_check(), in the same order, reusing the same cached probes, so
+    the banner cannot claim a posture the gate contradicts on the next file write. `active` is True ONLY
+    when a scannable write really would be inspected: cx present, current, capable, authenticated,
+    licensed, and its scanner actually scanning. Anything less is reported as NOT active with the
+    blocker named — a reassuring banner over a silent no-op scanner is worse than no banner.
+
+    Returns the two finished strings rather than parts to assemble: every caller wants exactly these.
+    Deliberately NO `cx version` spawn — _version_state() already yields ok/dev from cache, and the
+    exact build number cost ~120ms (92% of a warm run) purely to render a digit. The version floor
+    comes from the bundled file, which is a read not a spawn. Never raises."""
+    def blocked(code, headline, detail, action="Run /cx-cli-setup"):
+        # `action` is per-reason, NOT a blanket "Run /cx-cli-setup" — for an invalid CX_BINARY the
+        # installer cannot fix anything, since the pin shadows the store the bootstrap writes to.
+        return (False, code,
+                "Checkmarx One | NOT active: %s. %s" % (headline, action),
+                "%s Scanning is NOT active: %s. %s\nWrites to scannable file types will be BLOCKED "
+                "until this is fixed.%s" % (_SESSION_LEAD, headline, detail, _SESSION_RULES))
+
+    _, cx_err = _cx_binary()
+    if cx_err is not None:
+        # Reuse the canonical note instead of paraphrasing it: it carries all THREE remedies and is the
+        # same text the gate's own deny uses, so the two cannot drift.
+        return blocked("cx_binary_invalid", "CX_BINARY is set but invalid",
+                       cx_err + "." + _cx_binary_pin_note("binary"),
+                       action="Unset CX_BINARY (setup will NOT fix it)")
+
+    effective, tier = _cx_exe_with_tier()
+    resolved = effective if os.path.isabs(effective) else shutil.which(effective)
+    if resolved is None:
+        return blocked("cx_absent", "cx CLI is not installed",
+                       "Run /cx-cli-setup to install and authenticate it.")
+
+    identity = _binary_identity(resolved)
+    version = _version_state(identity)
+    if version == "below":
+        return blocked("below_min", "cx is older than the required version",
+                       "The bundled floor is v%s. Run /cx-cli-setup to upgrade."
+                       % ".".join(str(n) for n in _load_min_version()))
+    if version == "incapable":
+        return blocked("capability_missing", "this cx build lacks the required scanner subcommands",
+                       "Run /cx-cli-setup to install a capable build.")
+    if version == "unrunnable":
+        return blocked("unrunnable", "cx could not be run", "Run /cx-cli-setup to reinstall.")
+
+    if not _is_authenticated(identity):
+        # Mirror the gate's fresh-login branch. Without this the banner says "run /cx-cli-setup" during
+        # the post-login propagation window — prescribing the re-login loop the gate exists to stop.
+        if _credential_is_fresh():
+            return blocked(
+                "auth_pending_fresh_login", "you just signed in and Checkmarx is still accepting the token",
+                "Do NOT re-run `cx auth login` — each login REVOKES the current token and RESTARTS the "
+                "wait. Wait ~30-60s, then retry the operation.",
+                action="Wait ~30-60s, do NOT re-login")
+        return blocked("unauthenticated", "cx is installed but NOT signed in",
+                       "Run /cx-cli-setup to authenticate.")
+
+    scanner = _scanner_state(identity)
+    if scanner == _SCANNER_UNLICENSED:
+        # The gate ALLOWS with a warning when CX_ALLOW_UNLICENSED=1, so claiming writes are blocked here
+        # would be false — and would push the assistant toward the shell bypass _SESSION_RULES warns
+        # against. Report it as the genuinely dangerous state it is: proceeding, but UNSCANNED.
+        if os.environ.get("CX_ALLOW_UNLICENSED") == "1":
+            return (True, "unlicensed_override",
+                    "Checkmarx One | cx signed in but UNLICENSED - writes proceed UNSCANNED "
+                    "(CX_ALLOW_UNLICENSED=1)",
+                    "%s WARNING: cx is authenticated but has NO AI-scanning license, so its scanner runs "
+                    "in pass-through and scans NOTHING. Writes are allowed anyway because "
+                    "CX_ALLOW_UNLICENSED=1 is set, so code reaches disk UNSCANNED. Acquire a Checkmarx "
+                    "AI-scanning license and unset CX_ALLOW_UNLICENSED to restore scanning.%s"
+                    % (_SESSION_LEAD, _SESSION_RULES))
+        return blocked("scanner_unlicensed", "cx is signed in but has NO AI-scanning license",
+                       "Its scanner runs in pass-through and will NOT scan. Acquire a Checkmarx "
+                       "AI-scanning license (Checkmarx One Assist / AI Protection / Developer Assist).",
+                       action="Acquire an AI-scanning license")
+    if scanner == _SCANNER_PASSTHROUGH:
+        return blocked("scanner_passthrough", "cx is signed in but its SCANNER is not",
+                       "The scanner cannot establish a session from the stored credential, so it would "
+                       "run in pass-through and scan nothing. Run /cx-cli-setup to re-authenticate.")
+
+    # _SCANNER_SCAN, or _SCANNER_UNKNOWN (probe inconclusive — the gate defers to stage 2 rather than
+    # over-block, so report active and say the probe was inconclusive).
+    build = "dev build" if version == "dev" else "v%s+" % ".".join(str(n) for n in _load_min_version())
+    detail = "cx %s (%s tier), signed in, ASCA/KICS/SCA scanning ACTIVE on file writes." % (build, tier)
+    if scanner == _SCANNER_UNKNOWN:
+        detail += " (Readiness probe inconclusive; the stage-2 scanner is authoritative.)"
+    return (True, "ok", "Checkmarx One | cx %s, signed in, scanning active" % build,
+            "%s\nPosture: %s%s" % (_SESSION_LEAD, detail, _SESSION_RULES))
+
+
+def cx_session_start():
+    """SessionStart hook: announce the Checkmarx posture once per session.
+
+    Two channels, because they reach different audiences:
+      - `systemMessage`                          -> the DEVELOPER, one line in the terminal.
+      - `hookSpecificOutput.additionalContext`   -> CLAUDE, which is where _SESSION_RULES matters.
+
+    Cannot block: SessionStart has no permission decision, and main() forces exit 0 on every path —
+    including any exception raised in here, which yields silence rather than a false posture."""
+    active, reason_code, system_message, context = _session_posture()
+    _log("session_start", active=active, reason_code=reason_code)
+    print(json.dumps({
+        "systemMessage": system_message,
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": context,
+        },
+    }))
+
+
 def main():
     # OBSERVER mode: record-login must NEVER block a tool call, whatever happens inside it. Any
     # failure is swallowed and the hook still exits 0 — a missing history file, an unwritable state
@@ -1754,6 +1889,16 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "record-login":
         try:
             cx_record_login()
+        except BaseException:
+            pass
+        sys.exit(0)
+
+    # ANNOUNCE mode: same contract. SessionStart carries no permission decision, so this can never
+    # block — but it must also never emit a traceback or a non-zero exit, which Claude Code would
+    # surface to the developer as a hook error on every single session start.
+    if len(sys.argv) > 1 and sys.argv[1] == "session-start":
+        try:
+            cx_session_start()
         except BaseException:
             pass
         sys.exit(0)

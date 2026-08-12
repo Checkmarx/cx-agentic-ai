@@ -7,3 +7,6 @@
 cx-min-version       text eol=lf
 cx-scannable-files   text eol=lf
 *.properties         text eol=lf
+# The hook wiring itself. CRLF does not break JSON parsing, but leaving it unpinned means every edit on
+# a core.autocrlf=true checkout shows up as a whole-file diff, which hides the real change.
+hooks.json           text eol=lf

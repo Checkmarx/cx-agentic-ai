@@ -50,6 +50,40 @@ a **non-blocking observer**:
   later logged-out deny offers up to 3 confirmed pairs as choices the developer picks from.
   OAuth only — an API-key setup carries no URL/tenant to record.
 
+#### Added — session posture announcement
+
+A `SessionStart` hook (`hooks/cx_session_start.sh`, matched to `startup|resume`) states the Checkmarx
+posture once per session, on two channels:
+
+- **`systemMessage`** — one line for the developer: `Checkmarx One | cx v2.3.59+, signed in, scanning
+  active`, or `NOT active: <blocker>` with a **per-reason** remedy. An invalid `CX_BINARY` says "Unset
+  CX_BINARY (setup will NOT fix it)", never `/cx-cli-setup`, which cannot fix a pin; the post-login
+  propagation window says "Wait ~30-60s, do NOT re-login", mirroring the gate's own branch rather than
+  prescribing the re-login loop that branch exists to stop.
+- **`hookSpecificOutput.additionalContext`** — for the assistant: the posture plus the instruction not
+  to rebuild a blocked file with a shell command, since shell writes are not scanned. That is
+  **guidance, not a control** — nothing may rely on it — but the observed default was to bypass
+  silently, so making refusal the default is worth the two lines.
+
+Wording is deliberately scoped: "powered by Checkmarx One", never "guarded"/"protected". The gate
+inspects writes to scannable file types; it does not see shell-written content and does not scan types
+no engine claims, so a blanket claim would be false. A test asserts the overclaiming words stay out.
+
+It walks the same readiness chain as the gate, reusing the same cached probes — a warm posture is
+**0.9 ms and zero `cx` spawns**; it deliberately does not shell out for the exact build number, which
+cost ~120 ms (92% of a warm run) to render a digit, and reports `v<floor>+` or `dev build` from the
+cached version state instead. Because the two walks must agree,
+`tests/…::SessionPostureAgreesWithGate` drives the branches and asserts they do; it exists because two
+divergences shipped without it — `CX_ALLOW_UNLICENSED=1` (the gate *allows* with a warning while the
+banner announced writes were blocked) and the post-login window (the gate says do **not** re-login
+while the banner said run setup). Both are fixed, and the reason codes now match the gate's literally,
+enforced by an `_enum` in the log schema rather than a comment claiming they line up.
+
+It cannot block: `SessionStart` has no permission decision, and both the launcher and
+`cx_check.py session-start` force exit 0 on every path. Posture is logged as a new `session_start`
+event, alongside `unlicensed_override` — which the gate has always emitted but which was **missing from
+the log registry**, so the one record proving code reached disk unscanned was silently dropped.
+
 #### Added
 - `config/cx-scannable-files` — the scannable file types, with exactly one reader
   (`cx_check.py`'s `_is_scannable_file`).
@@ -69,6 +103,12 @@ a **non-blocking observer**:
   cannot silently open it.
 
 #### Fixed
+- **A dir-resolution failure in the session launcher produced silence instead of a diagnostic.** If
+  `cx_check.py` could not be found next to the script — `$0` with no separator, an unexpanded
+  `${CLAUDE_PLUGIN_ROOT}`, a truncated install — the launcher ran an interpreter against a path that did
+  not exist and emitted nothing, with no indication why. It now checks for the file and writes one line
+  to **stderr**, never stdout, since stdout is the announcement channel. That single check covers the
+  whole family of resolution failures.
 - **An invalid `CX_BINARY` sent agents into an unbreakable loop.** The `cx_binary_invalid` deny said
   "unset it to use cx from PATH" and nothing more, so an agent would suggest `/cx-cli-setup`, watch the
   bootstrap install `cx` successfully, and hit the identical deny again — forever — because a pin

@@ -84,6 +84,29 @@ _EVENTS = {
         "action": _enum({"recorded", "promoted", "offered", "invalid", "pruned"}),
         "count": _as_int,
     },
+    "session_start": {
+        # The posture announced at session start (SessionStart hook). `active` is True ONLY when a
+        # scannable write really would be inspected. Carries no URL or tenant (see login_history) —
+        # posture only.
+        #
+        # An _enum, NOT a free _token: the values are a closed set that must stay identical to
+        # gate_decision's, so a session_start/gate_decision join on reason_code holds. A _token would
+        # not have caught `unlicensed` being written here while the gate logs `scanner_unlicensed` —
+        # which is exactly what happened. Unknown values coerce to "other", making drift visible.
+        "active": _as_bool,
+        "reason_code": _enum({
+            "ok", "unlicensed_override", "cx_binary_invalid", "cx_absent", "below_min",
+            "capability_missing", "unrunnable", "auth_pending_fresh_login", "unauthenticated",
+            "scanner_unlicensed", "scanner_passthrough",
+        }),
+    },
+    "unlicensed_override": {
+        # Emitted by the gate when CX_ALLOW_UNLICENSED=1 lets an unscanned write through. Declared
+        # here because it was NOT: cx_check.py has always called _log("unlicensed_override", ...), but
+        # with no entry in this registry log_event dropped it silently — so the one record that proves
+        # code reached disk unscanned was the one record never written.
+        "tool_name": _token,
+    },
     "admin_config": {
         # Outcome of loading the bundled admin onboarding config
         # (config/cx-onboarding.properties). NEVER carries the offending VALUE (which an admin — or a
