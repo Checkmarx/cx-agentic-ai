@@ -69,6 +69,19 @@ a **non-blocking observer**:
   cannot silently open it.
 
 #### Fixed
+- **An invalid `CX_BINARY` sent agents into an unbreakable loop.** The `cx_binary_invalid` deny said
+  "unset it to use cx from PATH" and nothing more, so an agent would suggest `/cx-cli-setup`, watch the
+  bootstrap install `cx` successfully, and hit the identical deny again — forever — because a pin
+  shadows the canonical store the bootstrap writes. Seen twice on a test VM whose `CX_BINARY` pointed
+  at a leftover `C:\Cursor-plug\cx.exe`. It now carries the existing `_cx_binary_pin_note()` (already
+  wired to `below_min` and `unrunnable`), which states that setup cannot fix it and gives the three
+  real options, and the guidance now names the canonical store instead of only PATH.
+- **Audit records vanished on Windows hosts reachable only via the `py` launcher.** `cx_run.sh` looked
+  for `python3` then `python` at three separate inline sites — none tried `py -3`, which `cx_check.sh`
+  had probed all along. On a normal python.org install exposing only `py`, every `scan_decision` and
+  `mcp_connect` record was silently dropped, silently because logging is best-effort by contract. The
+  three copies are now one `_cxrun_log()` helper that also tries `py -3`; verified by running with
+  `python`/`python3` removed from PATH — the pushed version wrote nothing, this one writes the record.
 - **A cx-less machine still blocked every file write.** `cx_run.sh`'s cx-unresolvable branch denied all
   `pre-file-write` calls, overriding stage 1 — which had already evaluated the same call correctly and
   logged `allow / unscannable_file`. Because verdicts merge most-restrictive-wins, stage 1 being right

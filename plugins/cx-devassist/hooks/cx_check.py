@@ -105,7 +105,9 @@ def _cx_exe():
 
 def _cx_binary_pin_note(tier):
     """An extra, explicit note to append to a below/incapable/unrunnable deny's context when the
-    unfit binary came from a CX_BINARY pin (tier == 'binary') — empty string otherwise. Re-running
+    unfit binary came from a CX_BINARY pin (tier == 'binary') — empty string otherwise. The
+    cx_binary_invalid deny passes 'binary' literally: a set-but-invalid CX_BINARY is the pin case
+    by definition, and it is the deny most likely to send an agent round the loop. Re-running
     the upgrade bootstrap does NOT fix this case: the bootstrap only ever writes the canonical
     store, which a CX_BINARY pin continues to shadow, so an agent could loop re-running the
     suggested upgrade command forever with no visible effect. Phrased as an instruction to the
@@ -1387,8 +1389,10 @@ def cx_check():
                 "cannot run. This operation is BLOCKED until CX_BINARY is fixed or unset."
             ),
             context=(
-                cx_err + ". Set CX_BINARY to the ABSOLUTE path of a real, executable cx binary, "
-                "or unset it to use cx from PATH. All agent actions are blocked fail-closed."
+                cx_err + ". All agent actions are blocked fail-closed."
+                # A set-but-invalid CX_BINARY IS the pin case by definition — pass it literally. The
+                # note owns the remediation options, so don't restate them here.
+                + _cx_binary_pin_note("binary")
             ),
             reason_code="cx_binary_invalid",
             tool_name=tool,
