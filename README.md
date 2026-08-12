@@ -12,8 +12,8 @@ Use them together or separately — they solve different halves of the problem.
 
 
 A hosted [MCP](https://modelcontextprotocol.io) server that connects any MCP-capable AI client — Claude,
-Cursor, Copilot, Windsurf, Kiro — to Checkmarx One. It exposes scanning, findings, project management,
-and AI-generated remediation as tools your assistant can call in conversation.
+Cursor, Copilot, Gemini CLI, Windsurf, Kiro — to Checkmarx One. It exposes scanning, findings, project
+management, and AI-generated remediation as tools your assistant can call in conversation.
 
 **Reach for this when** you want your assistant to scan projects, investigate findings, or fix them on
 request — in whichever AI client you already use. Configure it once (see
@@ -72,6 +72,26 @@ trusted to run. Findings are remediated through the bundled Checkmarx MCP server
 someone remembers to ask for.
 
 For more details **→ [plugins/copilot-devassist/README.md](plugins/copilot-devassist/README.md)**
+
+## gemini-cli-devassist
+
+**→ [plugins/gemini-cli-devassist/README.md](plugins/gemini-cli-devassist/README.md)**
+
+A fail-closed security gate for [Gemini CLI](https://github.com/google-gemini/gemini-cli). Before
+Gemini creates or edits a file, the Checkmarx `cx` CLI scans the proposed content. Real vulnerabilities
+are **blocked rather than silently allowed** — and so is the case where the scanner itself can't be
+trusted to run. Findings are remediated through the bundled Checkmarx MCP server.
+
+**Reach for this when** you want the check to be automatic and non-optional rather than something
+someone remembers to ask for.
+
+For more details **→ [plugins/gemini-cli-devassist/README.md](plugins/gemini-cli-devassist/README.md)**
+
+Install from the extension subdirectory (not the monorepo root):
+
+```
+gemini extensions install "C:\path\to\cx-agentic-ai\plugins\gemini-cli-devassist"
+```
 
 
 ## Documentation
