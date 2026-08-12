@@ -44,7 +44,7 @@ stand — one line for the developer via `systemMessage`, and a fuller note for 
 `additionalContext`:
 
 ```
-Checkmarx One | cx v2.3.59+, signed in, scanning active
+Powered by Checkmarx One | cx v2.3.59+, signed in, scanning active
 Checkmarx One | NOT active: cx is installed but NOT signed in. Run /cx-cli-setup
 Checkmarx One | NOT active: CX_BINARY is set but invalid. Unset CX_BINARY (setup will NOT fix it)
 Checkmarx One | NOT active: you just signed in and Checkmarx is still accepting the token.

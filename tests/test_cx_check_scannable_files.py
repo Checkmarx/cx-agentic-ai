@@ -620,8 +620,13 @@ class SessionPostureAgreesWithGate(unittest.TestCase):
                 for field in (code, msg, ctx):
                     self.assertIsInstance(field, str)
                     self.assertTrue(field)
-                self.assertTrue(msg.startswith("Checkmarx One |"))
+                self.assertTrue(msg.startswith(("Checkmarx One |", "Powered by Checkmarx One |")))
                 self.assertIn("powered by Checkmarx One", ctx)
+                # "Powered by" is reserved for the branch where scanning really runs — anything else
+                # would announce protection the gate is not providing.
+                if msg.startswith("Powered by"):
+                    self.assertTrue(active)
+                    self.assertIn("scanning active", msg)
 
 
 class CxAbsentStageTwo(unittest.TestCase):

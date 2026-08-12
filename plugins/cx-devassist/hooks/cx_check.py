@@ -1858,7 +1858,10 @@ def _session_posture():
     detail = "cx %s (%s tier), signed in, ASCA/KICS/SCA scanning ACTIVE on file writes." % (build, tier)
     if scanner == _SCANNER_UNKNOWN:
         detail += " (Readiness probe inconclusive; the stage-2 scanner is authoritative.)"
-    return (True, "ok", "Checkmarx One | cx %s, signed in, scanning active" % build,
+    # "Powered by" appears ONLY here, on the one branch where scanning is genuinely running. Every
+    # other branch leads with a bare "Checkmarx One |" — claiming the session is powered by a scanner
+    # that is inactive or in pass-through would be the overclaim the wording rule exists to prevent.
+    return (True, "ok", "Powered by Checkmarx One | cx %s, signed in, scanning active" % build,
             "%s\nPosture: %s%s" % (_SESSION_LEAD, detail, _SESSION_RULES))
 
 

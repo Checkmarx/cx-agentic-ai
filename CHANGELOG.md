@@ -55,7 +55,7 @@ a **non-blocking observer**:
 A `SessionStart` hook (`hooks/cx_session_start.sh`, matched to `startup|resume`) states the Checkmarx
 posture once per session, on two channels:
 
-- **`systemMessage`** — one line for the developer: `Checkmarx One | cx v2.3.59+, signed in, scanning
+- **`systemMessage`** — one line for the developer: `Powered by Checkmarx One | cx v2.3.59+, signed in, scanning
   active`, or `NOT active: <blocker>` with a **per-reason** remedy. An invalid `CX_BINARY` says "Unset
   CX_BINARY (setup will NOT fix it)", never `/cx-cli-setup`, which cannot fix a pin; the post-login
   propagation window says "Wait ~30-60s, do NOT re-login", mirroring the gate's own branch rather than
