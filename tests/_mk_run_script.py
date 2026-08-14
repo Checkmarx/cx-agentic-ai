@@ -29,7 +29,7 @@ run_one() {
 
 JSON1='{"tool_name":"Shell","tool_input":{"command":"& \\"C:\\\\\\\\Users\\\\\\\\kedarb\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Checkmarx\\\\\\\\cx\\\\\\\\cx.exe\\" auth login --base-auth-uri https://eu.ast.checkmarx.net --tenant cx_seg 1>$null","cwd":"","timeout":300000},"hook_event_name":"preToolUse","cwd":""}'
 JSON2='{"tool_name":"Shell","tool_input":{"command":"& \\"C:\\\\\\\\Users\\\\\\\\kedarb\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Checkmarx\\\\\\\\cx\\\\\\\\cx.exe\\" auth validate","cwd":"","timeout":30000},"hook_event_name":"preToolUse","cwd":""}'
-INST="/c/Users/kedarb/.cursor/plugins/local/cx-devassist-cursor/hooks/cx_check.sh"
+INST="/c/Users/kedarb/.cursor/plugins/local/cursor-devassist/hooks/cx_check.sh"
 REPO="/c/AST/Repos/cx-agentic-ai/plugins/cursor-devassist/hooks/cx_check.sh"
 
 echo "--- grep _CX_HOOK_INPUT_FILE (installed) ---"

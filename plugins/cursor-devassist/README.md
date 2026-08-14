@@ -59,7 +59,7 @@ remediation MCP** — nothing more.
 When a finding needs fixing, remediation runs through the **Checkmarx MCP server** (`cx mcp bridge`),
 declared in `mcp.json` and loaded automatically when this plugin is installed under
 `~/.cursor/plugins/local/`. It exposes code- and package-remediation tools
-(`mcp__Checkmarx__codeRemediation`, …) that the agent calls directly. A single `cx` sign-in covers
+(`mcp__plugin-cx-devassist-Checkmarx__codeRemediation`, …) that the agent calls directly. A single `cx` sign-in covers
 both the CLI and the MCP.
 
 ---
@@ -150,9 +150,12 @@ so `cx auth login` cannot leak its token). Everything outside this set is gated 
 │   ├── cx-mcp-guard.sh          # version/capability decision for `cx mcp bridge`
 │   ├── cx-path-probe.sh         # first writable on-PATH directory
 │   ├── cx-min-version           # minimum cx version (numeric floor)
-│   └── install-hooks.sh         # writes ~/.cursor/hooks.json with absolute paths
+│   ├── install-hooks.sh         # merges hooks + syncs rules into user/project .cursor/ (user or project scope)
+│   ├── cx-hooks-merge.py        # JSON merge for hooks — preserves unrelated hooks, replaces only ours
+│   └── cx-rules-install.py      # syncs cx-*.mdc rules into .cursor/rules/ (preserves unrelated rules)
 ├── skills/
 │   ├── cx-cli-setup/            # guided cx install + authentication (router + references/)
+│   ├── cx-install-wiring/       # on-demand CLI-only: hooks + rules → auto-continues into cx-cli-setup
 │   ├── cx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
 │   └── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
 └── examples/
@@ -168,11 +171,21 @@ invoked with `/cx-devassist-asca` / `/cx-devassist-sca` in chat, or autonomously
 
 | Ask | Skill | Engine |
 |---|---|---|
-| "scan this file" / "check app.py" (source code) | `cx-devassist-asca` | SAST (ASCA) → `mcp__Checkmarx__codeRemediation` |
-| "scan my dependencies" / "check package.json" (manifest/lockfile) | `cx-devassist-sca` | SCA / OSS → `mcp__Checkmarx__packageRemediation` |
+| "scan this file" / "check app.py" (source code) | `cx-devassist-asca` | SAST (ASCA) → `mcp__plugin-cx-devassist-Checkmarx__codeRemediation` |
+| "scan my dependencies" / "check package.json" (manifest/lockfile) | `cx-devassist-sca` | SCA / OSS → `mcp__plugin-cx-devassist-Checkmarx__packageRemediation` |
 
 A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA.
-`cx-cli-setup` (`/cx-cli-setup`) guides installing, upgrading, and authenticating the `cx` CLI itself.
+
+### Setup skills (when to use which)
+
+| Skill | Surface | When |
+|---|---|---|
+| `/cx-install-wiring` | **Cursor CLI** (intended) | **On-demand** — developer types `/cx-install-wiring`. Wires hooks + rules, then auto-continues into `cx` install/auth. **Always run Phase 1 when invoked** — do not refuse based on IDE vs CLI guessing. |
+| `/cx-cli-setup` | Cursor CLI **or** IDE | `cx` missing, outdated, unauthenticated, or re-auth. Also used when a **hook deny** surfaces setup (hooks already wired — never run `install-hooks.sh` from this path). |
+
+`/cx-install-wiring` is **on-demand only** (`disable-model-invocation: true`) — it is not auto-selected
+by the agent. After it finishes in CLI, **restart the terminal / start a new `agent` session** (not
+**Developer: Reload Window**, which is IDE-only).
 
 ### Admin onboarding pre-fill (optional)
 
@@ -216,20 +229,56 @@ probe (the `cx mcp bridge` and `cx hooks cursor-*` subcommands must all respond 
 └── ...
 ```
 
-Copy or symlink this plugin folder there, then run the install script (below) and
-**Developer: Reload Window**.
+Copy or symlink this plugin folder there.
 
-**User-level hooks** (recommended for visibility + belt-and-suspenders):
+### First-time setup (Cursor CLI)
+
+From a **Cursor CLI** terminal session (`agent` in your project directory), run **on demand**:
+
+```text
+/cx-install-wiring
+```
+
+This skill is **intended for Cursor CLI** (`agent` in a terminal) and is **on-demand** only. When
+invoked, it will:
+
+1. Ask **User** vs **Project** scope. For **Project**, ask whether to use **this repo** (show the
+   resolved path) or **another path** (developer supplies it); validate the directory exists, then
+   run `install-hooks.sh` (hooks + rules).
+2. Automatically continue into `cx` CLI install and authentication (reads `cx-cli-setup` in the same session).
+
+When setup completes, **exit and restart your CLI session** (`/exit`, then `agent` again, or restart the
+terminal) so hooks, rules, and the MCP bridge load. Do **not** use **Developer: Reload Window** — that
+is for the IDE.
+
+For **hook-deny recovery** or **re-auth only** (hooks already wired), use `/cx-cli-setup` from CLI or IDE.
+
+### IDE / manual hook install
+
+**User-level hooks** (optional; IDE users or non-interactive install):
+
+To run it by hand instead (e.g. non-interactively, or from CI):
 
 ```bash
+# User scope
 bash /plugins/cursor-devassist/scripts/install-hooks.sh
 # or from the local plugin copy:
 CX_PLUGIN_ROOT=~/.cursor/plugins/local/cx-devassist-cursor bash scripts/install-hooks.sh
+
+# Project scope — set CX_PROJECT_PATH to the validated repo root (defaults to cwd if unset)
+CX_CURSOR_HOOKS_TARGET=project CX_PROJECT_PATH=/path/to/repo bash scripts/install-hooks.sh
 ```
 
-This writes `~/.cursor/hooks.json` (visible in Settings → Hooks) with absolute paths to this plugin.
-Plugin-level hooks may still run without this file, but they often do not appear in the Hooks
-settings UI without it.
+When the script finishes, **restart your Cursor CLI session** (exit `agent` and start again, or restart
+the terminal) — not **Developer: Reload Window** (IDE only).
+
+This **merges** this plugin's hooks into the target `hooks.json` and **syncs** its `cx-*.mdc` rules
+into the matching `.cursor/rules/` directory (visible in Settings → Hooks and Rules) with absolute
+paths to this plugin — any hooks/rules you already have for other tools are preserved untouched;
+only this plugin's own prior entries are replaced. Replaced files are backed up to `*.bak` first
+(`scripts/cx-hooks-merge.py` and `scripts/cx-rules-install.py`; need Python 3, already a hard
+prerequisite below). Plugin-level hooks may still run without the hooks file, but they often do not
+appear in the Hooks settings UI without it.
 
 On first use the gate will detect that `cx` is missing and name the exact bootstrap command to run
 (`bash scripts/cx-bootstrap.sh install`), then walk you through authenticating it.

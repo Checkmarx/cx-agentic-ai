@@ -31,7 +31,7 @@ Report findings (rule_name, severity, line, description). Ask the user whether t
 
 ## Remediation (MCP-only)
 
-For each finding, call **`mcp__Checkmarx__codeRemediation`** with `type: "sast"` and metadata from the scan.
+For each finding, call **`mcp__plugin-cx-devassist-Checkmarx__codeRemediation`** with `type: "sast"` and metadata from the scan.
 
 - **MCP available** → apply `remediation_steps` in order; change only code at/near the problematic line
 - **MCP unavailable** → **STOP.** No manual fixes. Run `/cx-cli-setup` if auth fails; ask developer to **Developer: Reload Window** for MCP
@@ -40,9 +40,9 @@ After fixes, re-scan. Remediate **only in-scope findings** (your changes or the 
 
 ## Skill compliance (mandatory)
 
-**Follow the full skill workflow in `skills/cx-devassist-asca/SKILL.md` exactly — do not skip, abbreviate, or reorder any step.**
+**Invoke and follow `skills/cx-devassist-asca/SKILL.md` exactly as written — as-is, with no paraphrasing, summarizing, or reimplementing its steps inline in this rule or in chat. Do not skip, abbreviate, substitute your own judgment for, or reorder any step.**
 
-The **Step 5 Remediation Summary** is mandatory output — always produce it after remediation completes, even for a single finding:
+The **Step 5 Remediation Summary** is mandatory output — **always** produce and show it to the user **verbatim**, in full, after remediation completes, even for a single finding. Never omit it, shorten it, or fold it into other output:
 
 ```
 Remediation Summary

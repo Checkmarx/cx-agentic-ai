@@ -32,7 +32,7 @@ Report findings (title, severity, line, description). KICS findings are **determ
 
 ## Remediation (MCP-only)
 
-For each finding, call **`mcp__Checkmarx__imageRemediation`** with:
+For each finding, call **`mcp__plugin-cx-devassist-Checkmarx__imageRemediation`** with:
 
 ```json
 {
@@ -54,9 +54,9 @@ If a fix genuinely requires resources outside this file (e.g. a separate KMS key
 
 ## Skill compliance (mandatory)
 
-**Follow the full skill workflow exactly — do not skip, abbreviate, or reorder any step.**
+**Follow this rule's workflow exactly as written — as-is, with no paraphrasing, summarizing, or skipping steps. Do not abbreviate, substitute your own judgment for, or reorder any step (Scan → Report → Remediate via MCP → Re-scan → Step 5 summary).**
 
-The **Step 5 Remediation Summary** is mandatory output — always produce it after remediation completes:
+The **Step 5 Remediation Summary** is mandatory output — **always** produce and show it to the user **verbatim**, in full, after remediation completes, even for a single finding. Never omit it, shorten it, or fold it into other output:
 
 ```
 IaC Remediation Summary

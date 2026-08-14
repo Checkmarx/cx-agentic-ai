@@ -49,7 +49,7 @@ manifest/lockfile → `cx-devassist-sca`. If it is unclear which, ask the user.
   Fall back to a bare `cx` (identical in every shell) only when it is already on PATH.
 - Checkmarx MCP server connected (required for remediation).
 
-> **Remediation is MCP-only.** Every fix MUST come from `mcp__Checkmarx__codeRemediation`. If that tool
+> **Remediation is MCP-only.** Every fix MUST come from `mcp__plugin-cx-devassist-Checkmarx__codeRemediation`. If that tool
 > is not available, you MUST NOT remediate by any other means — no manual edits, no generic or
 > LLM-generated fixes, and do not apply the `remediationAdvise` text yourself. Stop and recover the MCP
 > first (see Flow 2 → Step 2, "If the tool is not available").
@@ -111,6 +111,10 @@ The scan returns a JSON response:
 ```
 
 - **If `scan_details` is empty** — Inform the user the file passed the ASCA security scan with no findings.
+  ASCA may return no findings for files that look like test code (e.g. `*Test.java`, `test_*.py`) even
+  when the same vulnerability pattern would be reported in a non-test file — that behavior comes from the
+  ASCA engine, not from cursor-devassist. The write hook also **fails open** when ASCA is unavailable
+  (engine error, scan timeout), so a missing block does not always mean the code is safe.
 - **If `scan_details` has findings** — Report each finding:
   - `rule_name` — vulnerability type
   - `severity` — Critical / High / Medium / Low
@@ -133,9 +137,9 @@ Perform all steps **completely and autonomously** — no user interaction.
 
 Determine the programming language of the affected file. If unknown, leave `language` empty.
 
-### Step 2 — Call `mcp__Checkmarx__codeRemediation`
+### Step 2 — Call `mcp__plugin-cx-devassist-Checkmarx__codeRemediation`
 
-For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
+For each finding, call the `mcp__plugin-cx-devassist-Checkmarx__codeRemediation` tool:
 
 ```json
 {
@@ -167,8 +171,9 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
      at startup, so the server can't become live in this running session on its own:
 
      > "The Checkmarx remediation MCP isn't connected in this session. Please run **Developer: Reload
-     > Window** (Command Palette) to reload it, then check that `Checkmarx` shows connected in your MCP
-     > settings — then ask me to remediate again. I won't apply a non-Checkmarx fix in the meantime."
+     > Window** (Command Palette) to reload it, then check that **`plugin-cx-devassist-Checkmarx`** shows
+     > connected in your MCP settings — then ask me to remediate again. I won't apply a non-Checkmarx fix
+     > in the meantime."
 
   Then end the remediation flow without modifying any code.
 
@@ -261,22 +266,34 @@ rather than a manual edit or a shell workaround. The finding shape for ASCA is:
 {"FileName": "<file_name from scan>", "Line": <line from scan>, "RuleID": <rule_id from scan>}
 ```
 
-The `--data` value is a JSON document, so it is full of double quotes. **Do not single-quote it**,
-even on PowerShell or bash: Cursor's own command-execution layer can reformat a single-quoted
-argument into a double-quoted one before the real shell runs it, which strips the embedded `"`
-around the JSON keys and sends `cx` invalid JSON (the `'F' looking for beginning of object key
-string` error). Always double-quote the whole value and escape every inner `"` yourself. Use the
-form for **your** shell (full explanation in
-[`../cx-cli-setup/references/shells.md`](../cx-cli-setup/references/shells.md)):
+The `--data` value is a JSON document, so it is full of double quotes. **On PowerShell, use `--%`
+stop-parsing** (preferred — see
+[`../cx-cli-setup/references/shells.md`](../cx-cli-setup/references/shells.md)) — but `--%` only
+stops PowerShell from reparsing the remainder; it still reaches `cx.exe`'s own Windows argv parser,
+which only keeps an embedded `"` when it's backslash-escaped inside one outer quoted region. Wrap
+the whole JSON value in one outer `"..."` and backslash-escape the inner `"` even under `--%` — a
+bare, unquoted value gets every `"` stripped by that parser and sends `cx` invalid JSON. On cmd/bash,
+double-quote the whole value and escape every inner `"` yourself. **Do not single-quote it** on any
+shell: Cursor's own command-execution layer can reformat a single-quoted argument into a
+double-quoted one before the real shell runs it, which strips the embedded `"` around the JSON keys
+and sends `cx` invalid JSON (the `'F' looking for beginning of object key string` error).
+
+**Suppressing more than one finding? Run one `ignore-vulnerability` command per finding, each as
+its own separate Shell tool call — never join two with `;`, `&&`, or `||` on one line.** This is
+especially important with `--%`: it makes PowerShell stop parsing for the *rest of that entire
+line*, so a `;` placed after it is not a statement separator anymore — it and everything following
+(including a second `--%` invocation) get swallowed as literal trailing arguments of the first
+command. Only one process runs; `cx` then fails with `unknown flag: --%` on the smuggled-in second
+command, and that second finding is never actually suppressed.
+
+```powershell
+# PowerShell — preferred: --%, JSON wrapped in one outer quote, inner quotes backslash-escaped
+& "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" --% ignore-vulnerability --scan-type asca --data "{\"FileName\":\"example.py\",\"Line\":38,\"RuleID\":4059}"
+```
 
 ```bash
 # bash / sh — double-quote the whole value, backslash-escape each inner "
 "$HOME/.checkmarx/bin/cx" ignore-vulnerability --scan-type asca --data "{\"FileName\":\"example.py\",\"Line\":38,\"RuleID\":4059}"
-```
-
-```powershell
-# PowerShell — & call operator, double-quote the whole value, double each inner "
-& "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" ignore-vulnerability --scan-type asca --data "{""FileName"":""example.py"",""Line"":38,""RuleID"":4059}"
 ```
 
 ```bat
@@ -299,7 +316,7 @@ form; those are more likely to be blocked by the security gate than to fix a quo
 
 ### Constraints
 
-- **All remediation MUST come from `mcp__Checkmarx__codeRemediation`. Never apply a manual, generic, or
+- **All remediation MUST come from `mcp__plugin-cx-devassist-Checkmarx__codeRemediation`. Never apply a manual, generic, or
   non-MCP fix — if the MCP is unavailable, stop and recover it (Step 2), do not improvise.**
 - Do not prompt the user
 - Do not skip or reorder fix steps

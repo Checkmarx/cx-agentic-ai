@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_HOOKS = os.path.join(_REPO, "plugins", "cx-devassist-cursor", "hooks")
+_HOOKS = os.path.join(_REPO, "plugins", "cursor-devassist", "hooks")
 _CX_CHECK = os.path.join(_HOOKS, "cx_check.py")
 _CX_CHECK_SH = os.path.join(_HOOKS, "cx_check.sh")
 _CX_RUN = os.path.join(_HOOKS, "cx_run.sh")

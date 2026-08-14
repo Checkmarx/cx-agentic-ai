@@ -1,4 +1,4 @@
-"""Tests for cx-devassist-cursor gate deny/allow JSON on stdout."""
+"""Tests for cursor-devassist gate deny/allow JSON on stdout."""
 
 import json
 import os
@@ -8,7 +8,7 @@ import unittest
 
 
 PLUGIN_HOOKS = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "plugins", "cx-devassist-cursor", "hooks")
+    os.path.join(os.path.dirname(__file__), "..", "plugins", "cursor-devassist", "hooks")
 )
 CX_CHECK = os.path.join(PLUGIN_HOOKS, "cx_check.py")
 DENY_PREFIX = "CHECKMARX_HOOK_DENY — MANDATORY agent_message"

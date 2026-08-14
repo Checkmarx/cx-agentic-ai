@@ -25,7 +25,7 @@ import unittest
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CX_CHECK_PATH = os.path.join(
-    _REPO_ROOT, "plugins", "cx-devassist-cursor", "hooks", "cx_check.py"
+    _REPO_ROOT, "plugins", "cursor-devassist", "hooks", "cx_check.py"
 )
 
 _spec = importlib.util.spec_from_file_location("cx_check_cursor_pathnorm", _CX_CHECK_PATH)
@@ -42,7 +42,7 @@ def _to_gitbash_posix(windows_path):
 @unittest.skipUnless(os.name == "nt", "Git-Bash POSIX path aliasing is Windows-only")
 class TestNormalizePathGitBashDriveAlias(unittest.TestCase):
     def test_posix_and_native_forms_normalize_equal(self):
-        native = r"C:\AST\Repos\cx-agentic-ai\plugins\cx-devassist-cursor\scripts\cx-bootstrap.sh"
+        native = r"C:\AST\Repos\cx-agentic-ai\plugins\cursor-devassist\scripts\cx-bootstrap.sh"
         posix = _to_gitbash_posix(native)
         self.assertEqual(cx_check._normalize_path(native), cx_check._normalize_path(posix))
 
