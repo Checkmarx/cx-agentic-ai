@@ -1,0 +1,5 @@
+# Pinned ast-cli GitHub release tag for bootstrap install/upgrade (all OS).
+# Format: a single non-comment line with the exact tag name from GitHub releases.
+# Synced fail-closed fallback: scripts/cx-bootstrap.sh and scripts/cx-asset-resolver.sh
+# (search: CX_RELEASE_TAG).
+2.3.59-Cursor-CLI
