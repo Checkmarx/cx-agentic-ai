@@ -1,4 +1,4 @@
-"""Cross-shell tests for the cx-devassist-cursor plugin: hooks/cx_shell.py plus the carve-outs in
+"""Cross-shell tests for the cursor-devassist plugin: hooks/cx_shell.py plus the carve-outs in
 hooks/cx_check.py that depend on it.
 
 Why this file exists. Cursor's default shell on Windows is PowerShell, and the plugin's own deny
@@ -30,11 +30,11 @@ import unittest.mock
 
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_HOOKS_DIR = os.path.join(_REPO_ROOT, "plugins", "cx-devassist-cursor", "hooks")
+_HOOKS_DIR = os.path.join(_REPO_ROOT, "plugins", "cursor-devassist", "hooks")
 _CX_CHECK_PATH = os.path.join(_HOOKS_DIR, "cx_check.py")
 _CX_CHECK_SH = os.path.join(_HOOKS_DIR, "cx_check.sh")
 _BOOTSTRAP = os.path.join(
-    _REPO_ROOT, "plugins", "cx-devassist-cursor", "scripts", "cx-bootstrap.sh")
+    _REPO_ROOT, "plugins", "cursor-devassist", "scripts", "cx-bootstrap.sh")
 
 # Private module names so this file can never collide in sys.modules with the sibling test modules
 # that load the same (or the Claude plugin's) cx_check.py.
@@ -170,10 +170,17 @@ class TestShellRendering(unittest.TestCase):
     def test_render_with_json_data_per_shell(self):
         payload = '{"packageName":"lodash"}'
         args = "ignore-vulnerability --scan-type sca"
+        # PowerShell goes through --% stop-parsing, so the JSON reaches cx.exe's own Windows argv
+        # parser (CommandLineToArgvW) as literal text: it only survives backslash-escaped inside
+        # ONE outer quoted region — doubled quotes ("") get silently stripped by that parser
+        # instead (verified via ctypes.windll.shell32.CommandLineToArgvW), corrupting the JSON.
         ps = cx_shell.render_with_json_data(cx_shell.POWERSHELL, _FAKE_CX_WIN, args, payload)
         self.assertIn("ignore-vulnerability", ps)
-        self.assertIn('"{""packageName"":""lodash""}"', ps)
+        self.assertIn("--%", ps)
+        self.assertIn('"{\\"packageName\\":\\"lodash\\"}"', ps)
         self.assertTrue(ps.startswith("& "), ps)
+        # cmd/bash don't use --%, so quote_json_data_for_cursor()'s Cursor-reformatting
+        # compensation applies instead (doubled quotes for cmd, backslash-escaped for bash/sh).
         cmd = cx_shell.render_with_json_data(cx_shell.CMD, _FAKE_CX_WIN, args, payload)
         self.assertIn('"{""packageName"":""lodash""}"', cmd)
         bash = cx_shell.render_with_json_data(cx_shell.BASH, _FAKE_CX_WIN, args, payload)

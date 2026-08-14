@@ -26,10 +26,10 @@ import unittest
 
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_HOOKS_DIR = os.path.join(_REPO_ROOT, "plugins", "cx-devassist-cursor", "hooks")
+_HOOKS_DIR = os.path.join(_REPO_ROOT, "plugins", "cursor-devassist", "hooks")
 CX_RUN = os.path.join(_HOOKS_DIR, "cx_run.sh")
 CX_CHECK_SH = os.path.join(_HOOKS_DIR, "cx_check.sh")
-BOOTSTRAP = os.path.join(_REPO_ROOT, "plugins", "cx-devassist-cursor", "scripts", "cx-bootstrap.sh")
+BOOTSTRAP = os.path.join(_REPO_ROOT, "plugins", "cursor-devassist", "scripts", "cx-bootstrap.sh")
 
 _BASH = shutil.which("bash")
 _SH = shutil.which("sh") or _BASH

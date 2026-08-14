@@ -27,13 +27,13 @@
     ],
     "preToolUse": [
       {
-        "matcher": "Write|StrReplace|EditNotebook",
+        "matcher": "Write|StrReplace|Edit|MultiEdit|EditNotebook",
         "command": "sh \"__CURSOR_PLUGIN_ROOT__/hooks/cx_check.sh\"",
         "timeout": 45,
         "failClosed": true
       },
       {
-        "matcher": "Write|StrReplace|EditNotebook",
+        "matcher": "Write|StrReplace|Edit|MultiEdit|EditNotebook",
         "command": "sh \"__CURSOR_PLUGIN_ROOT__/hooks/cx_run.sh\" hooks cursor-before-file-write",
         "timeout": 60,
         "failClosed": true

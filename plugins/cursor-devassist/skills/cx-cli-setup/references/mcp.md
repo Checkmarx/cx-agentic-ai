@@ -1,14 +1,17 @@
 # The Checkmarx Remediation MCP (bundled)
 
 The `cx-devassist-asca` / `cx-devassist-sca` skills remediate findings via the **Checkmarx Security
-MCP** (`mcp__Checkmarx__codeRemediation` / `mcp__Checkmarx__packageRemediation`). The plugin declares
-this server in `mcp.json`, so Cursor starts it **automatically** whenever the plugin is installed under
-`~/.cursor/plugins/local/` — there is **no manual registration step**. The server command is the
-native **`cx mcp bridge`** subcommand, which reads the credential from the cx config, derives the
-realm-scoped URL from its JWT, and proxies to the remote MCP over Streamable HTTP. Whatever Phase 2
-established — an API key (Path A) or an OAuth refresh token (Path B) — is what the bridge uses, so a
-single sign-in covers both the CLI and the MCP. Nothing is pasted into chat. (Requires a `cx` build
-that includes `cx mcp bridge` — verify with `cx mcp bridge --help`.)
+MCP** (`mcp__plugin-cx-devassist-Checkmarx__codeRemediation` /
+`mcp__plugin-cx-devassist-Checkmarx__packageRemediation`). The plugin declares this server in
+`mcp.json` under the key `Checkmarx`, so Cursor starts it **automatically** whenever the plugin is
+installed under `~/.cursor/plugins/local/` — there is **no manual registration step**. In Cursor's
+MCP settings panel the server appears as **`plugin-cx-devassist-Checkmarx`** (plugin id +
+`mcp.json` key). The server command is the native **`cx mcp bridge`** subcommand, which reads the
+credential from the cx config, derives the realm-scoped URL from its JWT, and proxies to the remote
+MCP over Streamable HTTP. Whatever Phase 2 established — an API key (Path A) or an OAuth refresh
+token (Path B) — is what the bridge uses, so a single sign-in covers both the CLI and the MCP.
+Nothing is pasted into chat. (Requires a `cx` build that includes `cx mcp bridge` — verify with
+`cx mcp bridge --help`.)
 
 ## Reloading the MCP — the single source of truth
 
@@ -18,15 +21,16 @@ up the change. **Developer: Reload Window** (Command Palette) re-spawns it again
 and credential — no full application restart needed. Everywhere else in this skill that says "reload
 the MCP" means run **Developer: Reload Window**.
 
-> "The Checkmarx MCP is bundled with the plugin. Run **Developer: Reload Window** to re-spawn it, then
-> check your MCP settings/panel to confirm `Checkmarx` shows connected. After that it connects
-> automatically on every launch — no registration and no re-auth."
+> "The Checkmarx MCP is bundled with the plugin. Run **Developer: Reload Window** to re-spawn it,
+> then check your MCP settings/panel to confirm **`plugin-cx-devassist-Checkmarx`** shows connected.
+> After that it connects automatically on every launch — no registration and no re-auth."
 
 ## Verify
 
-Open Cursor's MCP settings (or the equivalent status panel) and check the `Checkmarx` server's status.
+Open Cursor's MCP settings (or the equivalent status panel) and check the
+**`plugin-cx-devassist-Checkmarx`** server's status.
 
-- **`Checkmarx` shows Connected** → remediation is ready.
+- **`plugin-cx-devassist-Checkmarx` shows Connected** → remediation is ready.
 - **Not connected?** The bridge needs a valid credential to derive the URL and authenticate. Confirm
   `cx auth validate` passes (Phases 2–3) and `cx mcp bridge --help` works, then run **Developer: Reload
   Window** and re-check the MCP status. If still not connected, for dev/on-prem hosts whose
@@ -45,3 +49,14 @@ Open Cursor's MCP settings (or the equivalent status panel) and check the `Check
 > re-authenticating is picked up automatically — there is no re-register step. If a request comes back
 > unauthorized (e.g. the token rotated on a fresh `cx auth login`), the bridge re-reads the credential
 > and retries, so a rotated token self-heals on the next remediation call.
+
+## Discovering MCP tools
+
+If a remediation call fails with "tool not found", use `GetMcpTools` with pattern `Checkmarx` or
+`plugin-cx-devassist` to list the live tool names for this session. The expected names are:
+
+| Tool | Full name |
+|------|-----------|
+| SAST / ASCA fix | `mcp__plugin-cx-devassist-Checkmarx__codeRemediation` |
+| SCA / package fix | `mcp__plugin-cx-devassist-Checkmarx__packageRemediation` |
+| IaC / image fix | `mcp__plugin-cx-devassist-Checkmarx__imageRemediation` |

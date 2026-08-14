@@ -51,7 +51,7 @@ code → `cx-devassist-asca`. If it is unclear which, ask the user.
   Fall back to a bare `cx` (identical in every shell) only when it is already on PATH.
 - Checkmarx MCP server connected (required for remediation).
 
-> **Remediation is MCP-only.** Every fix MUST come from `mcp__Checkmarx__packageRemediation`. If that
+> **Remediation is MCP-only.** Every fix MUST come from `mcp__plugin-cx-devassist-Checkmarx__packageRemediation`. If that
 > tool is not available, you MUST NOT remediate by any other means — no manual edits to the manifest,
 > no generic or LLM-guessed version bumps. Stop and recover the MCP first (see Flow 2 → Step 2).
 
@@ -135,9 +135,9 @@ Triggered after the user confirms in Flow 1, or when SCA findings need fixing. P
 For each package to remediate, collect `PackageManager`, `PackageName`, `PackageVersion`, and the
 `Vulnerabilities` (CVE list) from the scan.
 
-### Step 2 — Call `mcp__Checkmarx__packageRemediation`
+### Step 2 — Call `mcp__plugin-cx-devassist-Checkmarx__packageRemediation`
 
-For each finding, call the `mcp__Checkmarx__packageRemediation` tool, passing the affected package's
+For each finding, call the `mcp__plugin-cx-devassist-Checkmarx__packageRemediation` tool, passing the affected package's
 details. **The tool's own input schema (shown when you invoke it) is the source of truth for the exact
 field names** — provide at minimum the package manager, name, version, and the CVE(s):
 
@@ -169,8 +169,9 @@ field naming.
      startup, so it can't become live in this running session on its own):
 
      > "The Checkmarx remediation MCP isn't connected in this session. Please run **Developer: Reload
-     > Window** (Command Palette) to reload it, then check that `Checkmarx` shows connected in your MCP
-     > settings — then ask me to remediate again. I won't apply a non-Checkmarx fix in the meantime."
+     > Window** (Command Palette) to reload it, then check that **`plugin-cx-devassist-Checkmarx`** shows
+     > connected in your MCP settings — then ask me to remediate again. I won't apply a non-Checkmarx fix
+     > in the meantime."
 
   Then end the remediation flow without modifying any dependency.
 
@@ -183,6 +184,18 @@ field naming.
 - Regenerate the lockfile if the ecosystem requires it (e.g. `npm install`, `pip install -r`,
   `go mod tidy`) only when the user's workflow expects it; otherwise note that a lockfile refresh is
   needed.
+
+**No fixed version available?** Check the `packageRemediation` response itself for a suggested
+**alternative package** (a different, non-vulnerable library recommended as a drop-in replacement) —
+apply it the same way as a version upgrade if one is present, tracking it the same way. **Never look
+for an alternative by any other means — no web search, no searching a registry (npm/PyPI/Maven/…)
+yourself, no relying on training-data familiarity with "similar" packages.** The MCP response is the
+only source of truth for whether a fixed version or alternative exists; if it says neither exists,
+neither exists. If the response offers **no fixed version and no alternative package**, tell the user
+plainly which package has no available fix ("`<PackageName>@<PackageVersion>` has no fixed version or
+suggested alternative from Checkmarx — I'm suppressing this finding so it isn't repeatedly blocked"),
+then suppress it via `cx ignore-vulnerability` (see Suppression, below) and record it in the Step 5
+summary as suppressed, not as a TODO.
 
 ### Step 4 — Re-scan
 
@@ -220,19 +233,25 @@ File:      [FilePath]
 Pre-existing findings (NOT fixed — outside the scope of this remediation):
 - [package@version] — [CVE list] — [severity]
 - (omit this section entirely when the re-scan reports none)
+
+Suppressed (no fixed version or alternative package available from Checkmarx):
+- [package@version] — [CVE list] — [severity]
+- (omit this section entirely when none were suppressed)
 ```
 
 **Final status:**
 - ✅ All fixed: "SCA remediation completed. Affected packages upgraded/removed; they are clean on
   re-scan. Any pre-existing findings in packages I did not change are listed above, unfixed."
-- ⚠️ Partially fixed: "SCA remediation partially completed — manual review required (e.g. no fixed
-  version exists / breaking upgrade). TODOs noted."
+- ⚠️ Partially fixed: "SCA remediation partially completed — manual review required (e.g. a breaking
+  upgrade needs manual testing). TODOs noted." (A package with no fixed version *and* no alternative —
+  suppressed per Step 3 — is reported in the summary above, not treated as a TODO here.)
 - ❌ Failed: "SCA remediation failed. Reason: [summary]. Unresolved packages listed above."
 
-### Suppression (only when explicitly requested and justified)
+### Suppression
 
-If the user decides to accept/ignore a specific finding rather than fix it, use cx's suppression rather
-than a manual edit:
+Two paths lead here: the user explicitly asks to accept/ignore a finding instead of fixing it, or Step
+3 above determined no fixed version or alternative package exists. Either way, use cx's suppression
+rather than a manual edit:
 
 The `--data` value is a JSON document, so it is full of double quotes. **Do not single-quote it**,
 even on PowerShell or bash: Cursor's own command-execution layer can reformat a single-quoted
@@ -256,14 +275,25 @@ every inner `"` yourself. Use the form for **your** shell (full explanation in
 "%LOCALAPPDATA%\Checkmarx\cx\cx.exe" ignore-vulnerability --scan-type sca --data "{""key"":""value""}"
 ```
 
+**Suppressing more than one package? Run one `ignore-vulnerability` command per package, each as its
+own separate Shell tool call — never join two with `;`, `&&`, or `||` on one line.** The gate's
+carve-out for this command only recognizes a single, bare invocation; a `;`-joined pair is real
+shell chaining and gets denied outright (and on PowerShell with `--%`, per `cx-devassist-asca`'s
+Suppression section, it can silently swallow the second command instead of denying it — either way,
+one command per call, always).
+
 If the command still fails after using the exact form above for your shell, **stop and report it**
 — do not retry by re-wrapping it in `bash -c`, `cmd /c`, backtick-escaping, or any other improvised
 form; those are more likely to be blocked by the security gate than to fix a quoting problem.
 
 ### Constraints
 
-- **All remediation MUST come from `mcp__Checkmarx__packageRemediation`. Never apply a manual, generic,
+- **All remediation MUST come from `mcp__plugin-cx-devassist-Checkmarx__packageRemediation`. Never apply a manual, generic,
   or non-MCP fix — if the MCP is unavailable, stop and recover it (Step 2), do not improvise.**
+- **Never search the web (or any registry/package index) to find a fix or an alternative package.**
+  The only source of truth for "is there a fixed version or alternative" is the
+  `packageRemediation` response itself — if it offers neither, suppress per Step 3, do not go
+  looking for one yourself.
 - Do not prompt the user during Flow 2.
 - Only modify the dependency entries corresponding to the identified findings.
 - Insert clear `TODO` comments where a finding cannot be safely auto-remediated.

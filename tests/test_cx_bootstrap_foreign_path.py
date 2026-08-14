@@ -8,9 +8,9 @@ import tempfile
 import unittest
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_CX_CHECK = os.path.join(_REPO, "plugins", "cx-devassist-cursor", "hooks", "cx_check.py")
-_CX_CHECK_SH = os.path.join(_REPO, "plugins", "cx-devassist-cursor", "hooks", "cx_check.sh")
-_CX_RUN = os.path.join(_REPO, "plugins", "cx-devassist-cursor", "hooks", "cx_run.sh")
+_CX_CHECK = os.path.join(_REPO, "plugins", "cursor-devassist", "hooks", "cx_check.py")
+_CX_CHECK_SH = os.path.join(_REPO, "plugins", "cursor-devassist", "hooks", "cx_check.sh")
+_CX_RUN = os.path.join(_REPO, "plugins", "cursor-devassist", "hooks", "cx_run.sh")
 _SH = shutil.which("sh") or shutil.which("bash")
 
 _spec = importlib.util.spec_from_file_location("cx_check_foreign_boot", _CX_CHECK)
@@ -21,7 +21,7 @@ _spec.loader.exec_module(cx_check)
 class TestForeignInstallBootstrapPath(unittest.TestCase):
     def test_existing_foreign_scripts_cx_bootstrap_is_trusted(self):
         with tempfile.TemporaryDirectory() as tmp:
-            scripts = os.path.join(tmp, "cx-devassist-cursor", "scripts")
+            scripts = os.path.join(tmp, "cursor-devassist", "scripts")
             os.makedirs(scripts)
             foreign_boot = os.path.join(scripts, "cx-bootstrap.sh")
             with open(foreign_boot, "w", encoding="utf-8") as f:
@@ -39,7 +39,7 @@ class TestForeignInstallBootstrapPath(unittest.TestCase):
     @unittest.skipUnless(_SH, "sh required")
     def test_cx_check_sh_allows_foreign_bootstrap_before_python(self):
         with tempfile.TemporaryDirectory() as tmp:
-            scripts = os.path.join(tmp, "cx-devassist-cursor", "scripts")
+            scripts = os.path.join(tmp, "cursor-devassist", "scripts")
             os.makedirs(scripts)
             foreign_boot = os.path.join(scripts, "cx-bootstrap.sh")
             with open(foreign_boot, "w", encoding="utf-8") as f:
@@ -69,7 +69,7 @@ class TestForeignInstallBootstrapPath(unittest.TestCase):
     @unittest.skipUnless(_SH, "sh required")
     def test_cx_run_allows_foreign_bootstrap_when_cx_absent(self):
         with tempfile.TemporaryDirectory() as tmp:
-            scripts = os.path.join(tmp, "cx-devassist-cursor", "scripts")
+            scripts = os.path.join(tmp, "cursor-devassist", "scripts")
             os.makedirs(scripts)
             foreign_boot = os.path.join(scripts, "cx-bootstrap.sh")
             with open(foreign_boot, "w", encoding="utf-8") as f:

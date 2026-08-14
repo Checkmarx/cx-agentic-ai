@@ -330,7 +330,8 @@ def has_chaining_outside_quotes(command):
     function's docstring for why. Only the ignore-vulnerability carve-out uses this."""
     if not isinstance(command, str):
         return True
-    return has_chaining(command_skeleton(command))
+    # PowerShell --%: only the prefix is PowerShell-parsed; the suffix is passed through literally.
+    return has_chaining(command_skeleton(strip_stop_parsing(command)))
 
 
 def has_unsafe_redirect_outside_quotes(command):
@@ -338,7 +339,7 @@ def has_unsafe_redirect_outside_quotes(command):
     that function's docstring for why. Only the ignore-vulnerability carve-out uses this."""
     if not isinstance(command, str):
         return True
-    return has_unsafe_redirect(command_skeleton(command))
+    return has_unsafe_redirect(command_skeleton(strip_stop_parsing(command)))
 
 
 def normalize(command):
@@ -521,13 +522,50 @@ def render_invocation(shell, exe, args="", suppress_stdout=False):
     return " ".join(parts)
 
 
+def strip_stop_parsing(command):
+    """Return the PowerShell-parsed prefix of `command` — everything before `--%`.
+
+    After `--%`, PowerShell passes the remainder through to the native executable without
+    re-parsing quotes or metacharacters. Carve-out safety checks must run only on the prefix."""
+    if not isinstance(command, str):
+        return command
+    idx = command.find("--%")
+    if idx == -1:
+        return command
+    return command[:idx].rstrip()
+
+
+def strip_stop_parsing_flag(rest):
+    """Remove a leading `--%` token from the remainder after the executable (PowerShell only)."""
+    if not isinstance(rest, str):
+        return rest
+    return re.sub(r"^\s*--%\s+", "", rest, count=1)
+
+
 def render_with_json_data(shell, exe, command_args, json_value, suppress_stdout=False):
     """One invocation where `json_value` is passed as a single `--data` argument — e.g.
     `cx ignore-vulnerability --scan-type asca --data "<json>"`. `command_args` is everything before
-    `--data` (typically `ignore-vulnerability --scan-type asca`). Uses
-    quote_json_data_for_cursor() — not the generic quote_arg() — because this command is always
-    run by Cursor's agent, and Cursor's own command-reformatting behavior needs the Cursor-specific
-    escaping to survive intact in PowerShell, cmd, and bash/sh (see that function's docstring)."""
+    `--data` (typically `ignore-vulnerability --scan-type asca`).
+
+    On PowerShell, uses `--%` stop-parsing so PowerShell (and Cursor's own single-to-double-quote
+    reformatting) leaves the remainder alone — but that remainder still reaches the target exe's
+    OWN Windows argv parser (CommandLineToArgvW), which only preserves an embedded `"` when it is
+    backslash-escaped inside one outer quoted region. Sending the JSON bare/unquoted after `--%`
+    (as this used to do) gets every `"` silently stripped by that parser, corrupting
+    `{"FileName":"x.py",...}` into unquoted-key `{FileName:x.py,...}` and producing a `looking for
+    beginning of object key string`-style failure on the cx side — verified empirically via
+    `ctypes.windll.shell32.CommandLineToArgvW`, and it matches exactly how
+    `cursorplugin.IgnoreVulnerabilityCommand` in ast-cli already renders this on Windows. So: wrap
+    once in an outer `"..."` and backslash-escape the inner `"`, same as that Go code.
+
+    On cmd/bash, uses quote_json_data_for_cursor() (see that function's docstring) — a different,
+    unrelated compensation for Cursor's own single-to-double-quote reformatting on the non-`--%`
+    path; leave that one alone."""
+    shell = _shell_or_default(shell)
+    if shell == POWERSHELL:
+        escaped = json_value.replace('"', '\\"')
+        data_args = '--% {0} --data "{1}"'.format(command_args.strip(), escaped)
+        return render_invocation(shell, exe, data_args, suppress_stdout=suppress_stdout)
     data_args = "{0} --data {1}".format(command_args.strip(), quote_json_data_for_cursor(shell, json_value))
     return render_invocation(shell, exe, data_args, suppress_stdout=suppress_stdout)
 

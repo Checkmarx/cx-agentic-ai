@@ -63,18 +63,26 @@ above), which exists so `cx auth login` cannot leak its token.
 ## JSON arguments
 
 `cx ignore-vulnerability --data <json>` takes a JSON document as one argument, and JSON is full of
-double quotes. **Do not use the single-quote form here even on PowerShell / bash**, even though
-that's the normal literal-string convention for those shells: Cursor's own command-execution layer
-can reformat a single-quoted argument into a double-quoted one before the real shell runs it
-(observed on Windows), which strips the embedded `"` around the JSON keys and sends `cx` invalid
-JSON (`{FileName:...}` instead of `{"FileName":...}` — the `'F' looking for beginning of object key
-string` error). Always double-quote the whole value and escape every inner `"` yourself, the same
-way on every shell:
+double quotes. **On PowerShell, prefer `--%` stop-parsing** — it tells PowerShell (and stops Cursor's
+own single-to-double-quote reformatting) from touching the remainder at all. But `--%` only changes
+what *PowerShell* does with the text — the remainder still reaches `cx.exe`'s own Windows argv parser
+(`CommandLineToArgvW`), which only preserves an embedded `"` when it's **backslash-escaped inside one
+outer quoted region**. Sending the JSON bare, with no outer quotes at all, gets every `"` silently
+stripped by that parser — `{"FileName":"Demo.java",...}` becomes `{FileName:Demo.java,...}`, invalid
+JSON (verified with `ctypes.windll.shell32.CommandLineToArgvW`). Always wrap the whole value in one
+outer `"..."` and backslash-escape the inner `"`, even under `--%`:
 
 ```powershell
-# PowerShell — double-quote the whole value, double each inner "
-& "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" ignore-vulnerability --scan-type sca --data "{""packageName"":""lodash""}"
+# PowerShell — preferred: --%, JSON wrapped in one outer quote, inner quotes backslash-escaped
+& "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" --% ignore-vulnerability --scan-type asca --data "{\"FileName\":\"Demo.java\",\"Line\":5,\"RuleID\":1027}"
 ```
+
+When `--%` is not an option (cmd.exe, bash/sh), double-quote the whole value and escape every inner
+`"` yourself. **Do not use the single-quote form even on PowerShell / bash** — Cursor's own
+command-execution layer can reformat a single-quoted argument into a double-quoted one before the real
+shell runs it (observed on Windows), which strips the embedded `"` around the JSON keys and sends `cx`
+invalid JSON (`{FileName:...}` instead of `{"FileName":...}` — the `'F' looking for beginning of
+object key string` error).
 
 ```bat
 :: cmd.exe — double-quote the whole value, double each inner "
@@ -84,6 +92,13 @@ way on every shell:
 ```bash
 # bash / sh — double-quote the whole value, backslash-escape each inner "
 "$HOME/.checkmarx/bin/cx" ignore-vulnerability --scan-type sca --data "{\"packageName\":\"lodash\"}"
+```
+
+**Fallback on PowerShell** when `--%` cannot be used — double-quote the whole value and double each
+inner `"`:
+
+```powershell
+& "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" ignore-vulnerability --scan-type sca --data "{""packageName"":""lodash""}"
 ```
 
 ### @file syntax (preferred when inline JSON still fails)
@@ -126,6 +141,27 @@ Remove-Item "$env:TEMP\cx-cli.zip"
 
 These are multi-statement setup commands, not `cx` commands, so run them in a terminal yourself rather
 than through the gated Shell tool — the gate only admits **bare, single** commands while it is blocking.
+
+## Check a directory exists (project-scope hook install)
+
+Used by `/cx-cli-setup` Step 0 to validate a developer-supplied project path before calling
+`install-hooks.sh`. Prints nothing on success/failure by itself — check the command's exit status
+(bash/sh) or `$?`/boolean result (PowerShell, cmd.exe):
+
+```powershell
+# PowerShell
+Test-Path -Path "<path>" -PathType Container
+```
+
+```bat
+:: cmd.exe
+if exist "<path>\" (echo yes) else (echo no)
+```
+
+```bash
+# bash / sh
+[ -d "<path>" ] && echo yes || echo no
+```
 
 ## Paths containing spaces
 

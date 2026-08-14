@@ -3,7 +3,7 @@ before any gated tool call runs. Fail-closed: if cx is missing, unrunnable, or b
 minimum version, every preToolUse call (shell commands, file write/edit/create) is BLOCKED —
 even offline. The only escape from the block is running the plugin's own bundled bootstrap.
 
-This gate runs for Cursor preToolUse (Write/StrReplace/EditNotebook) and the native
+This gate runs for Cursor preToolUse (Write/StrReplace/Edit/MultiEdit/EditNotebook) and the native
 beforeShellExecution/beforeMCPExecution hooks (see hooks/hooks.json); it governs
 whether the security TOOLING ITSELF is usable, not whether a specific ASCA/SCA finding should
 block a write. That distinction lives in stage 2 (hooks/cx_run.sh -> `cx hooks
@@ -1238,11 +1238,12 @@ def _matches_bare_or_resolved_cx_subcommand(command, subcommand_pattern):
     Token extraction is cx_shell.leading_token(), so ALL THREE quoting styles a shell may use for the
     path count: `"…"` (bash/cmd/PowerShell), `'…'` (PowerShell's literal form — previously
     unrecognized, which denied every single-quoted `& 'C:\\…\\cx.exe' auth login`), and bare."""
-    if re.match(r"^\s*cx\s+" + subcommand_pattern, command):
+    if re.match(r"^\s*cx(?:\s+--%)?\s+" + subcommand_pattern, command):
         return True
     leading, rest = cx_shell.leading_token(command)
     if leading is None or leading == "cx":
         return False
+    rest = cx_shell.strip_stop_parsing_flag(rest)
     if not re.match(r"^\s+" + subcommand_pattern, rest):
         return False
     return _is_trusted_cx_exe_path(leading)
