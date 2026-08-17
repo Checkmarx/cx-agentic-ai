@@ -75,7 +75,7 @@ For more details **→ [plugins/copilot-devassist/README.md](plugins/copilot-dev
 
 ## gemini-cli-devassist
 
-**→ [plugins/gemini-cli-devassist/README.md](plugins/gemini-cli-devassist/README.md)**
+**→ [docs/gemini-cli-devassist.md](docs/gemini-cli-devassist.md)**
 
 A fail-closed security gate for [Gemini CLI](https://github.com/google-gemini/gemini-cli). Before
 Gemini creates or edits a file, the Checkmarx `cx` CLI scans the proposed content. Real vulnerabilities
@@ -85,12 +85,13 @@ trusted to run. Findings are remediated through the bundled Checkmarx MCP server
 **Reach for this when** you want the check to be automatic and non-optional rather than something
 someone remembers to ask for.
 
-For more details **→ [plugins/gemini-cli-devassist/README.md](plugins/gemini-cli-devassist/README.md)**
+For more details **→ [docs/gemini-cli-devassist.md](docs/gemini-cli-devassist.md)**
 
-Install from the extension subdirectory (not the monorepo root):
+This extension lives at the repository root (`gemini-extension.json`, `GEMINI.md`, `hooks/`,
+`scripts/`, `config/`, `skills/`), since Gemini CLI installs extensions from the root of a repo:
 
 ```
-gemini extensions install "C:\path\to\cx-agentic-ai\plugins\gemini-cli-devassist"
+gemini extensions install "C:\path\to\cx-agentic-ai"
 ```
 
 

@@ -71,14 +71,14 @@ unauthenticated, the gate denies with a clear, actionable message pointing at `/
 
 ## Plugin structure
 
-> The extension manifest, `gemini-extension.json`, lives at the root of the extension folder
-> (inside this directory) — so that when installed/linked under `~/.gemini/extensions/cx-devassist`,
-> the manifest is automatically discovered. All paths within the manifest and the hooks config
-> resolve relative to `${extensionPath}` (the root of the installed extension).
+> The extension manifest, `gemini-extension.json`, lives at the **repository root** — so that when
+> installed/linked under `~/.gemini/extensions/cx-devassist`, the manifest is automatically discovered.
+> All paths within the manifest and the hooks config resolve relative to `${extensionPath}` (the root
+> of the installed extension).
 
 ```
-plugins/gemini-cli-devassist/
-├── README.md
+cx-agentic-ai/                   # repo root — also the extension root
+├── gemini-extension.json
 ├── GEMINI.md                    # extension context — hooks vs skills routing (loaded every session)
 ├── config/
 │   └── cx-onboarding.properties # OPTIONAL admin pre-fill of Checkmarx One URL + tenant (onboarding)
@@ -158,25 +158,25 @@ numeric floor in `scripts/cx-min-version`; the real capability decision is a run
 ## Installation
 
 Gemini CLI installs extensions from a Git repository or a **local directory that contains
-`gemini-extension.json` at its root**. In this monorepo the extension lives in
-`plugins/gemini-cli-devassist/` — installing the repository root will **not** load hooks or skills.
+`gemini-extension.json` at its root**. `gemini-extension.json` lives at the root of this monorepo,
+so install/link the repository root directly.
 
-**From GitHub** (use `--path` when your Gemini CLI version supports it):
-
-```
-gemini extensions install https://github.com/Checkmarx/cx-agentic-ai.git --path plugins/gemini-cli-devassist
-```
-
-**Local development** (recommended — point at the extension folder, not the monorepo root):
+**From GitHub**:
 
 ```
-gemini extensions install "C:\path\to\cx-agentic-ai\plugins\gemini-cli-devassist"
+gemini extensions install https://github.com/Checkmarx/cx-agentic-ai.git
+```
+
+**Local development**:
+
+```
+gemini extensions install "C:\path\to\cx-agentic-ai"
 ```
 
 Or link for live iteration:
 
 ```
-gemini extensions link "C:\path\to\cx-agentic-ai\plugins\gemini-cli-devassist"
+gemini extensions link "C:\path\to\cx-agentic-ai"
 ```
 
 Restart Gemini CLI (or run `/extensions reload`) so hooks, MCP, and skills are picked up. Then verify:
@@ -229,13 +229,13 @@ itself or its credentials/logs under `~/.checkmarx/`; remove those manually if a
 1. **UTF-8 BOM in `SKILL.md`** — if `gemini extensions list` shows `cx-devassist` with hooks/MCP
    but **no "Agent skills"**, frontmatter could not be parsed. Re-save `skills/*/SKILL.md` as
    UTF-8 **without BOM** (must start with `---`).
-2. **Wrong install path** — install from `plugins/gemini-cli-devassist/`, not the monorepo root
-   (see [Installation](#installation)).
+2. **Wrong install path** — install from the repository root, which is where `gemini-extension.json`
+   lives (see [Installation](#installation)).
 3. Reload — `/extensions reload` then `/skills reload`.
 
 **Vulnerable code writes are not blocked** — Gemini CLI may invoke `WriteFile` (not `write_file`).
 If hooks were installed from the wrong path, or the matcher omitted `WriteFile`, the scanner never
-runs. Reinstall the extension from `plugins/gemini-cli-devassist/` and retry; the hook matchers now
+runs. Reinstall the extension from the repository root and retry; the hook matchers now
 include `WriteFile|write_file|write_.*|replace`.
 
 **Windows file lock during update / uninstall** — if `gemini extensions update`/`uninstall` fails
@@ -276,5 +276,5 @@ raises into the gate, and `CX_LOG_DISABLE=1` turns it off.
 
 ## License
 
-Apache 2.0 — see [LICENSE](../../LICENSE) at the repo root, which governs this plugin along with the
-rest of [Checkmarx Agentic AI](../../README.md).
+Apache 2.0 — see [LICENSE](../LICENSE) at the repo root, which governs this plugin along with the
+rest of [Checkmarx Agentic AI](../README.md).
