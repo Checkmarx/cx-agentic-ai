@@ -12,6 +12,9 @@
 *.yml           text eol=lf
 *.md            text eol=lf
 plugins/cx-devassist/scripts/cx-min-version text eol=lf
+scripts/cx-min-version text eol=lf
+*.properties    text eol=lf
+**/SKILL.md     text eol=lf
 
 # Binary assets must never be EOL-normalized.
 *.png  binary

@@ -282,8 +282,15 @@ def _cx_bash_token():
 def _cx_recovery_command_str(args):
     """A ready-to-run `cx auth …` / `cx configure …` recovery command using the gate's resolved cx
     (absolute path when cx isn't yet on PATH). Gemini CLI's `run_shell_command` tool is a single
-    cross-platform tool (unlike Copilot CLI's separate powershell/bash tool split), so the plain
-    bash-style form is used on every OS — no PowerShell call-operator special case."""
+    cross-platform tool, but on Windows it still executes via PowerShell, which requires the `&`
+    call operator to invoke a quoted path (a bare quoted string is parsed as an expression, not a
+    command — see _is_powershell_auth_recovery_command, which already allow-lists this exact form).
+    Emit the PowerShell form there; bash-style everywhere else (matches Copilot CLI's split)."""
+    if os.name == "nt":
+        exe = _cx_exe()
+        if os.path.isabs(exe):
+            path_token = '"{0}"'.format(exe.replace("\\", "/"))
+            return "& {0} {1} 1>$null".format(path_token, args)
     return "{0} {1}".format(_cx_bash_token(), args)
 
 
@@ -956,8 +963,14 @@ def _is_powershell_auth_recovery_command(hook_input):
     Bash tool), so we handle the PowerShell form here instead.
     Security: pinned to the gate's OWN resolved cx (_cx_exe) — never an attacker-chosen path; no
     other chaining tokens (`;`, `|`, backtick, `$(`, newline) are allowed after the call operator
-    and null-redirect are stripped."""
-    if _tool_name(hook_input).lower() != "powershell":
+    and null-redirect are stripped.
+    Tool name: Claude Code / Copilot CLI report a dedicated 'powershell' tool; Gemini CLI's single
+    cross-platform 'run_shell_command' tool also runs via PowerShell on Windows, so it is accepted
+    here too — gated by os.name == "nt" plus the mandatory leading '& ' below, so a non-Windows
+    'run_shell_command' bash command is never matched by this PowerShell-only form."""
+    if _tool_name(hook_input).lower() not in ("powershell", "run_shell_command"):
+        return False
+    if os.name != "nt":
         return False
     command = _bash_command(hook_input)
     if not command:
