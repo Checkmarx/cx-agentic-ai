@@ -1,0 +1,18 @@
+{
+  "name": "cx-devassist-marketplace",
+  "description": "Checkmarx CxOne security scanning plugins for Codex CLI",
+  "owner": {
+    "name": "Checkmarx"
+  },
+  "plugins": [
+    {
+      "name": "cx-devassist",
+      "description": "Checkmarx-powered security scanning and fixing inside your coding loop. Checks the code you write and the code AI generates for vulnerabilities and risky dependencies, then returns precise, engine-backed fixes. Best invoked after writing or changing code, before commits, and around security-sensitive logic. Applies fixes inline so you can accept them without leaving your editor.",
+      "category": "security",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-devassist"
+      }
+    }
+  ]
+}

@@ -190,9 +190,30 @@ probe (the `cx mcp bridge` and `cx hooks codex-*` subcommands must all respond t
 
 ## Installation
 
-No Codex plugin marketplace listing is published for this plugin yet (Codex's plugin manifest
-schema and marketplace distribution mechanism were not fully confirmed at the time this plugin
-was built). Install by pointing Codex at a cloned copy of this repository:
+### Via the local marketplace (recommended)
+
+This repo ships a repo-scoped marketplace at
+[`.agents/plugins/marketplace.json`](../../.agents/plugins/marketplace.json) that points a
+`cx-devassist` plugin entry at `./plugins/codex-devassist` — the same plugin name used by the
+Claude Code and Copilot CLI marketplaces, so all three surfaces refer to "cx-devassist"
+consistently even though each has its own packaged folder.
+
+1. Clone this repository (or your internal fork) somewhere durable.
+2. Point Codex at the marketplace:
+   ```bash
+   codex plugin marketplace add "/path/to/cx-agentic-ai"
+   ```
+3. Enable the plugin (`codex plugin marketplace list` to confirm the marketplace registered, then
+   enable `cx-devassist` from the Codex plugin picker or `config.toml`).
+4. Restart the Codex CLI session so it re-reads `config.toml` and loads the plugin's hooks and
+   skills. Trust the hooks when prompted — plugin-bundled hooks are non-managed and Codex skips
+   them until reviewed.
+
+The MCP server may still need manual registration — see below.
+
+### Manual installation (fallback)
+
+If the marketplace mechanism isn't available in your Codex CLI build, wire the plugin by hand:
 
 1. Clone this repository (or your internal fork) somewhere durable.
 2. Symlink or copy the skills so Codex can discover them:
@@ -267,7 +288,12 @@ lowest-risk defaults rather than confirmed behavior:
 
 1. **External `cx` CLI capability** — see [above](#external-dependency-cx-cli-capability).
 2. **MCP auto-registration** — a plugin-bundled `.mcp.json` may or may not be auto-discovered by
-   Codex; the manual `config.toml` step is the documented, supported path.
+   Codex; the manual `config.toml` step is the documented, supported path. `.mcp.json` now uses
+   the `mcp_servers` (snake_case) wrapped-map shape documented by OpenAI's plugin docs (it
+   previously used an unsupported `mcpServers` camelCase key, which matched neither of the two
+   accepted formats and is the likely cause of the `Auth: Unsupported` / no-tools result seen in a
+   live Codex session before this fix) — but whether Codex actually auto-loads a plugin's
+   `.mcp.json` at all remains unconfirmed.
 3. **Skills auto-discovery** — a plugin-relative `skills/` folder may or may not be
    auto-discovered; manual copy/symlink into `.agents/skills` is the documented, supported path.
 4. **Plugin manifest / marketplace** — a `.codex-plugin/plugin.json` manifest is now shipped
