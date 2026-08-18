@@ -3,14 +3,9 @@
   "hooks": {
     "beforeShellExecution": [
       {
-        "command": "sh \"${CURSOR_PLUGIN_ROOT}/hooks/cx_check.sh\"",
-        "timeout": 45,
-        "failClosed": true
-      },
-      {
-        "command": "sh \"${CURSOR_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks cursor-before-shell",
-        "timeout": 30,
-        "failClosed": true
+        "command": "sh \"${CURSOR_PLUGIN_ROOT}/hooks/cx_record_login.sh\"",
+        "timeout": 10,
+        "failClosed": false
       }
     ],
     "beforeMCPExecution": [
