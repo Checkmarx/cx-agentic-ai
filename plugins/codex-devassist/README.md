@@ -100,6 +100,8 @@ is expected fail-closed behavior, not a bug in this plugin.
 
 ```
 plugins/codex-devassist/
+├── .codex-plugin/
+│   └── plugin.json              # plugin manifest (name/version/hooks/skills/mcpServers pointers)
 ├── .mcp.json                    # best-effort MCP declaration (forward-compat; see caveat above)
 ├── README.md
 ├── config/
@@ -268,9 +270,11 @@ lowest-risk defaults rather than confirmed behavior:
    Codex; the manual `config.toml` step is the documented, supported path.
 3. **Skills auto-discovery** — a plugin-relative `skills/` folder may or may not be
    auto-discovered; manual copy/symlink into `.agents/skills` is the documented, supported path.
-4. **Plugin manifest / marketplace** — Codex's plugin manifest schema and marketplace
-   distribution mechanism were not fully confirmed; no marketplace listing is published for this
-   plugin — install from a cloned copy of this repository instead.
+4. **Plugin manifest / marketplace** — a `.codex-plugin/plugin.json` manifest is now shipped
+   (name/version/description/`hooks`/`skills`/`mcpServers` pointers, per OpenAI's published plugin
+   docs), but Codex's marketplace distribution mechanism was not fully confirmed at build time and
+   no marketplace listing is published for this plugin — install from a cloned copy of this
+   repository instead, using the manual steps above.
 
 ---
 

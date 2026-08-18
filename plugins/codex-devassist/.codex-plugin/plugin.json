@@ -1,0 +1,18 @@
+{
+  "name": "codex-devassist",
+  "version": "1.0.0",
+  "description": "Checkmarx-powered security scanning and fixing inside your Codex CLI coding loop. Checks the code you write and the code Codex generates for vulnerabilities and risky dependencies, then returns precise, engine-backed fixes. Best invoked after writing or changing code, before commits, and around security-sensitive logic.",
+  "author": {
+    "name": "Checkmarx"
+  },
+  "license": "Apache-2.0",
+  "keywords": ["security", "checkmarx", "cxone", "sast", "sca"],
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills",
+  "interface": {
+    "displayName": "Checkmarx DevAssist for Codex",
+    "shortDescription": "Fail-closed Checkmarx security gate for Codex CLI",
+    "category": "security"
+  }
+}
