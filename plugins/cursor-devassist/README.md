@@ -3,13 +3,12 @@
 A **fail-closed security gate** for **Cursor**, backed by
 [Checkmarx CxOne](https://checkmarx.com/).
 
-Before Cursor runs a shell command, calls an MCP tool, or writes/edits a file, the plugin asks the
-Checkmarx `cx` CLI to scan the proposed action. Shell and MCP calls are blocked fail-closed if a real
-vulnerability or policy violation is found — or if the scanner can't be trusted to run. File writes
-are scanned silently via Cursor's `afterFileEdit` hook (which cannot block a completed write); if
-findings remain when the agent tries to stop, remediation guidance is sent via the stop hook's
-`followup_message`. Found issues are remediated interactively through the bundled Checkmarx MCP server
-and cx-devassist skills.
+Before Cursor writes or edits a file the Checkmarx engines can scan — source code, IaC, or a dependency
+manifest — the plugin asks the `cx` CLI to scan the proposed content. Shell commands and file types no
+engine can scan are **not** gated: nothing would have been scanned there, so blocking them cost
+developers time without buying protection. MCP calls are still fully gated. File writes are also scanned
+silently via Cursor's `afterFileEdit` hook (which cannot block a completed write); if findings remain
+when the agent tries to stop, remediation guidance is sent via the stop hook's `followup_message`.
 
 Part of [Checkmarx Agentic AI](../../README.md). This plugin is entirely independent of
 [`cx-devassist`](../cx-devassist/README.md) (the Claude Code plugin) — no files, hooks, or state
@@ -31,13 +30,24 @@ Every gated action runs a **two-stage chain**:
 
 | Cursor event | Gate | Scanner | Behavior |
 |---|---|---|---|
-| `beforeShellExecution` | `cx_check` | `cx hooks cursor-before-shell` | **Deny** if cx missing / not authed, or a real finding |
+| `beforeShellExecution` | — | — | **Not gated.** One non-blocking observer (`cx_record_login.sh`) notes `cx auth login` URL/tenant for later re-auth |
 | `beforeMCPExecution` | `cx_check` | `cx hooks cursor-before-mcp` | **Deny** if cx missing / not authed, or a real finding |
-| `afterFileEdit` | `cx_check` | `cx hooks cursor-file-edit-capture` | Scans the documented (`old_string`/`new_string`) diff silently and records findings for the stop hook; fire-and-forget — **cannot block** (the write already landed) |
-| `stop` | — | `cx hooks cursor-stop` | Session end; if unresolved findings remain, sends rich remediation guidance via `followup_message` (same text as the former `additional_context`), up to 3 times, then lets the agent stop |
+| `preToolUse` (Write/StrReplace/Edit/…) — **scannable file** | `cx_check` | `cx hooks cursor-before-file-write` | **Deny** if cx missing / not authed, or a real finding |
+| `preToolUse` — other file types | — | — | Nothing: no engine can scan it, so the write proceeds |
+| `afterFileEdit` | `cx_check` | `cx hooks cursor-file-edit-capture` | Scans the documented diff silently; fire-and-forget — **cannot block** |
+| `stop` | — | `cx hooks cursor-stop` | Session end; remediation via `followup_message` when findings remain |
 
 File-write findings cannot be blocked on Cursor; remediation guidance is delivered only when the
-agent tries to stop, via `followup_message`. Shell/MCP gates still **deny** fail-closed.
+agent tries to stop, via `followup_message`. MCP gates and scannable-file writes still **deny**
+fail-closed when cx is missing or unauthenticated.
+
+### Scannable file types
+
+The gate blocks a file write only when one of the three engines can analyse that file. The list is
+[`config/cx-scannable-files`](config/cx-scannable-files), mirroring the engines' own filters in
+`ast-cli` (ASCA/SAST, KICS/IaC, SCA/manifests). Everything else — `.md`, `.css`, `.sql`, `.sh` — is
+not gated. The file has exactly one reader — `cx_check.py`'s `_is_scannable_file`. Set
+`CX_GATE_ALL_FILES=1` to restore the previous "gate every file write" behaviour.
 
 **Scoped scanning:** Cursor's dedicated `afterFileEdit` hook documents a real diff
 (`old_string`/`new_string` pairs). Its result is discarded by Cursor (fire-and-forget), but it scans
@@ -66,9 +76,9 @@ both the CLI and the MCP.
 
 ## Fail-closed by design
 
-The gate is engineered so that **uncertainty blocks** wherever Cursor allows it (shell and MCP calls).
-Every "can't evaluate" path on those two gates is deliberately routed to a deny, and the gate is
-hardened against cross-OS holes that would otherwise **fail open**:
+The gate is engineered so that **uncertainty blocks** scannable file writes and MCP calls wherever
+Cursor allows it. Shell commands are never blocked — a broken cx must not stop `git`, `npm`, or
+bootstrap install commands.
 
 - **Windows** — hooks invoke `sh` (which only ever resolves to Git Bash), never bare `bash` (which
   Windows resolves to the System32 WSL stub → exit 127 → unscanned).
@@ -77,8 +87,10 @@ hardened against cross-OS holes that would otherwise **fail open**:
 - **Any OS** — an unexpected error inside the gate denies fail-closed instead of crashing through.
 
 If cx is missing, below the minimum version, missing the required subcommands (`incapable`), or
-unauthenticated, the gate denies with a clear, actionable message that names the exact bootstrap
-command to run.
+unauthenticated, scannable file writes and MCP calls are denied with a clear, actionable message that
+names the exact bootstrap command to run. Shell commands and writes to unscannable file types still
+proceed (except when Python 3 is absent — then every file write is blocked because the gate cannot
+evaluate file types at all).
 
 ---
 
@@ -134,7 +146,8 @@ so `cx auth login` cannot leak its token). Everything outside this set is gated 
 ├── mcp.json                     # Checkmarx MCP server (${CURSOR_PLUGIN_ROOT})
 ├── README.md
 ├── config/
-│   └── cx-onboarding.properties # OPTIONAL admin pre-fill of Checkmarx One URL + tenant (onboarding)
+│   ├── cx-onboarding.properties # OPTIONAL admin pre-fill of Checkmarx One URL + tenant (onboarding)
+│   └── cx-scannable-files       # file types the gate blocks on — mirrors ASCA/KICS/SCA filters
 ├── hooks/
 │   ├── hooks.json               # Cursor hook wiring (${CURSOR_PLUGIN_ROOT}/hooks/ paths)
 │   ├── hooks.json.template      # Template for install-hooks.sh (sed __CURSOR_PLUGIN_ROOT__ → absolute path)
@@ -142,6 +155,7 @@ so `cx auth login` cannot leak its token). Everything outside this set is gated 
 │   ├── cx_check.py              # the fail-closed gate (present → recent → capable → authenticated)
 │   ├── cx_shell.py              # cross-shell command parsing + rendering (PowerShell/cmd/bash/sh)
 │   ├── _cx_bootstrap_match.sh   # trusted-setup matcher for the shell stages (delegates to cx_check.py)
+│   ├── cx_record_login.sh       # non-blocking observer: remembers OAuth URL + tenant
 │   ├── cx_run.sh                # resolves cx by absolute path; runs the native scanner + MCP bridge
 │   └── cx_log.py                # structured, redacted JSONL logging
 ├── scripts/

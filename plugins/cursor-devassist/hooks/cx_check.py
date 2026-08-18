@@ -1,14 +1,14 @@
 """Shared helper: enforces that the cx CLI is installed, recent enough, and authenticated
-before any gated tool call runs. Fail-closed: if cx is missing, unrunnable, or below the
-minimum version, every preToolUse call (shell commands, file write/edit/create) is BLOCKED —
-even offline. The only escape from the block is running the plugin's own bundled bootstrap.
+before gated file writes (to types Checkmarx can scan) and Checkmarx MCP calls. Fail-closed: if cx
+is missing, unrunnable, or below the minimum version, those operations are BLOCKED — even offline.
+Shell commands are never blocked by this gate. The only escape from the block is running the plugin's
+own bundled bootstrap.
 
-This gate runs for Cursor preToolUse (Write/StrReplace/Edit/MultiEdit/EditNotebook) and the native
-beforeShellExecution/beforeMCPExecution hooks (see hooks/hooks.json); it governs
-whether the security TOOLING ITSELF is usable, not whether a specific ASCA/SCA finding should
-block a write. That distinction lives in stage 2 (hooks/cx_run.sh -> `cx hooks
-cursor-before-file-write`), which emits structured deny JSON with agent_message when a finding
-is detected; the agent must follow cx-hook-deny.mdc."""
+This gate runs for Cursor preToolUse (Write/StrReplace/Edit/MultiEdit/EditNotebook) and
+beforeMCPExecution (see hooks/hooks.json); it governs whether the security TOOLING ITSELF is usable,
+not whether a specific ASCA/SCA finding should block a write. That distinction lives in stage 2
+(hooks/cx_run.sh -> `cx hooks cursor-before-file-write`), which emits structured deny JSON with
+agent_message when a finding is detected; the agent must follow cx-hook-deny.mdc."""
 
 import json
 import os
@@ -63,7 +63,7 @@ def _log(event, **fields):
 # is a fast pre-filter: capability is decided by the probe below (_capabilities_present), not by
 # this number. Keep IDENTICAL to scripts/cx-min-version and scripts/cx-bootstrap.sh.
 # (search marker: CX_MIN_VERSION)
-_MIN_VERSION_FALLBACK = (2, 3, 57)
+_MIN_VERSION_FALLBACK = (2, 3, 59)
 
 # The cx executable the GATE invokes for its own probes, resolved by ABSOLUTE path where possible so
 # the gate works the instant cx is installed — even before it is on PATH. A freshly-installed cx in
@@ -255,6 +255,27 @@ def _chmod_600(path):
         pass
 
 
+def _is_number(value):
+    """True for a real int/float — NOT bool (True == 1 in Python)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _read_capped(path, max_bytes, encoding="utf-8-sig"):
+    """The file's text, or None if unreadable, undecodable, or larger than max_bytes."""
+    try:
+        with open(path, "r", encoding=encoding) as f:
+            raw = f.read(max_bytes + 1)
+    except (OSError, UnicodeDecodeError):
+        return None
+    return None if len(raw) > max_bytes else raw
+
+
+def _plugin_path(*parts):
+    """Absolute path to a file bundled in this plugin, relative to THIS file (…/hooks)."""
+    return os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", *parts))
+
+
 def _agent_log_dir():
     """Per-user directory for the gate's caches and bypass audit (and, later, structured
     logs). Default ~/.checkmarx/agent-logs/cursor/ — a user-owned 0700 dir, so these
@@ -369,6 +390,88 @@ _READONLY_COMMANDS = frozenset(name.lower() for name in {
     "Get-ComputerInfo", "Test-Path", "Split-Path", "Resolve-Path", "Join-Path", "Write-Output",
     "Write-Host", "Select-String", "Measure-Object", "Get-FileHash",
 })
+
+
+# --- Scannable files: what the three Checkmarx engines can actually analyse ------------------------
+# The readiness chain is only worth ENFORCING for a file one of the engines would look at.
+# The set lives in config/cx-scannable-files; THIS is its only reader — see that file's header.
+_SCANNABLE_FILES_MAX_BYTES = 65536
+_SCANNABLE_KINDS = ("ext", "suffix", "base", "txtprefix")
+_FILE_TOOL_PATH_KEYS = ("file_path", "notebook_path")
+_FILE_WRITE_TOOLS = frozenset({"Write", "StrReplace", "Edit", "MultiEdit", "EditNotebook"})
+
+
+def _scannable_files_path():
+    return _plugin_path("config", "cx-scannable-files")
+
+
+def _load_scannable_files(path=None):
+    """config/cx-scannable-files parsed to {kind: frozenset(lowercased values)}, or None on failure."""
+    try:
+        if path is None:
+            path = _scannable_files_path()
+        raw = _read_capped(path, _SCANNABLE_FILES_MAX_BYTES)
+        if raw is None:
+            return None
+        parsed = {kind: set() for kind in _SCANNABLE_KINDS}
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or ":" not in line:
+                continue
+            kind, _sep, value = line.partition(":")
+            kind = kind.strip().lower()
+            value = value.strip().lower()
+            if value and kind in parsed:
+                parsed[kind].add(value)
+        if not any(parsed.values()):
+            return None
+        return {kind: frozenset(values) for kind, values in parsed.items()}
+    except Exception:
+        return None
+
+
+def _effective_basename(base):
+    """The basename that will ACTUALLY be created, or '' when it cannot be determined."""
+    if "::" in base:
+        return ""
+    return base.rstrip(" .")
+
+
+def _is_scannable_file(hook_input):
+    """True when this call targets a file one of the Checkmarx engines can analyse.
+
+    FAIL CLOSED on every uncertainty. Force-gate everything with CX_GATE_ALL_FILES=1."""
+    if os.environ.get("CX_GATE_ALL_FILES") == "1":
+        return True
+    if hook_input.get("tool_name") not in _FILE_WRITE_TOOLS:
+        return True
+    tool_input = hook_input.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return True
+    path = None
+    for key in _FILE_TOOL_PATH_KEYS:
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            path = value
+            break
+    if path is None:
+        return True
+    table = _load_scannable_files()
+    if table is None:
+        return True
+    base = _effective_basename(os.path.basename(path.replace("\\", "/").rstrip("/")).lower())
+    if not base:
+        return True
+    if base in table["base"]:
+        return True
+    _root, ext = os.path.splitext(base)
+    if ext and ext in table["ext"]:
+        return True
+    if any(base.endswith(suffix) for suffix in table["suffix"]):
+        return True
+    if ext == ".txt" and any(base.startswith(prefix) for prefix in table["txtprefix"]):
+        return True
+    return False
 
 
 # Git-Bash/MSYS-style POSIX rendering of a Windows drive path: `/c/Users/...` for `C:\Users\...`.
@@ -668,45 +771,237 @@ def _load_admin_config(path=None):
         return {}
 
 
-def _oauth_recovery_bullet(cfg):
-    """The 'Browser sign-in (OAuth)' bullet for an auth-recovery deny context, branched on whether the
-    admin config supplied a VALIDATED base-auth-uri AND tenant. Both present → embed the real values
-    and tell the agent to use them as-is (skip the URL/tenant question). Otherwise → the original
-    ask-the-developer / never-guess guidance, now with the regional-URLs doc link. The embedded values
-    are pre-validated to a shell-inert charset, so the resulting `"<cx>" auth login …` command still
-    passes _is_auth_recovery_command's bare-command guard."""
+_OAUTH_BULLET_LEAD = (
+    "- Browser sign-in (OAuth) — only if the developer picks this: you may run it yourself "
+    "(it opens the developer's browser with MFA; no secret passes through you; it resolves cx "
+    "by absolute path so it works before cx is on PATH). "
+)
+
+
+def _oauth_recovery_bullet(cfg, history=None):
+    """The 'Browser sign-in (OAuth)' bullet for an auth-recovery deny context."""
     base = cfg.get("cx_base_auth_uri")
     tenant = cfg.get("cx_tenant")
-    # suppress_stdout: `cx auth login` prints the LIVE refresh token on stdout for scripting parity,
-    # so the rendered command always discards stdout — using the target shell's own null device
-    # (`1>/dev/null` / `1>$null` / `1>NUL`), which is exactly the kind of per-shell difference that
-    # made the previous single bash-only rendering wrong in PowerShell and cmd.
     if base and tenant:
         cmd = _cx_recovery_command_block(
             "auth login --base-auth-uri {0} --tenant {1}".format(base, tenant),
             suppress_stdout=True)
-        return (
-            "- Browser sign-in (OAuth) — only if the developer picks this: you may run it yourself "
-            "(it opens the developer's browser with MFA; no secret passes through you; it resolves cx "
-            "by absolute path so it works before cx is on PATH). The --base-auth-uri and --tenant "
+        return _OAUTH_BULLET_LEAD + (
+            "The --base-auth-uri and --tenant "
             "below were PRECONFIGURED BY YOUR ADMINISTRATOR (the plugin's "
             "config/cx-onboarding.properties) — use them AS-IS and do NOT ask the developer for a URL "
             "or tenant:" + cmd
         )
+    if history is None:
+        history = _confirmed_login_pairs()
+    if history:
+        pairs = "".join(
+            "\n    [{0}] {1} @ {2}\n        {3}".format(
+                i + 1, t, b,
+                _cx_recovery_command_block(
+                    "auth login --base-auth-uri {0} --tenant {1}".format(b, t),
+                    suppress_stdout=True))
+            for i, (b, t) in enumerate(history))
+        _log("login_history", action="offered", count=len(history))
+        return _OAUTH_BULLET_LEAD + (
+            "The environment(s) below were used in an EARLIER `cx auth login` "
+            "from this machine and are offered as a shortcut, NOT as verified history — the plugin "
+            "infers success from the credential file changing, which a login the developer abandoned "
+            "can also produce. Treat each as a suggestion to confirm, never as fact. Most recent "
+            "first. Only AFTER OAuth is "
+            "chosen, present them with the AskUserQuestion tool — one option per environment, most "
+            "recent first; the tool's built-in \"Other\" lets the developer type a different URL + "
+            "tenant instead — and do NOT run any login until the developer explicitly picks one "
+            "(they may want a different tenant this time). If they pick \"Other\", ask for the "
+            "URL/tenant per the cx-cli-setup skill's oauth.md Question 2 (free-text form) — NEVER "
+            "guess or default values that are not listed. Ready-to-run command for each:" + pairs
+        )
     cmd = _cx_recovery_command_block(
         "auth login --base-auth-uri <url> --tenant <tenant>", suppress_stdout=True)
-    return (
-        "- Browser sign-in (OAuth) — only if the developer picks this: you may run it yourself (it "
-        "opens the developer's browser with MFA; no secret passes through you; it resolves cx by "
-        "absolute path so it works before cx is on PATH). Only AFTER OAuth is chosen, ask for the "
+    return _OAUTH_BULLET_LEAD + (
+        "Only AFTER OAuth is chosen, ask for the "
         "URL/tenant — NEVER guess or default the --base-auth-uri or --tenant values (e.g. do not try "
-        "'iam.checkmarx.net' or a tenant of 'checkmarx') — ask the developer. "
-        "Regional URL examples: US https://ast.checkmarx.net, "
+        "'iam.checkmarx.net' or a tenant of 'checkmarx') — ask the developer, per the cx-cli-setup "
+        "skill's oauth.md Question 2. Regional URL examples: US https://ast.checkmarx.net, "
         "US2 https://us.ast.checkmarx.net, EU https://eu.ast.checkmarx.net, "
         "ANZ https://anz.ast.checkmarx.net, India https://ind.ast.checkmarx.net, or their on-prem "
         "URL. Full region list + how to find your tenant: " + _CX_ENV_URLS_DOC
         + cmd
     )
+
+
+# --- OAuth login history (previously used base-URL/tenant pairs) -----------------------------------
+_LOGIN_HISTORY_FILE = _state_path("cx_login_history.json")
+_LOGIN_HISTORY_MAX = 5
+_LOGIN_HISTORY_OFFER_MAX = 3
+_LOGIN_HISTORY_MAX_BYTES = 16384
+_LOGIN_PENDING_TTL = 3600
+
+_AUTH_LOGIN_RE = re.compile(r"\bauth\s+login\b")
+_LOGIN_FLAG_RE = re.compile(
+    r'--(base-auth-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
+_CX_CONFIGURE_SET_RE = re.compile(r"\bconfigure\s+set\b")
+
+
+def _parse_login_flags(command):
+    if not command or not _AUTH_LOGIN_RE.search(command):
+        return None
+    found = {}
+    for m in _LOGIN_FLAG_RE.finditer(command):
+        found[m.group(1)] = next(g for g in m.groups()[1:] if g is not None)
+    base = found.get("base-auth-uri")
+    tenant = found.get("tenant")
+    if base is None or tenant is None:
+        return None
+    if not (_ADMIN_URL_RE.match(base) and _ADMIN_TENANT_RE.match(tenant)):
+        return None
+    return base, tenant
+
+
+def _valid_login_entry(entry):
+    if not isinstance(entry, dict):
+        return None
+    url, tenant = entry.get("base_auth_uri"), entry.get("tenant")
+    status, last_used, cred = entry.get("status"), entry.get("last_used"), entry.get("cred_before")
+    if isinstance(url, str):
+        url = url.strip()
+    if isinstance(tenant, str):
+        tenant = tenant.strip()
+    if not (isinstance(url, str) and _ADMIN_URL_RE.fullmatch(url)):
+        return None
+    if not (isinstance(tenant, str) and _ADMIN_TENANT_RE.fullmatch(tenant)):
+        return None
+    if status not in ("pending", "confirmed") or not _is_number(last_used):
+        return None
+    if cred is not None and not _is_number(cred):
+        return None
+    return {"base_auth_uri": url, "tenant": tenant, "status": status,
+            "last_used": last_used, "cred_before": cred}
+
+
+def _load_login_history(path=None):
+    try:
+        if path is None:
+            path = _LOGIN_HISTORY_FILE
+        if not path:
+            return []
+        raw = _read_capped(path, _LOGIN_HISTORY_MAX_BYTES, encoding="utf-8")
+        if raw is None:
+            return []
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            return []
+        version = data.get("version") if isinstance(data, dict) else None
+        if version != 1 or isinstance(version, bool):
+            return []
+        entries = data.get("entries")
+        if not isinstance(entries, list):
+            return []
+        result = [e for e in (_valid_login_entry(entry) for entry in entries) if e is not None]
+        if len(result) < len(entries):
+            _log("login_history", action="invalid", count=min(len(entries) - len(result), 255))
+        result.sort(key=lambda e: e["last_used"], reverse=True)
+        return result[:_LOGIN_HISTORY_MAX]
+    except Exception:
+        return []
+
+
+def _save_login_history(entries, path=None):
+    try:
+        if path is None:
+            path = _LOGIN_HISTORY_FILE
+        if not path:
+            return
+        entries = entries[:_LOGIN_HISTORY_MAX]
+        directory = os.path.dirname(path) or "."
+        fd, tmp = tempfile.mkstemp(prefix=".cx_login_history-", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps({"version": 1, "entries": entries}))
+            _chmod_600(tmp)
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
+def _record_login_attempt(command, path=None):
+    try:
+        if command and _CX_CONFIGURE_SET_RE.search(command):
+            _drop_pending_logins(path)
+            return
+        parsed = _parse_login_flags(command)
+        if parsed is None:
+            return
+        base, tenant = parsed
+        key = (base.lower(), tenant.lower())
+        status = "pending"
+        entries = []
+        for entry in _load_login_history(path):
+            if (entry["base_auth_uri"].lower(), entry["tenant"].lower()) == key:
+                if entry["status"] == "confirmed":
+                    status = "confirmed"
+                continue
+            entries.append(entry)
+        entries.insert(0, {"base_auth_uri": base, "tenant": tenant, "status": status,
+                           "last_used": time.time(), "cred_before": _credential_mtime()})
+        _save_login_history(entries, path)
+        _log("login_history", action="recorded")
+    except Exception:
+        pass
+
+
+def _drop_pending_logins(path=None):
+    try:
+        entries = _load_login_history(path)
+        kept = [e for e in entries if e["status"] != "pending"]
+        if len(kept) != len(entries):
+            _save_login_history(kept, path)
+            _log("login_history", action="pruned", count=len(entries) - len(kept))
+    except Exception:
+        pass
+
+
+def _promote_pending_login(path=None):
+    try:
+        if path is None:
+            path = _LOGIN_HISTORY_FILE
+        if not path or not os.path.exists(path):
+            return
+        entries = _load_login_history(path)
+        if not any(e["status"] == "pending" for e in entries):
+            return
+        cred = _credential_mtime()
+        now = time.time()
+        kept = []
+        promoted = False
+        for entry in entries:
+            if entry["status"] != "pending":
+                kept.append(entry)
+            elif not promoted and cred is not None and cred != entry.get("cred_before"):
+                kept.append(dict(entry, status="confirmed", last_used=now))
+                promoted = True
+            elif not promoted and (now - entry["last_used"]) <= _LOGIN_PENDING_TTL:
+                kept.append(entry)
+        if promoted or len(kept) != len(entries):
+            _save_login_history(kept, path)
+            _log("login_history", action="promoted" if promoted else "pruned")
+    except Exception:
+        pass
+
+
+def _confirmed_login_pairs(path=None):
+    try:
+        confirmed = [(e["base_auth_uri"], e["tenant"])
+                     for e in _load_login_history(path) if e["status"] == "confirmed"]
+        return confirmed[:_LOGIN_HISTORY_OFFER_MAX]
+    except Exception:
+        return []
 
 
 def _parse_semver(text):
@@ -1113,6 +1408,7 @@ def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, versio
 _DENY_AGENT_PREFIX = (
     "CHECKMARX_HOOK_DENY — MANDATORY agent_message "
     "(follow exactly; cx-hook-deny rule applies):\n\n"
+    "Do not bypass the scan by writing the same content through another tool or shell command.\n\n"
 )
 
 
@@ -1544,6 +1840,10 @@ def cx_check():
     if _is_setup_diagnostic_command(hook_input, tool):
         _allow(reason_code="setup_diagnostic", tool_name=tool)
 
+    # 2b. Files no Checkmarx engine can scan are not worth gating — restore with CX_GATE_ALL_FILES=1.
+    if not _is_scannable_file(hook_input):
+        _allow(reason_code="unscannable_file", tool_name=tool)
+
     # 2.6 CX_BINARY override: validate before trusting it. A set-but-invalid value fails CLOSED
     #     (never silently use a different binary). When valid, every gate probe below uses it,
     #     and the version/capability/auth gates then prove it's a real, recent, capable, authed cx.
@@ -1581,10 +1881,11 @@ def cx_check():
             ),
             context=(
                 "cx CLI is not installed on this machine (not found via CX_BINARY, the canonical "
-                "store, or PATH). All agent actions are blocked fail-closed until it is installed and "
-                "authenticated. To self-install now, run the plugin's bundled bootstrap by its resolved "
-                "absolute path (its directory is empty in ${CURSOR_PLUGIN_ROOT} in your shell, so use "
-                "this literal command):\n    " + _bootstrap_command_str("install")
+                "store, or PATH). Scannable file writes and Checkmarx MCP calls are blocked "
+                "fail-closed until it is installed and authenticated. To self-install now, run the "
+                "plugin's bundled bootstrap by its resolved absolute path (its directory is empty in "
+                "${CURSOR_PLUGIN_ROOT} in your shell, so use this literal command):\n    "
+                + _bootstrap_command_str("install")
             ),
             reason_code="cx_absent",
             tool_name=tool,
@@ -1723,6 +2024,9 @@ def cx_check():
             version_state=state,
         )
 
+    # Auth verified — promote a recorded `cx auth login` pair when credentials changed.
+    _promote_pending_login()
+
     # 6b. Scanner readiness. `cx auth validate` (step 6) and the native scanner authenticate
     #     DIFFERENTLY: validate accepts an OAuth refresh token, but `cx hooks cursor-*` only
     #     extracts an API key and otherwise runs in SILENT PASS-THROUGH (allow everything, NO scan).
@@ -1811,8 +2115,7 @@ def _fail_closed_on_crash(detail=None):
             "action, so it is BLOCKED fail-closed."
         )
         context = (
-            "CHECKMARX_HOOK_DENY — MANDATORY agent_message (follow exactly; cx-hook-deny rule applies):\n\n"
-            + (detail + " " if detail else "")
+            (detail + " " if detail else "")
             + "An unexpected error occurred inside cx_check.py. All agent actions remain "
             "blocked until it is resolved. Re-run the plugin's bundled bootstrap to restore the gate:\n    "
             + _bootstrap_command_str("install")
@@ -1936,7 +2239,35 @@ def _match_trusted_setup_cli():
         sys.exit(_MATCH_EXIT_UNAVAILABLE)
 
 
+_OBSERVABLE_LOGIN_RE = re.compile(
+    r'^\s*&?\s*"?(?:[^"\s]*[/\\])?cx(?:\.exe)?"?\s+(?:auth|configure)\b', re.IGNORECASE
+)
+
+
+def _is_observable_login_command(hook_input):
+    """True for a bare shell `<any cx path> auth|configure …` worth recording."""
+    command = _bare_bash_command(hook_input)
+    if not command:
+        return False
+    return _OBSERVABLE_LOGIN_RE.match(command) is not None
+
+
+def cx_record_login():
+    """OBSERVER-ONLY mode: notes URL/tenant of `cx auth login` for later auth-recovery offers."""
+    hook_input = _read_hook_input()
+    if _is_observable_login_command(hook_input):
+        _record_login_attempt(_bare_bash_command(hook_input))
+
+
 def main():
+    # OBSERVER mode: record-login must NEVER block a tool call.
+    if len(sys.argv) > 1 and sys.argv[1] == "record-login":
+        try:
+            cx_record_login()
+        except BaseException:
+            pass
+        sys.exit(0)
+
     # cx_shell is required (it owns all shell parsing) — a failed import means the carve-outs cannot
     # be evaluated at all, which must BLOCK, not silently pass. Handled here rather than at import
     # time so it becomes a well-formed deny (exit 2) instead of an uncaught ImportError (exit 1,

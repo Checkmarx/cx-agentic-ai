@@ -23,16 +23,38 @@
 #
 # When cx CANNOT be resolved at all, the fail mode depends on the sub-command so a missing cx is
 # never a silent fail-OPEN on the scan path:
-#   - Blocking scanners (cursor-before-shell / cursor-before-mcp / cursor-before-submit-prompt /
-#     cursor-before-file-read / cursor-before-file-write) -> emit a deny JSON + exit 2 (fail CLOSED,
-#     no-Python deny) so the tool call is BLOCKED, unscanned.
+#   - cursor-before-mcp (a Checkmarx MCP call) -> emit a deny JSON + exit 2 (fail CLOSED, mirroring
+#     cx_check.sh's no-Python deny) so the tool call is BLOCKED, unscanned.
+#   - cursor-before-file-write -> exit 0, DEFERRING to stage 1 (cx_check.sh -> cx_check.py), which has
+#     already decided this same call and correctly: it denies a scannable file when cx is absent and
+#     allows an unscannable one. Denying again here cannot make a scannable write safer (verdicts merge
+#     most-restrictive-wins, so stage 1's deny already stands) and DOES block the unscannable writes
+#     stage 1 just allowed.
 #   - cursor-after-file-edit (postToolUse) -> emit additional_context + exit 0 (a completed write
 #     cannot be blocked).
-#   - Advisory lifecycle hooks (…stop / …cursor-file-edit-capture) -> exit 0 (non-blocking by design; a
-#     missing diff capture just means the later postToolUse scan falls back to scanning the whole file
-#     instead of just the edited region).
+#   - Advisory lifecycle hooks (…stop / …cursor-file-edit-capture) -> exit 0 (non-blocking by design).
 #   - Anything else (mcp bridge, scan, auth, configure, version, …) -> stderr error + exit 1.
 set -u
+
+# The plugin's hooks/ directory, resolved ONCE for every site that needs it: the audit logger, the MCP
+# guard / min-version paths, and the bootstrap matcher. `${0%/*}` rather than
+# `$(cd "$(dirname "$0")" && pwd)` — the latter is a subshell plus a `dirname` exec (~86ms measured on
+# Git-Bash Windows) to rebuild a path hooks.json already passes absolutely.
+case "$0" in
+    */*) _CXRUN_DIR=${0%/*} ;;
+    *)   _CXRUN_DIR=. ;;
+esac
+
+# Write ONE cx_log.py audit record using the first WORKING Python 3: python3 -> python -> py -3.
+# Best-effort by contract: every failure is swallowed and callers ignore the status.
+_cxrun_log() {
+    for _cxrun_py in python3 python "py -3"; do
+        command -v "${_cxrun_py%% *}" >/dev/null 2>&1 || continue
+        # shellcheck disable=SC2086
+        $_cxrun_py "$_CXRUN_DIR/cx_log.py" "$@" >/dev/null 2>&1 && return 0
+    done
+    return 0
+}
 
 # OS detection mirrors cx_check.py's `os.name == "nt"`: on Windows the canonical store is under
 # %LOCALAPPDATA%; on Unix it is ~/.checkmarx/bin. Keeping the two adapters OS-consistent avoids the
@@ -141,7 +163,6 @@ if [ -n "$CX_RESOLVED" ]; then
         # read once here and replayed to cx unchanged.
         _CXRUN_INPUT_FILE=$(mktemp 2>/dev/null) || _CXRUN_INPUT_FILE="/tmp/cxrun_hook.$$"
         cat > "$_CXRUN_INPUT_FILE"
-        _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
         # TRUSTED BOOTSTRAP / AUTH / SETUP CARVE-OUT — the same shared matcher cx_check.sh applies to
         # the same input, so the two stages cannot disagree. It runs even when cx RESOLVED (not just
         # on the cx-absent branch below): the native scanner is free to have its own opinion about a
@@ -233,18 +254,8 @@ if [ -n "$CX_RESOLVED" ]; then
         fi
         _CXRUN_TOOL=$(sed -n 's/.*"tool_name" *: *"\([A-Za-z0-9_.:-]*\)".*/\1/p' "$_CXRUN_INPUT_FILE" | head -1)
 
-        # Best-effort log — never let a missing/slow python or a logging failure affect the relay.
-        _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
-        for _CXRUN_PY in python3 python; do
-            command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
-            # `break` only on a real success: on Windows, "python3" can resolve to the Microsoft
-            # Store's App Execution Alias stub, which is ON PATH but exits non-zero without running
-            # anything (no Python actually installed under that name) — falling through to "python"
-            # in that case is what makes this work on such machines.
-            "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" scan_decision \
-                "decision=$_CXRUN_DECISION" "tool_name=$_CXRUN_TOOL" "reason_code=$_CXRUN_REASON" \
-                >/dev/null 2>&1 && break
-        done
+        _cxrun_log scan_decision \
+            "decision=$_CXRUN_DECISION" "tool_name=$_CXRUN_TOOL" "reason_code=$_CXRUN_REASON"
 
         printf '%s\n' "$_CXRUN_OUTPUT"
         rm -f "$_CXRUN_INPUT_FILE"
@@ -258,19 +269,13 @@ if [ -n "$CX_RESOLVED" ]; then
         _CXRUN_OUTPUT=$("$CX_RESOLVED" "$@" < "$_CXRUN_INPUT_FILE")
         _CXRUN_STATUS=$?
         _CXRUN_TOOL=$(sed -n 's/.*"tool_name" *: *"\([A-Za-z0-9_.:-]*\)".*/\1/p' "$_CXRUN_INPUT_FILE" | head -1)
-        _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
-        for _CXRUN_PY in python3 python; do
-            command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
-            "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" scan_decision \
-                "decision=allow" "tool_name=$_CXRUN_TOOL" "reason_code=post_tool_use" \
-                >/dev/null 2>&1 && break
-        done
+        _cxrun_log scan_decision \
+            "decision=allow" "tool_name=$_CXRUN_TOOL" "reason_code=post_tool_use"
         printf '%s\n' "$_CXRUN_OUTPUT"
         rm -f "$_CXRUN_INPUT_FILE"
         exit 0
     fi
     if [ "$_CXRUN_MCP" = 1 ]; then
-        _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
         _CXRUN_GUARD="$_CXRUN_DIR/../scripts/cx-mcp-guard.sh"
         _CXRUN_MIN_FILE="$_CXRUN_DIR/../scripts/cx-min-version"
         _CXRUN_MCP_STATE=""
@@ -300,19 +305,10 @@ if [ -n "$CX_RESOLVED" ]; then
                 ;;
         esac
 
-        # Best-effort log — same python3/python fallback loop as the scan_decision log above; never
-        # let a missing/slow python or a logging failure affect the connection outcome. `tier`
-        # records which resolution tier supplied $CX_RESOLVED, so the log can explain (via
-        # cx_log.py's message synthesis) why a CX_BINARY-pinned denial won't self-heal from a
-        # bootstrap upgrade — see the matching stderr note below.
-        for _CXRUN_PY in python3 python; do
-            command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
-            "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" mcp_connect \
-                "result=$_CXRUN_MCP_RESULT" "reason_code=$_CXRUN_MCP_REASON" \
-                "version_have=$_CXRUN_MCP_HAVE" "version_min=$_CXRUN_MCP_MIN" \
-                "tier=$_CX_RESOLVED_TIER" \
-                >/dev/null 2>&1 && break
-        done
+        _cxrun_log mcp_connect \
+            "result=$_CXRUN_MCP_RESULT" "reason_code=$_CXRUN_MCP_REASON" \
+            "version_have=$_CXRUN_MCP_HAVE" "version_min=$_CXRUN_MCP_MIN" \
+            "tier=$_CX_RESOLVED_TIER"
 
         if [ "$_CXRUN_MCP_RESULT" = denied ]; then
             # Refuse to exec a subcommand this build can't run — that is what corrupts the stdio
@@ -351,18 +347,24 @@ fi
 
 # --- cx could not be resolved anywhere: pick a fail mode that never silently opens the scan path. ---
 case "${1:-} ${2:-}" in
-    *cursor-before-shell* | *cursor-before-mcp* | *cursor-before-submit-prompt* | *cursor-before-file-read* | *cursor-before-file-write*)
-        # Bootstrap carve-out: the sanctioned self-install must pass even though cx is absent — that
-        # is the whole POINT of running it. Stage-1 (cx_check) already allows this exact command; but
-        # every hook in a matcher must allow, so without the SAME carve-out HERE this stage's deny
-        # would override that allow and the documented `bash "<bootstrap>" install` recovery could
-        # never run through the Shell tool (the deadlock). Read stdin ONLY now — safe because cx was
-        # never exec'd (resolution failed above), so nothing downstream consumes it. The shared matcher
-        # (mirroring cx_check.sh / cx_check.py) keeps the two shell stages from drifting.
+    *cursor-before-file-write*)
+        # Bootstrap carve-out: the sanctioned self-install must pass even though cx is absent.
         _CXRUN_INPUT_FILE=$(mktemp 2>/dev/null) || _CXRUN_INPUT_FILE="/tmp/cxrun_hook.$$"
         cat > "$_CXRUN_INPUT_FILE"
-        _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
-        if [ -n "$_CXRUN_DIR" ] && [ -f "$_CXRUN_DIR/_cx_bootstrap_match.sh" ]; then
+        if [ -f "$_CXRUN_DIR/_cx_bootstrap_match.sh" ]; then
+            . "$_CXRUN_DIR/_cx_bootstrap_match.sh"
+            cx_is_trusted_setup_command "$_CXRUN_INPUT_FILE" "$_CXRUN_DIR" && \
+                rm -f "$_CXRUN_INPUT_FILE" && printf '%s\n' '{"permission":"allow"}' && exit 0
+        fi
+        rm -f "$_CXRUN_INPUT_FILE"
+        # Stage 1 (cx_check) has already applied scannable-file logic to this exact call — defer here
+        # so unscannable writes stage 1 allowed are not denied again.
+        exit 0
+        ;;
+    *cursor-before-mcp* | *cursor-before-submit-prompt* | *cursor-before-file-read*)
+        _CXRUN_INPUT_FILE=$(mktemp 2>/dev/null) || _CXRUN_INPUT_FILE="/tmp/cxrun_hook.$$"
+        cat > "$_CXRUN_INPUT_FILE"
+        if [ -f "$_CXRUN_DIR/_cx_bootstrap_match.sh" ]; then
             . "$_CXRUN_DIR/_cx_bootstrap_match.sh"
             cx_is_trusted_setup_command "$_CXRUN_INPUT_FILE" "$_CXRUN_DIR" && \
                 rm -f "$_CXRUN_INPUT_FILE" && printf '%s\n' '{"permission":"allow"}' && exit 0
@@ -370,17 +372,16 @@ case "${1:-} ${2:-}" in
         rm -f "$_CXRUN_INPUT_FILE"
         _CXRUN_BOOTSTRAP="$(cd "$_CXRUN_DIR/.." && pwd)/scripts/cx-bootstrap.sh"
         if command -v cygpath >/dev/null 2>&1; then
-            # -m (mixed: drive letter + forward slashes), NOT -w (native backslashes): this path is
-            # embedded directly into hand-written JSON below with no escaping, and an unescaped `\`
-            # makes the JSON invalid — exactly what broke every "cx could not be resolved" deny on
-            # Windows. Forward slashes are also what Git Bash's `bash "<path>" install` expects
-            # (mirrors _cx_bootstrap_match.sh's own use of `cygpath -m` for the same reason).
             _CXRUN_BOOTSTRAP=$(cygpath -m "$_CXRUN_BOOTSTRAP")
         fi
         cat <<JSON
-{"permission":"deny","user_message":"The Checkmarx security scanner could not run: the cx CLI could not be resolved. This operation is BLOCKED fail-closed.","agent_message":"CHECKMARX_HOOK_DENY — MANDATORY agent_message (follow exactly; cx-hook-deny rule applies):\n\nRun the plugin bundled bootstrap to install and authenticate the cx CLI, then retry the blocked operation:\n    bash \"${_CXRUN_BOOTSTRAP}\" install\n\nThe gate resolves cx from the canonical store (%LOCALAPPDATA%\\\\Checkmarx\\\\cx\\\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path. All agent actions remain blocked until cx is available.","additional_context":"CHECKMARX_HOOK_DENY — MANDATORY agent_message (follow exactly; cx-hook-deny rule applies):\n\nRun the plugin bundled bootstrap to install and authenticate the cx CLI, then retry the blocked operation:\n    bash \"${_CXRUN_BOOTSTRAP}\" install\n\nThe gate resolves cx from the canonical store (%LOCALAPPDATA%\\\\Checkmarx\\\\cx\\\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path. All agent actions remain blocked until cx is available."}
+{"permission":"deny","user_message":"The Checkmarx security scanner could not run: the cx CLI could not be resolved. This operation is BLOCKED fail-closed.","agent_message":"CHECKMARX_HOOK_DENY — MANDATORY agent_message (follow exactly; cx-hook-deny rule applies):\n\nRun the plugin bundled bootstrap to install and authenticate the cx CLI, then retry the blocked operation:\n    bash \"${_CXRUN_BOOTSTRAP}\" install\n\nThe gate resolves cx from the canonical store (%LOCALAPPDATA%\\\\Checkmarx\\\\cx\\\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path. Shell commands and writes to file types Checkmarx cannot scan still run, so you can install cx from here.","additional_context":"CHECKMARX_HOOK_DENY — MANDATORY agent_message (follow exactly; cx-hook-deny rule applies):\n\nRun the plugin bundled bootstrap to install and authenticate the cx CLI, then retry the blocked operation:\n    bash \"${_CXRUN_BOOTSTRAP}\" install\n\nThe gate resolves cx from the canonical store (%LOCALAPPDATA%\\\\Checkmarx\\\\cx\\\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path. Shell commands and writes to file types Checkmarx cannot scan still run, so you can install cx from here."}
 JSON
         exit 2
+        ;;
+    *cursor-before-shell*)
+        # Shell commands are no longer gated — this path should not run; stay non-blocking if invoked.
+        exit 0
         ;;
     *cursor-after-file-edit*)
         cat <<'JSON'
@@ -398,12 +399,7 @@ JSON
         ;;
     *)
         if [ "$_CXRUN_MCP" = 1 ]; then
-            _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
-            for _CXRUN_PY in python3 python; do
-                command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
-                "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" mcp_connect \
-                    "result=denied" "reason_code=cx_absent" >/dev/null 2>&1 && break
-            done
+            _cxrun_log mcp_connect "result=denied" "reason_code=cx_absent"
         fi
         printf 'cx-devassist: cx CLI not found (looked at CX_BINARY, the canonical store, and PATH). Run "bash scripts/cx-bootstrap.sh install" to install it.\n' >&2
         exit 1
