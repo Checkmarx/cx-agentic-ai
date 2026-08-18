@@ -2,7 +2,8 @@
   "mcpServers": {
     "Checkmarx": {
       "command": "sh",
-      "args": ["${PLUGIN_ROOT}/hooks/cx_run.sh", "mcp", "bridge"]
+      "args": ["./hooks/cx_run.sh", "mcp", "bridge"],
+      "cwd": "."
     }
   }
 }

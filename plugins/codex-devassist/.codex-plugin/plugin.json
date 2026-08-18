@@ -1,5 +1,5 @@
 {
-  "name": "cx-devassist-codex",
+  "name": "cx-devassist",
   "version": "1.0.0",
   "description": "Checkmarx-powered security scanning and fixing inside your Codex CLI coding loop. Checks the code you write and the code Codex generates for vulnerabilities and risky dependencies, then returns precise, engine-backed fixes. Best invoked after writing or changing code, before commits, and around security-sensitive logic.",
   "author": {

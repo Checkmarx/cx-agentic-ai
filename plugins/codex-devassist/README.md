@@ -287,13 +287,18 @@ end-to-end validation against a live Codex CLI session. The following are docume
 lowest-risk defaults rather than confirmed behavior:
 
 1. **External `cx` CLI capability** — see [above](#external-dependency-cx-cli-capability).
-2. **MCP auto-registration** — a plugin-bundled `.mcp.json` may or may not be auto-discovered by
-   Codex; the manual `config.toml` step is the documented, supported path. `.mcp.json` now uses
-   the `mcp_servers` (snake_case) wrapped-map shape documented by OpenAI's plugin docs (it
-   previously used an unsupported `mcpServers` camelCase key, which matched neither of the two
-   accepted formats and is the likely cause of the `Auth: Unsupported` / no-tools result seen in a
-   live Codex session before this fix) — but whether Codex actually auto-loads a plugin's
-   `.mcp.json` at all remains unconfirmed.
+2. **MCP auto-registration** — confirmed live: Codex DOES auto-load a plugin-bundled `.mcp.json`
+   (verified against OpenAI's own curated `github`/`figma`/`notion`/`codex-security` plugins,
+   which all use the `mcpServers` camelCase wrapper — the correct shape, matching this plugin's
+   `.mcp.json`). The manual `config.toml` step below is still a valid fallback but is no longer
+   believed to be the only path. The real bug found and fixed here: `.mcp.json`'s `args` used
+   `${PLUGIN_ROOT}/hooks/cx_run.sh` — but Codex only guarantees `${PLUGIN_ROOT}` substitution
+   inside **hook** commands (`hooks/hooks.json`), not inside a bundled `.mcp.json`'s `command`/
+   `args`. Left unexpanded, `sh` received the literal string `${PLUGIN_ROOT}/hooks/cx_run.sh`,
+   exited immediately (exit 127), and Codex reported `handshaking with MCP server failed:
+   connection closed: initialize response` with `/mcp` showing `Auth: Unsupported` / no tools.
+   Fixed by switching to a relative path (`"./hooks/cx_run.sh"`) plus `"cwd": "."`, matching the
+   pattern OpenAI's own `codex-security` plugin uses for its bundled stdio MCP server.
 3. **Skills auto-discovery** — a plugin-relative `skills/` folder may or may not be
    auto-discovered; manual copy/symlink into `.agents/skills` is the documented, supported path.
 4. **Plugin manifest / marketplace** — a `.codex-plugin/plugin.json` manifest is now shipped
