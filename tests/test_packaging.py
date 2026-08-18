@@ -15,8 +15,7 @@ import unittest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _CLAUDE_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "cx-devassist"))
-_COPILOT_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "copilot-devassist"))
-_CODEX_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "codex-devassist"))
+_COPILOT_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "copilot", "checkmarx-devassist"))
 _REPO_ROOT = os.path.normpath(os.path.join(_HERE, ".."))
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
@@ -102,9 +101,6 @@ class TestMinVersionSync(unittest.TestCase):
     def test_copilot_four_sites_agree(self):
         self._check_four_sites(_COPILOT_PLUGIN_ROOT)
 
-    def test_codex_four_sites_agree(self):
-        self._check_four_sites(_CODEX_PLUGIN_ROOT)
-
 
 class TestReleaseTag(unittest.TestCase):
     def test_tag_matches_plugin_version(self):
@@ -140,14 +136,14 @@ class TestShippedBytes(unittest.TestCase):
             return f.read()
 
     def test_no_carriage_returns(self):
-        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT, _CODEX_PLUGIN_ROOT):
+        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT):
             for parts in self._LF_FILES:
                 self.assertNotIn(b"\r", self._bytes(plugin_root, *parts),
                                  "%s/%s contains CR bytes — must be LF-only" % (
                                      os.path.basename(plugin_root), parts[-1]))
 
     def test_cx_min_version_is_pure_ascii(self):
-        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT, _CODEX_PLUGIN_ROOT):
+        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT):
             try:
                 self._bytes(plugin_root, "scripts", "cx-min-version").decode("ascii")
             except UnicodeDecodeError as e:
@@ -171,7 +167,7 @@ class TestHookWiring(unittest.TestCase):
             self.assertFalse(c.startswith("cx hooks"), "stage-2 must not call bare cx: %s" % c)
 
     def test_cx_run_wrapper_present(self):
-        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT, _CODEX_PLUGIN_ROOT):
+        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT):
             self.assertTrue(
                 os.path.isfile(os.path.join(plugin_root, "hooks", "cx_run.sh")),
                 "cx_run.sh missing in %s" % os.path.basename(plugin_root))
@@ -183,7 +179,6 @@ class TestHookWiring(unittest.TestCase):
         hook_configs = [
             (_CLAUDE_PLUGIN_ROOT, "hooks.json"),
             (_COPILOT_PLUGIN_ROOT, "hooks-copilot-cli.json"),
-            (_CODEX_PLUGIN_ROOT, "hooks.json"),
         ]
         for plugin_root, cfg in hook_configs:
             data = json.loads(_read(plugin_root, "hooks", cfg))
@@ -208,8 +203,8 @@ class TestHookWiring(unittest.TestCase):
     def test_mcp_resolves_cx_via_cx_run(self):
         # The remediation MCP must resolve cx by absolute path (canonical store) through cx_run.sh —
         # NOT bare `cx` — so it can start on a locked-down / first-install machine after one
-        # /reload-plugins, with no restart. Checked for all plugin roots.
-        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT, _CODEX_PLUGIN_ROOT):
+        # /reload-plugins, with no restart. Checked for both plugin roots.
+        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT):
             mcp = json.loads(_read(plugin_root, ".mcp.json"))
             servers = mcp.get("mcpServers", {})
             self.assertEqual(list(servers), ["Checkmarx"],

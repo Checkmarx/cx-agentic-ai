@@ -1,4 +1,4 @@
-# copilot-devassist
+# Cx-Devassist For Copilot CLI
 
 A **fail-closed security gate** for **GitHub Copilot CLI**, backed by
 [Checkmarx CxOne](https://checkmarx.com/).
@@ -7,10 +7,6 @@ Before Copilot creates or edits a file, the plugin asks the Checkmarx `cx` CLI t
 content. If a real vulnerability or policy violation is found — **or if the scanner can't be trusted to
 run** — the action is **blocked**, not silently allowed. Found issues are remediated interactively
 through the bundled Checkmarx MCP server.
-
-Part of [Checkmarx Agentic AI](../../README.md). The Claude Code counterpart lives at
-[plugins/cx-devassist](../cx-devassist/README.md) — the two plugins share the same gate design and `cx`
-CLI, but are packaged and wired independently.
 
 ---
 

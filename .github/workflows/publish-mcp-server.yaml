@@ -1,0 +1,83 @@
+name: Publish Checkmarx MCP Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      mcp-domain:
+        description: "Registered domain for DNS authentication (must match the DNS TXT record)"
+        required: false
+        type: string
+        default: "checkmarx.com"
+      mcp-publisher-version:
+        description: "mcp-publisher release tag to download (pin to a specific version)"
+        required: false
+        type: string
+        default: "v1.8.0"
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish MCP Server
+    runs-on: cx-public-ubuntu-x64
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download mcp-publisher
+        env:
+          PUBLISHER_VERSION: ${{ inputs.mcp-publisher-version }}
+        run: |
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+          curl -fsSL \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${PUBLISHER_VERSION}/mcp-publisher_${OS}_${ARCH}.tar.gz" \
+            | tar xz mcp-publisher
+          chmod +x ./mcp-publisher
+
+      - name: Authenticate (DNS) and publish
+        env:
+          MCP_DOMAIN: ${{ inputs.mcp-domain }}
+          PEM_CONTENT: ${{ secrets.MCP_TOKEN }}
+        run: |
+          # Extract Ed25519 private key bytes as hex — format required by mcp-publisher dns login
+          PRIVATE_KEY_HEX=$(printf '%s' "${PEM_CONTENT}" \
+            | openssl pkey -noout -text \
+            | grep -A3 "priv:" | tail -n +2 | tr -d ' :\n')
+          echo "::add-mask::${PRIVATE_KEY_HEX}"
+
+          # Capture login output instead of streaming it, so the derived public
+          # key and any IP addresses can be masked/redacted before anything is printed.
+          # (set +e: a failing command substitution would otherwise abort the script
+          # here under bash -e, before we get a chance to redact and print the output.)
+          set +e
+          LOGIN_OUTPUT=$(./mcp-publisher login dns \
+            --domain "${MCP_DOMAIN}" \
+            --private-key "${PRIVATE_KEY_HEX}" 2>&1)
+          LOGIN_STATUS=$?
+          set -e
+
+          PUBLIC_KEY=$(printf '%s' "${LOGIN_OUTPUT}" | grep -oE 'p=[A-Za-z0-9+/=]+' | sed 's/^p=//')
+          if [ -n "${PUBLIC_KEY}" ]; then
+            echo "::add-mask::${PUBLIC_KEY}"
+          fi
+
+          printf '%s\n' "${LOGIN_OUTPUT}" | sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/[REDACTED_IP]/g'
+
+          if [ "${LOGIN_STATUS}" -ne 0 ]; then
+            exit "${LOGIN_STATUS}"
+          fi
+
+          ./mcp-publisher publish
+
+      - name: Verify publication
+        run: |
+          NAME=$(jq -r '.name' server.json)
+          echo "Verifying publication of ${NAME}..."
+          curl -fsSL "https://registry.modelcontextprotocol.io/v0/servers?search=${NAME}" | jq .

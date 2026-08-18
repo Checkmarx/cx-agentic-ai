@@ -37,6 +37,14 @@ someone remembers to ask for.
 
 For more details **→ [plugins/cx-devassist/README.md](plugins/cx-devassist/README.md)**
 
+## cx-cursor-plugin
+
+Plugin for [Cursor](https://cursor.com/) that integrates the Checkmarx MCP server directly through the [Cursor's marketplace](https://cursor.com/marketplace) mechanism.
+
+Refer **→ [README-MCP.md](README-MCP.md)** for more details on the MCP server.
+
+For more details **→ [plugins/cx-cursor-plugin/README.md](plugins/cx-cursor-plugin/README.md)**
+
 ## copilot-devassist
 
 **→ [plugins/copilot-devassist/README.md](plugins/copilot-devassist/README.md)**
@@ -50,6 +58,7 @@ trusted to run. Findings are remediated through the bundled Checkmarx MCP server
 someone remembers to ask for.
 
 For more details **→ [plugins/copilot-devassist/README.md](plugins/copilot-devassist/README.md)**
+
 
 ## Documentation
 

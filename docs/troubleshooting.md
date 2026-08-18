@@ -20,11 +20,11 @@ Common issues and solutions when using the Checkmarx Security MCP Server.
 **Symptoms:** Client shows "server not reachable", connection timeout, or no tools listed.
 
 **Checks:**
-1. Verify the server URL in your config matches the pattern `https://{api_host}/api/security-mcp/mcp/{tenant}`.
-2. Confirm your `api_host` value (e.g., `ast.checkmarx.net`) — get this from your Checkmarx administrator.
+1. Verify the server URL in your config matches the pattern `https://{cxone_base_url}/api/security-mcp/mcp/{tenant}`.
+2. Confirm your `cxone_base_url` value (e.g., `ast.checkmarx.net`) — get this from your Checkmarx administrator.
 3. Confirm your `tenant` value (e.g., `cx_eu`, `checkmarx`).
 4. Check that your network allows outbound HTTPS traffic to the Checkmarx API host.
-5. Test basic connectivity: `curl -I https://{api_host}/api/security-mcp/mcp/{tenant}`.
+5. Test basic connectivity: `curl -I https://{cxone_base_url}/api/security-mcp/mcp/{tenant}`.
 
 **Common mistakes:**
 - Trailing slash in the URL (remove it).

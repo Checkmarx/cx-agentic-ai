@@ -35,7 +35,7 @@ Pass the API key in the `Authorization` header when configuring your MCP client.
 ```json
 {
     "Checkmarx": {
-      "serverUrl": "https://{api_host}/api/security-mcp/mcp/{tenant}",
+      "serverUrl": "https://{cxone_base_url}/api/security-mcp/mcp/{tenant}",
       "headers": {
         "cx-origin": "<client-name>",
         "Authorization": "API_KEY"
@@ -74,13 +74,13 @@ For OAuth2, your MCP client config only needs the server URL:
 {
   "mcpServers": {
     "Checkmarx": {
-      "serverUrl": "https://{api_host}/api/security-mcp/mcp/{tenant}"
+      "serverUrl": "https://{cxone_base_url}/api/security-mcp/mcp/{tenant}"
     }
   }
 }
 ```
 
-Replace `{api_host}` and `{tenant}` with your values.
+Replace `{cxone_base_url}` and `{tenant}` with your values.
 
 **OAuth2 discovery endpoints exposed by the server:**
 - `/.well-known/oauth-protected-resource`
