@@ -164,6 +164,7 @@ so `cx auth login` cannot leak its token). Everything outside this set is gated 
 │   ├── cx-mcp-guard.sh          # version/capability decision for `cx mcp bridge`
 │   ├── cx-path-probe.sh         # first writable on-PATH directory
 │   ├── cx-min-version           # minimum cx version (numeric floor)
+│   ├── cx-release-tag           # pinned GitHub release for install/upgrade downloads
 │   ├── install-hooks.sh         # merges hooks + syncs rules into user/project .cursor/ (user or project scope)
 │   ├── cx-hooks-merge.py        # JSON merge for hooks — preserves unrelated hooks, replaces only ours
 │   └── cx-rules-install.py      # syncs cx-*.mdc rules into .cursor/rules/ (preserves unrelated rules)
@@ -226,7 +227,8 @@ provide these first, or the gate can't run:
 
 Then the **`cx` CLI** itself, which the bundled **`cx-bootstrap.sh`** script installs (with download
 checksum verification), puts on PATH, and (separately) authenticates (API key or OAuth). The minimum
-version is a numeric floor in `scripts/cx-min-version`; the real capability decision is a runtime
+version is a numeric floor in `scripts/cx-min-version`; install/upgrade downloads are pinned to
+`scripts/cx-release-tag` (currently `2.3.59-Cursor-CLI`). The real capability decision is a runtime
 probe (the `cx mcp bridge` and `cx hooks cursor-*` subcommands must all respond to `--help`).
 
 ---

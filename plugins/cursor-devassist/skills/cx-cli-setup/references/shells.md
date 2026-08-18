@@ -134,7 +134,7 @@ Git Bash is not yet installed (install it anyway — the gate launches through `
 ```powershell
 $store = "$env:LOCALAPPDATA\Checkmarx\cx"
 New-Item -ItemType Directory -Force -Path $store | Out-Null
-Invoke-WebRequest -Uri "https://github.com/Checkmarx/ast-cli/releases/latest/download/ast-cli_windows_x64.zip" -OutFile "$env:TEMP\cx-cli.zip"
+Invoke-WebRequest -Uri "https://github.com/Checkmarx/ast-cli/releases/download/2.3.59-Cursor-CLI/ast-cli_2.3.59-Cursor-CLI_windows_x64.zip" -OutFile "$env:TEMP\cx-cli.zip"
 Expand-Archive -Path "$env:TEMP\cx-cli.zip" -DestinationPath $store -Force
 Remove-Item "$env:TEMP\cx-cli.zip"
 ```

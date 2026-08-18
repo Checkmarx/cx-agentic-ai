@@ -106,7 +106,8 @@ cx version
   ```
 
 **Version gate:** the minimum is `scripts/cx-min-version` — the oldest ast-cli release this plugin
-supports. A build **below** it blocks every write to a file Checkmarx can scan, and every Checkmarx
+supports. Install/upgrade downloads are pinned to `scripts/cx-release-tag` (currently
+`2.3.59-Cursor-CLI`). A build **below** the minimum blocks every write to a file Checkmarx can scan, and every Checkmarx
 MCP call, until it is upgraded via `references/upgrade.md`. Shell commands are never blocked, so you
 can run `cx version` and the bootstrap freely to diagnose and fix it. A `cx version` reporting the literal `dev`
 sentinel bypasses the numeric check (auth still applies); don't treat `dev` as a failure.
@@ -224,6 +225,6 @@ canonical absolute path using **your shell's** form — see `references/shells.m
 | `cx auth validate` | Verify authentication |
 | `cx utils env` | Show current configuration |
 
-Releases: https://github.com/Checkmarx/ast-cli/releases ·
+Releases: https://github.com/Checkmarx/ast-cli/releases/tag/2.3.59-Cursor-CLI ·
 Quick-start: https://docs.checkmarx.com/en/34965-68621-checkmarx-one-cli-quick-start-guide.html ·
 Environment/region URLs + tenant lookup: https://docs.checkmarx.com/en/34965-68530-logging-in-to-checkmarx-one.html
