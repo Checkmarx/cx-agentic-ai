@@ -1168,6 +1168,76 @@ def _binary_identity(resolved=None):
     return resolved, mtime
 
 
+_PROBE_LOCK_TIMEOUT = 8.0   # seconds a cache-miss will wait for another invocation's probe
+_PROBE_LOCK_POLL = 0.2
+
+
+def _lock_path(cache_file):
+    if not cache_file:
+        return None
+    return os.path.normpath(cache_file + ".lock")
+
+
+def _acquire_probe_lock(lock_file, timeout=_PROBE_LOCK_TIMEOUT, poll=_PROBE_LOCK_POLL):
+    """Best-effort mutual exclusion around a cache-miss so a BATCH of concurrent gate invocations
+    (several Write/Edit calls Cursor fires at once, each hitting this hook independently) do not
+    all spawn the SAME expensive `cx version` / `cx auth validate` / `cx hooks check-auth`
+    subprocess simultaneously. Under load that stampede is exactly what turns one ~1-3s probe into
+    several competing for CPU/network, any one of which can then blow ITS OWN hooks.json timeout —
+    a hook-CHAIN failure (cx_check.sh exiting non-2), not a real policy decision on the file's
+    content. Uses an atomic O_CREAT|O_EXCL lock file as the mutex, restricted to 0600 immediately
+    after creation (before any other process could plausibly open it). A lock older than `timeout`
+    is presumed to belong to a holder that crashed/was killed and is stolen — checked with isfile()
+    first, and the unlink's own OSError is still swallowed for the race where a concurrent release
+    wins first — rather than honored, so a stuck lock file can never wedge the gate. Returns an fd
+    to pass to _release_probe_lock, or None if the lock could not be acquired in time — the caller
+    then probes anyway (this is purely a stampede optimization; it must never itself become a
+    source of blocking or fail-open)."""
+    if not lock_file:
+        return None
+    lock_file = os.path.normpath(lock_file)
+    deadline = time.time() + timeout
+    while True:
+        try:
+            fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            fd = None
+        except OSError:
+            return None
+        if fd is not None:
+            _chmod_600(lock_file)
+            return fd
+        try:
+            if (time.time() - os.path.getmtime(lock_file)) > timeout and os.path.isfile(lock_file):
+                try:
+                    os.unlink(lock_file)  # stale — previous holder crashed/was killed
+                except OSError:
+                    pass
+                continue
+        except OSError:
+            pass
+        if time.time() >= deadline:
+            return None
+        time.sleep(poll)
+
+
+def _release_probe_lock(lock_file, lock_fd):
+    if lock_fd is None:
+        return
+    try:
+        os.close(lock_fd)
+    except OSError:
+        pass
+    if not lock_file:
+        return
+    lock_file = os.path.normpath(lock_file)
+    if os.path.isfile(lock_file):
+        try:
+            os.unlink(lock_file)
+        except OSError:
+            pass
+
+
 def _cached_probe(cache_file, ttl, key, probe, should_cache):
     """Memoize probe() to `cache_file` for `ttl` seconds, keyed on the dict `key` (the resolved-binary
     identity plus any extra invalidators — min version, credential mtime). A cached value is reused
@@ -1175,8 +1245,17 @@ def _cached_probe(cache_file, ttl, key, probe, should_cache):
     which should_cache(result) is True are ever written — so a failing/pass-through probe can never be
     masked (the fail-open a stale positive would cause). A falsy `cache_file` (no private state dir)
     disables caching — re-probe every call. Never raises: any I/O or decode error falls through to a
-    live probe (fail-safe). This is the single home for the gate's version/auth/scanner caching."""
-    if cache_file:
+    live probe (fail-safe). This is the single home for the gate's version/auth/scanner caching.
+
+    A cache MISS is additionally serialized via _acquire_probe_lock (see its docstring): without
+    this, a batch of concurrent invocations landing on a cold/expired cache all spawn the same
+    subprocess at once, and the resulting contention is a common cause of an otherwise-healthy
+    invocation timing out. The lock is best-effort only — an unavailable lock just means this one
+    call probes live, exactly as before this fix existed."""
+
+    def _load():
+        if not cache_file:
+            return None
         try:
             with open(cache_file, encoding="utf-8") as f:
                 cached = json.loads(f.read())
@@ -1188,17 +1267,34 @@ def _cached_probe(cache_file, ttl, key, probe, should_cache):
                 return cached["value"]
         except (OSError, ValueError, TypeError):
             pass
-    result = probe()
-    if cache_file and should_cache(result):
-        try:
-            record = {"value": result, "ts": time.time()}
-            record.update(key)
-            with open(cache_file, "w", encoding="utf-8") as f:
-                f.write(json.dumps(record))
-            _chmod_600(cache_file)
-        except OSError:
-            pass
-    return result
+        return None
+
+    hit = _load()
+    if hit is not None:
+        return hit
+
+    lock_file = _lock_path(cache_file)
+    lock_fd = _acquire_probe_lock(lock_file)
+    try:
+        # Re-check: another invocation may have populated the cache while this one waited for the
+        # lock (or the lock was unavailable and we're racing it anyway) — the double-check is what
+        # actually avoids the redundant spawn, not merely holding the lock.
+        hit = _load()
+        if hit is not None:
+            return hit
+        result = probe()
+        if cache_file and should_cache(result):
+            try:
+                record = {"value": result, "ts": time.time()}
+                record.update(key)
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(record))
+                _chmod_600(cache_file)
+            except OSError:
+                pass
+        return result
+    finally:
+        _release_probe_lock(lock_file, lock_fd)
 
 
 def _version_state(identity=None):
@@ -2108,16 +2204,26 @@ def _fail_closed_on_crash(detail=None):
     """Last-resort deny printed if the gate itself crashes. A fail-CLOSED guard: an unexpected
     error inside cx_check() must BLOCK (exit 2) — preToolUse is always a blocking gate. `detail`
     names the specific failure when it is known (e.g. a missing hooks/cx_shell.py), so a broken
-    install is diagnosable instead of a generic "internal error"."""
+    install is diagnosable instead of a generic "internal error".
+
+    Logged with its own reason_code ("gate_crash", distinct from every content-based reason_code
+    _deny() uses elsewhere in this file) so this HOOK-CHAIN failure is never confused, in the
+    cx-devassist.jsonl audit log or in the message shown to the agent, with a real policy decision
+    about the file's content — before this, a crash here denied silently with NO log record at
+    all, so "the gate crashed" and "the gate never ran" were indistinguishable after the fact."""
+    _log("gate_decision", decision="deny", reason_code="gate_crash", exit_code=2)
     try:
         reason = (
-            "The Checkmarx security gate hit an internal error and could not evaluate this "
-            "action, so it is BLOCKED fail-closed."
+            "The Checkmarx security gate hit an internal error BEFORE it could evaluate this "
+            "action's content, so it is BLOCKED fail-closed. This is a hook-chain execution "
+            "failure, NOT a decision about your file's content — no scan of the content ran."
         )
         context = (
             (detail + " " if detail else "")
-            + "An unexpected error occurred inside cx_check.py. All agent actions remain "
-            "blocked until it is resolved. Re-run the plugin's bundled bootstrap to restore the gate:\n    "
+            + "An unexpected error occurred inside cx_check.py — a hook-chain failure, not a "
+            "content-based policy denial (no scan of the proposed content ran or could have run). "
+            "All agent actions remain blocked until it is resolved. Re-run the plugin's bundled "
+            "bootstrap to restore the gate:\n    "
             + _bootstrap_command_str("install")
         )
         agent_msg = _deny_agent_message(context)

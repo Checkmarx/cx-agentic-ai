@@ -1,18 +1,55 @@
-# cx-devassist-cursor
+# Checkmarx DevAssist for Cursor (`cx-devassist-cursor`)
 
 A **fail-closed security gate** for **Cursor**, backed by
-[Checkmarx CxOne](https://checkmarx.com/).
+[Checkmarx CxOne](https://checkmarx.com/). Plugin id `cx-devassist` · version `1.0.0` · Apache-2.0.
 
 Before Cursor writes or edits a file the Checkmarx engines can scan — source code, IaC, or a dependency
-manifest — the plugin asks the `cx` CLI to scan the proposed content. Shell commands and file types no
-engine can scan are **not** gated: nothing would have been scanned there, so blocking them cost
-developers time without buying protection. MCP calls are still fully gated. File writes are also scanned
-silently via Cursor's `afterFileEdit` hook (which cannot block a completed write); if findings remain
-when the agent tries to stop, remediation guidance is sent via the stop hook's `followup_message`.
+manifest — the plugin asks the `cx` CLI to scan the proposed content **before the write lands**, and
+can deny it outright on a real finding. Shell commands and file types no engine can scan are **not**
+gated: nothing would have been scanned there, so blocking them cost developers time without buying
+protection. MCP calls are still fully gated. A separate, advisory-only hook fires when the agent tries
+to stop — it cannot block the agent from stopping.
 
 Part of [Checkmarx Agentic AI](../../README.md). This plugin is entirely independent of
 [`cx-devassist`](../cx-devassist/README.md) (the Claude Code plugin) — no files, hooks, or state
 directories are shared between the two.
+
+### Contents
+
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [Fail-closed by design](#fail-closed-by-design)
+- [Cross-shell behaviour](#cross-shell-behaviour-powershell--cmdexe--bash--sh)
+- [Plugin structure](#plugin-structure)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Troubleshooting](#troubleshooting)
+- [Uninstalling](#uninstalling)
+- [Privacy & logging](#privacy--logging)
+- [License](#license)
+
+---
+
+## Quick start
+
+1. **Install the plugin:**
+   ```bash
+   cursor-agent plugin marketplace add https://github.com/Checkmarx/cx-agentic-ai
+   ```
+   (or copy/symlink this folder to `~/.cursor/plugins/local/cx-devassist-cursor/` — see
+   [Installation](#installation) for the manual/offline alternative).
+2. **Wire hooks + rules and install `cx`** — from a Cursor CLI terminal (`agent`), run:
+   ```text
+   /cx-install-wiring
+   ```
+   then restart the CLI session (`/exit`, then `agent` again) so the hooks, rules, and MCP bridge load.
+3. **Start coding.** Every scannable file write and every Checkmarx MCP call is now scanned
+   automatically; `/cx-devassist-asca` and `/cx-devassist-sca` are available on demand for source files
+   and dependency manifests.
+
+Already have `cx` installed and hooks wired elsewhere? Just authenticate: run `/cx-cli-setup` any time
+`cx` is missing, outdated, or a hook denies with an auth error.
 
 ---
 
@@ -34,12 +71,12 @@ Every gated action runs a **two-stage chain**:
 | `beforeMCPExecution` | `cx_check` | `cx hooks cursor-before-mcp` | **Deny** if cx missing / not authed, or a real finding |
 | `preToolUse` (Write/StrReplace/Edit/…) — **scannable file** | `cx_check` | `cx hooks cursor-before-file-write` | **Deny** if cx missing / not authed, or a real finding |
 | `preToolUse` — other file types | — | — | Nothing: no engine can scan it, so the write proceeds |
-| `afterFileEdit` | `cx_check` | `cx hooks cursor-file-edit-capture` | Scans the documented diff silently; fire-and-forget — **cannot block** |
-| `stop` | — | `cx hooks cursor-stop` | Session end; remediation via `followup_message` when findings remain |
+| `stop` | — | `cx hooks cursor-stop` | Session end; advisory only — this hook cannot block the agent from stopping |
 
-File-write findings cannot be blocked on Cursor; remediation guidance is delivered only when the
-agent tries to stop, via `followup_message`. MCP gates and scannable-file writes still **deny**
-fail-closed when cx is missing or unauthenticated.
+`preToolUse` is the only one of these that can actually block: it denies both when cx itself isn't
+ready (missing/outdated/unauthenticated) **and** when the native scanner finds a real vulnerability in
+the proposed content. `stop` runs after the agent has already decided to stop, so it cannot block
+anything either (see [Session-end hook](#session-end-hook-stop) below).
 
 ### Scannable file types
 
@@ -49,16 +86,15 @@ The gate blocks a file write only when one of the three engines can analyse that
 not gated. The file has exactly one reader — `cx_check.py`'s `_is_scannable_file`. Set
 `CX_GATE_ALL_FILES=1` to restore the previous "gate every file write" behaviour.
 
-**Scoped scanning:** Cursor's dedicated `afterFileEdit` hook documents a real diff
-(`old_string`/`new_string` pairs). Its result is discarded by Cursor (fire-and-forget), but it scans
-only the changed region — not the whole file — so pre-existing code elsewhere is not falsely flagged.
-A full `Write` falls back to scanning the whole proposed content.
+### Session-end hook (`stop`)
 
-**Stop-hook remediation loop:** if a session had Checkmarx findings that are still present on disk
-when the agent tries to stop, the stop hook sends the full remediation prompt (including the
-cx-devassist skill to invoke) via `followup_message`, up to 3 times. If findings are fixed earlier,
-the loop exits immediately with no follow-up. After 3 attempts, the agent is allowed to stop with a
-final summary. A session the user explicitly aborted is respected as-is.
+`hooks.json` wires `stop` straight to the native `sh cx_run.sh hooks cursor-stop` (10s timeout, no
+`failClosed`) — unlike the scan hooks above, `cx_run.sh` does not intercept or interpret this call at
+all; it resolves `cx` and execs it transparently, relaying whatever that native subcommand prints and
+exits with, unchanged. `cx_run.sh`'s own fallback path for this event (cx absent) documents it as an
+"advisory lifecycle hook" that "stays non-blocking" — this plugin makes no claims about, and does not
+depend on, any specific field or retry behavior the native subcommand's output may contain, and there
+is no `followup_message` concept anywhere in this plugin's own hook code.
 
 The scanning logic itself lives in the `cx` CLI (maintained centrally by Checkmarx); this plugin is a
 thin, hardened wrapper that **guarantees cx is ready, installs it when missing, and wires the
@@ -67,8 +103,7 @@ remediation MCP** — nothing more.
 ### Remediation (MCP)
 
 When a finding needs fixing, remediation runs through the **Checkmarx MCP server** (`cx mcp bridge`),
-declared in `mcp.json` and loaded automatically when this plugin is installed under
-`~/.cursor/plugins/local/`. It exposes code- and package-remediation tools
+declared in `mcp.json` and loaded automatically . It exposes code- and package-remediation tools
 (`mcp__plugin-cx-devassist-Checkmarx__codeRemediation`, …) that the agent calls directly. A single `cx` sign-in covers
 both the CLI and the MCP.
 
@@ -91,6 +126,23 @@ unauthenticated, scannable file writes and MCP calls are denied with a clear, ac
 names the exact bootstrap command to run. Shell commands and writes to unscannable file types still
 proceed (except when Python 3 is absent — then every file write is blocked because the gate cannot
 evaluate file types at all).
+
+**Hook-chain failures vs. policy decisions.** A deny always means one of two things, and the deny
+text says which: (1) a real policy decision — cx isn't ready, or the native scanner found something —
+or (2) a hook-CHAIN failure — the gate or scanner crashed/timed out **before or during** the scan, so
+no content was ever evaluated. Both stages log and label case (2) distinctly (`gate_crash` in
+`cx_check.py`'s crash guard, `error_during_block` in `cx_run.sh`'s scan-decision classification) so
+`cx-devassist.jsonl` and the message shown to the agent never conflate "the scan denied this" with
+"the scan never ran." Retrying the same operation once is the right response to a hook-chain failure.
+
+**Batched writes and probe contention.** Cursor can fire several `Write`/`Edit` hooks at once (e.g. a
+multi-file batch). On a cold/expired cache, each of those invocations independently needs the same
+`cx version` / `cx auth validate` / `cx hooks check-auth` result — without coordination, all of them
+would spawn that subprocess simultaneously, and the resulting CPU/network contention was a common
+cause of an otherwise-healthy invocation blowing its own hooks.json timeout (case (2) above). The gate
+serializes each cache miss with a short-lived, self-expiring lock file (`_acquire_probe_lock` in
+`cx_check.py`) so only one invocation in the batch actually probes; the rest reuse its result. The
+lock is best-effort and bounded — it can never itself block or fail the gate open.
 
 ---
 
@@ -233,7 +285,20 @@ probe (the `cx mcp bridge` and `cx hooks cursor-*` subcommands must all respond 
 
 ## Installation
 
-**Local plugin install** (recommended):
+### Marketplace install (recommended)
+
+From a **Cursor CLI** terminal (`cursor-agent`), add this repo as a plugin marketplace, then install
+the plugin from it:
+
+```bash
+cursor-agent plugin marketplace add https://github.com/Checkmarx/cx-agentic-ai
+```
+
+`cx-cursor-marketplace` is this repo's Cursor marketplace name (`.cursor-plugin/marketplace.json`);
+`cx-devassist` is this plugin's id within it (`.cursor-plugin/plugin.json`). Once installed, continue
+with [First-time setup](#first-time-setup-cursor-cli) below.
+
+### Local plugin install (manual / offline)
 
 ```text
 ~/.cursor/plugins/local/cx-devassist-cursor/
@@ -243,7 +308,8 @@ probe (the `cx mcp bridge` and `cx hooks cursor-*` subcommands must all respond 
 └── ...
 ```
 
-Copy or symlink this plugin folder there.
+Copy or symlink this plugin folder there — useful for a local checkout, a fork, or an environment
+without access to the marketplace.
 
 ### First-time setup (Cursor CLI)
 
@@ -304,15 +370,66 @@ Optional: `export CX_ASSISTANT=cursor` (this is already the default for this plu
 
 ## Configuration
 
-All optional — sensible defaults apply.
+All optional — sensible defaults apply, and every one of these **narrows or restores** gate
+behavior; none is required for normal use.
+
+### Runtime (read by the gate on every hook invocation)
 
 | Variable | Purpose |
 |---|---|
-| `CX_BINARY` | Absolute path to `cx` when it isn't on `PATH` (validated: must be a real, recent, capable, authenticated cx). |
+| `CX_BINARY` | Absolute path to `cx` when it isn't on `PATH` (validated: must be a real, recent, capable, authenticated cx). Takes priority over the canonical install store. |
+| `CX_GATE_ALL_FILES=1` | Gate **every** file write, not just types the Checkmarx engines can scan — restores pre-scoping behavior. |
+| `CX_GATE_ALL_COMMANDS=1` | Disable the read-only-command and `cx version`/`cx utils env` diagnostic carve-outs, so every Shell command is evaluated by the gate's own logic (shell commands themselves are still never blocked by this gate — see [Fail-closed by design](#fail-closed-by-design)). |
+| `CX_ALLOW_UNLICENSED=1` | Allow writes to proceed (with a logged warning) when cx is authenticated but has no AI-scanning license, instead of denying — accepts that those writes are **unscanned**. |
 | `CX_LOG_DIR` | Override the log directory (default `~/.checkmarx/agent-logs/cursor/`). |
 | `CX_LOG_DISABLE=1` | Turn structured logging off entirely. |
 | `CX_ASSISTANT` | Label the assistant in logs (default `cursor`). |
 | `CX_REQUIRE_CHECKSUM=1` | Make `cx-bootstrap.sh` refuse to install an asset it can't checksum-verify. |
+
+### Install-time (read only by `scripts/install-hooks.sh`)
+
+| Variable | Purpose |
+|---|---|
+| `CX_CURSOR_HOOKS_TARGET=project` | Install hooks/rules under a project's `.cursor/` instead of the user-level `~/.cursor/` (default `user`). |
+| `CX_PROJECT_PATH` | The project root to install into when `CX_CURSOR_HOOKS_TARGET=project`; defaults to the current directory. |
+| `CX_PLUGIN_ROOT` | Override plugin-root detection (rarely needed — the script infers it from its own location). |
+
+---
+
+## Troubleshooting
+
+Start with the deny message itself — it always names the exact cause and the exact command to run
+next (a `/cx-cli-setup` step, or `bash scripts/cx-bootstrap.sh install|upgrade`). Common cases:
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Deny says cx is missing / below version / incapable / unauthenticated | A real, named gate condition | Follow the command in the deny message, or run `/cx-cli-setup` |
+| Deny says the gate/scanner "did not return a result" or hit an "internal error" | A **hook-chain failure** (crash/timeout before or during the scan) — see [Fail-closed by design](#fail-closed-by-design) | Retry the same operation once; if it recurs, check `~/.checkmarx/agent-logs/cursor/cx-devassist.jsonl` for `reason_code":"gate_crash"` / `"error_during_block"` and re-run the bundled bootstrap |
+| A batch of several Write/Edit calls at once denies with a timeout | Probe/scan contention across the batch (mitigated, not eliminated, by the gate's cache-miss lock) | Retry the failed file(s); a warm cache (post-first-success) makes this rare |
+| Hooks/rules don't show up in Settings → Hooks and Rules | Not re-installed after a plugin update, or installed to the wrong scope | Re-run `/cx-install-wiring` (CLI) or `scripts/install-hooks.sh`, then restart the session |
+| `cx` on PATH but the gate still denies "not installed" | The gate resolves by absolute path (`CX_BINARY` → canonical store → PATH), not PATH alone | See `skills/cx-cli-setup/references/troubleshooting.md` → *"A gated action is still denied after `cx version` works"* |
+| Locked-down machine, `cx` can't be placed on any writable PATH | — | Set `CX_BINARY` — see `references/troubleshooting.md` → *"CX_BINARY — point the gate at an explicit cx"* |
+
+For install errors, auth failures, self-hosted base URIs, and the `CX_BINARY` override in full, see
+[`skills/cx-cli-setup/references/troubleshooting.md`](skills/cx-cli-setup/references/troubleshooting.md).
+
+---
+
+## Uninstalling
+
+1. **Remove the plugin folder** — delete (or unlink) `~/.cursor/plugins/local/cx-devassist-cursor/`
+   (or wherever it was copied/symlinked).
+2. **Remove the merged hooks/rules**, if `install-hooks.sh` was run:
+   - Hooks: edit `~/.cursor/hooks.json` (or `<project>/.cursor/hooks.json`) and delete the entries
+     whose `command` points at this plugin's `hooks/` scripts. A `hooks.json.bak` from the last merge
+     sits alongside it if you'd rather restore the pre-install file directly.
+   - Rules: delete the `cx-*.mdc` files from `~/.cursor/rules/` (or `<project>/.cursor/rules/`); any
+     `*.bak` backups from the install are alongside them.
+3. **Restart your Cursor CLI session** (or reload the IDE window) so the removed hooks/rules/MCP
+   server stop loading.
+4. **Optional cleanup** — the `cx` CLI itself, its credentials (`~/.checkmarx/checkmarxcli.yaml`), and
+   this plugin's logs/caches (`~/.checkmarx/agent-logs/cursor/`) are left in place, since `cx` is a
+   general-purpose CLI other tools may still use. Remove them by hand if you want a full clean state.
 
 ---
 
