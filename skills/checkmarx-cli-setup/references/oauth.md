@@ -18,12 +18,14 @@ burns a failed login round-trip.
   <tenant>` (concrete values, not the literal `<url>` / `<tenant>` placeholders), your administrator
   preconfigured them in the plugin's `config/cx-onboarding.properties`. Use those values as-is: go
   straight to running that login command and do **not** ask Question 2.
+- If the deny message lists **numbered environments** from an earlier `cx auth login` on this machine,
+  present them in chat and ask the developer to pick **one** (or supply a different URL + tenant).
+  Run only the command for the environment they choose — never auto-pick.
 - Only when the flags are still **bare placeholders** (`<url>` / `<tenant>`) do you ask Question 2
   below.
 
-**Question 2 — ask in a plain chat message (NOT `AskUserQuestion`)**: the tenant is org-specific
-free text with no preset options, and one `AskUserQuestion` cannot return two independent free-text
-values. Collect both in a single reply:
+**Question 2 — ask in a plain chat message**: collect URL and tenant in a single reply (both are
+org-specific free text):
 
 > "Browser sign-in it is. Reply with **two things, comma-separated**, in one message — your URL,
 > then your tenant:
@@ -53,27 +55,24 @@ value or no URL token, re-show the same combined prompt once. If `cx auth login`
 a "missing URI" error and omitting `--tenant` fails with "please provide tenant". Run it with stdout
 discarded (see the security note).
 
-**Invoke cx exactly as the gate's deny message spells it out — do not type a doc-static `cx auth
-login`.** On a first-install session `cx` is **not on PATH**, so a **bare** `cx auth login` exits 127
-(`command not found`). The auth deny message **embeds the resolved recovery command with cx's absolute
-path** (the canonical store — `~/.checkmarx/bin/cx` on Unix, `%LOCALAPPDATA%\Checkmarx\cx\cx.exe` on
-Windows — while cx isn't yet on PATH). Take that exact cx invocation and append the two login flags:
+**Run the login command via `run_shell_command` (Gemini CLI's shell tool).** On a first-install
+session `cx` is **not on PATH**, so a **bare** `cx auth login` exits 127 (`command not found`).
+The auth deny message **embeds the resolved recovery command with cx's absolute path** (the canonical
+store — `~/.checkmarx/bin/cx` on Unix, `%LOCALAPPDATA%\Checkmarx\cx\cx.exe` on Windows — while cx
+isn't yet on PATH). Copy that exact command from the deny message:
 
-**Bash tool (Gemini CLI / macOS / Linux):**
+**Unix / macOS / Linux** (`run_shell_command`):
 ```bash
-# Use the resolved cx path from the deny message (bare `cx` works only once it is on PATH):
 "$HOME/.checkmarx/bin/cx" auth login --base-auth-uri <your Checkmarx One URL> --tenant <tenant> 1>/dev/null
 ```
 
-**PowerShell tool (Gemini CLI on Windows):**
+**Windows** (`run_shell_command` — Gemini CLI runs via PowerShell):
 ```powershell
-# Use the & call operator (required for paths with spaces) and $null to suppress stdout:
 & "C:/Users/<you>/AppData/Local/Checkmarx/cx/cx.exe" auth login --base-auth-uri <your Checkmarx One URL> --tenant <tenant> 1>$null
 ```
 Replace the path above with the resolved cx path shown in the gate's deny message.
-The `&` call operator is mandatory in PowerShell when invoking an executable by absolute path.
+On Windows the `&` call operator is mandatory when invoking an executable by absolute path.
 Use `1>$null` (not `1>/dev/null`) to suppress the live token on PowerShell.
-Run this with the **powershell tool**, not the Bash tool.
 
 **Run this YOURSELF — do NOT hand it to the developer with the `!` prefix.** This
 is the OAuth path: the agent runs the resolved login command itself (unlike an API key, which the
@@ -86,11 +85,15 @@ was denied by the gate, that does NOT mean the resolved `cx auth login` will be 
 are allowed; run it.
 
 - The default browser opens automatically. Tell the developer: *"Your browser is opening — complete
-  the Checkmarx login and MFA there. You have about 5 minutes."*
+  the Checkmarx login and MFA there. This command waits until you finish (about 5 minutes)."*
+- **Do not ask them to reply "done" / "logged in".** `cx auth login` **blocks until the browser
+  flow finishes** (or times out after ~5 minutes). When the tool call returns, go straight to
+  Phase 3 (`cx auth validate`) yourself.
+- **Run it in the foreground** with a `run_shell_command` timeout of **at least 6 minutes**
+  (`timeout: 360000` or the client's equivalent). Do **not** background it — a backgrounded login
+  returns immediately, which is what makes the agent stop and wait for a chat reply.
 - Progress text ("Opening browser to…", "Waiting for authentication…") goes to **stderr**, so it
   stays visible; only the secret-bearing stdout is dropped.
-- The command **blocks until the developer finishes** (or times out after ~5 minutes). Run it in the
-  background or with a timeout of at least 5–6 minutes — do not kill it early.
 - Headless / SSH (no browser): add `--no-browser`; the CLI prints the authorize URL to stderr.
 - On the redirect to `http://localhost:<port>/checkmarx1/callback` the token is saved as
   `cx_apikey`. Confirm success with `cx auth validate` (Phase 3) — do not read the login output.

@@ -35,7 +35,7 @@ def _log(event, **fields):
 # is a fast pre-filter: capability is decided by the probe below (_capabilities_present), not by
 # this number. Keep IDENTICAL to scripts/cx-min-version and scripts/cx-bootstrap.sh.
 # (search marker: CX_MIN_VERSION)
-_MIN_VERSION_FALLBACK = (2, 3, 58)
+_MIN_VERSION_FALLBACK = (2, 3, 59)
 
 # The cx executable the GATE invokes for its own probes, resolved by ABSOLUTE path where possible so
 # the gate works the instant cx is installed — even before it is on PATH. A freshly-installed cx in
@@ -142,16 +142,51 @@ def _chmod_600(path):
         pass
 
 
+def _is_number(value):
+    """True for a real int/float — NOT bool (True == 1 in Python, so a bare isinstance check
+    would accept a boolean where a timestamp/mtime is expected)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _read_capped(path, max_bytes, encoding="utf-8-sig"):
+    """The file's text, or None if it is unreadable, undecodable, or larger than max_bytes.
+
+    Reads max_bytes + 1 so the length test can distinguish "exactly at the cap" from "over it"; an
+    implausibly large state/config file is refused rather than parsed. Never raises — the shared read
+    for every small bundled file the gate consumes, each of which maps None to its own sentinel.
+    utf-8-sig by default: an admin editing a bundled file with Windows Notepad can prepend a BOM,
+    which would otherwise corrupt the first key/line. It is a no-op when there is no BOM.
+    `path` is normalized to an absolute path first — every production caller already passes an
+    absolute, code-resolved path (never raw user/agent input), so this is belt-and-suspenders."""
+    try:
+        safe_path = os.path.abspath(os.path.normpath(path))
+        with open(safe_path, "r", encoding=encoding) as f:
+            raw = f.read(max_bytes + 1)
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    return None if len(raw) > max_bytes else raw
+
+
+def _assistant_name():
+    """Which client owns this hook process. hooks.json exports CX_ASSISTANT; keep the value
+    as a short allowlisted token so a dirty env var cannot pick an arbitrary subdirectory.
+    Default gemini-cli for this extension (cx_log.py defaults to claude for the Claude plugin)."""
+    raw = os.environ.get("CX_ASSISTANT", "")
+    if raw in ("gemini-cli", "claude", "copilot", "copilot-cli"):
+        return raw
+    return "gemini-cli"
+
+
 def _agent_log_dir():
-    """Per-user directory for the gate's caches and bypass audit (and, later, structured
-    logs). Default ~/.checkmarx/agent-logs/claude/ — a user-owned 0700 dir, so these
-    predictable filenames can't be pre-planted by another local user the way world-writable
-    OS-temp files could. CX_LOG_DIR overrides the location. Falls back to the OS temp dir
-    only if the per-user dir can't be created, so caching/auditing degrade gracefully and
-    this never raises into the gate."""
+    """Per-user directory for the gate's caches, login history, and audit files. Default
+    ~/.checkmarx/agent-logs/<assistant>/ — a user-owned 0700 dir, so these predictable
+    filenames can't be pre-planted by another local user the way world-writable OS-temp
+    files could. CX_LOG_DIR overrides the location (no assistant suffix — the caller owns
+    the layout). Falls back to a private temp dir only if the per-user dir can't be created,
+    so caching/auditing degrade gracefully and this never raises into the gate."""
     override = os.environ.get("CX_LOG_DIR")
     target = override or os.path.join(
-        os.path.expanduser("~"), ".checkmarx", "agent-logs"
+        os.path.expanduser("~"), ".checkmarx", "agent-logs", _assistant_name()
     )
     try:
         os.makedirs(target, exist_ok=True)
@@ -178,7 +213,7 @@ def _state_path(name):
     return os.path.join(_AGENT_LOG_DIR, name) if _AGENT_LOG_DIR else None
 
 
-# Per-user state lives under _AGENT_LOG_DIR (default ~/.checkmarx/agent-logs/claude, 0700),
+# Per-user state lives under _AGENT_LOG_DIR (default ~/.checkmarx/agent-logs/<assistant>, 0700),
 # NOT the world-writable OS temp dir, so these predictable filenames can't be pre-planted.
 # Each may be None if no private state dir could be created (then caching/auditing is skipped).
 _AUTH_CACHE_FILE = _state_path("cx_auth_cache")
@@ -219,6 +254,165 @@ _READONLY_COMMANDS = frozenset({
     "wc", "which", "stat", "file", "basename", "dirname", "realpath", "readlink", "tree",
     "df", "du", "ps", "grep", "rg", "cut", "uniq", "cmp", "cksum", "md5sum", "sha256sum",
 })
+
+# --- Scannable files: what the three Checkmarx engines can actually analyse ------------------------
+# The readiness chain (cx present → recent → capable → authenticated → licensed → really scanning) is
+# only worth ENFORCING for a file one of the engines would look at. Blocking a README.md write because
+# cx is unauthenticated helps nobody: ASCA, KICS and SCA each self-skip an unsupported path, so that
+# write would have gone through UNSCANNED even on a perfectly healthy cx — the block was friction, not
+# protection.
+#
+# The set lives in config/cx-scannable-files so an administrator can adjust coverage without editing
+# code. THIS is its only reader — see that file's header for the rule's exact provenance.
+_SCANNABLE_FILES_MAX_BYTES = 65536
+
+# The line kinds config/cx-scannable-files may declare. Each mirrors how the corresponding engine
+# filter compares (ast-vscode-extension constants.ts), so the plugin gates exactly what the
+# engines scan:
+#   ext       → path.extname(...)        (ASCA, SCA `*.csproj` / `*.sbt` / `*.gradle`)
+#   suffix    → endsWith / HasSuffix     (KICS — why `.auto.tfvars` matches but a plain `.tfvars`
+#                                         is NOT scanned, and so must NOT be gated — and SCA
+#                                         `*.gradle.kts`, whose final extname is `.kts`)
+#   base      → exact basename           (KICS `Dockerfile`, SCA's manifest filename set)
+#   txtprefix → a *.txt manifest         (SCA)
+_SCANNABLE_KINDS = ("ext", "suffix", "base", "txtprefix")
+
+# The tool_input key holding the target path, in priority order. NotebookEdit (Claude Code) carries
+# notebook_path rather than file_path; Gemini CLI's write_file/replace and Copilot CLI's create/edit
+# all carry file_path — so both are consulted before concluding "this is not a file write".
+_FILE_TOOL_PATH_KEYS = ("file_path", "notebook_path")
+
+# The tools whose payloads the file-type rule may narrow, across every assistant this gate serves.
+# Anything NOT listed here is gated unconditionally — see _is_scannable_file. Kept in step with the
+# file-write matchers in hooks/hooks.json; a new file tool added there but not here is gated
+# (fail closed), which is the safe direction.
+#   Claude Code:  Write, Edit, MultiEdit, NotebookEdit
+#   Gemini CLI:   WriteFile, write_file, replace   (hooks.json matcher: WriteFile|write_file|write_.*|replace)
+#   Copilot CLI:  create, edit
+_FILE_WRITE_TOOLS = frozenset({
+    "Write", "Edit", "MultiEdit", "NotebookEdit",
+    "WriteFile", "write_file", "replace",
+    "create", "edit",
+})
+
+
+def _scannable_files_path():
+    """Absolute path to the bundled scannable-file list, relative to THIS file (…/hooks) — mirrors
+    _admin_config_path() / _bootstrap_script_path(); never uses ${CLAUDE_PLUGIN_ROOT} /
+    ${extensionPath}, which are empty in the agent's own shell."""
+    return os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config", "cx-scannable-files")
+    )
+
+
+def _load_scannable_files(path=None):
+    """config/cx-scannable-files parsed to {kind: frozenset(lowercased values)}, or None when it is
+    missing, oversized, undecodable, or parses to nothing. Unknown line kinds are silently dropped
+    and this NEVER raises — an escaped exception would trip _fail_closed_on_crash and brick every
+    tool call.
+
+    Unlike _load_admin_config, a load failure is NOT benign: returning None makes _is_scannable_file
+    gate EVERY file (fail CLOSED). An empty parse is treated as a failure for the same reason — a
+    truncated or garbled file must not read as "nothing is scannable", which would silently disable
+    the gate everywhere. `path` is a test hook."""
+    try:
+        if path is None:
+            path = _scannable_files_path()
+        raw = _read_capped(path, _SCANNABLE_FILES_MAX_BYTES)
+        if raw is None:
+            return None
+        parsed = {kind: set() for kind in _SCANNABLE_KINDS}
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or ":" not in line:
+                continue
+            kind, _sep, value = line.partition(":")
+            kind = kind.strip().lower()
+            value = value.strip().lower()
+            if value and kind in parsed:
+                parsed[kind].add(value)
+        if not any(parsed.values()):
+            return None
+        return {kind: frozenset(values) for kind, values in parsed.items()}
+    except Exception:
+        return None
+
+
+def _effective_basename(base):
+    """The basename that will ACTUALLY be created, or `""` when it cannot be determined.
+
+    Windows silently discards trailing spaces and dots from a filename, and `name::$DATA` addresses
+    the default data stream of `name` — so `payload.py `, `payload.py.` and `payload.py::$DATA` all
+    create `payload.py`. Classifying the raw string would let a scannable file be laundered through
+    the unscannable carve-out: the gate sees extension `.py ` (no match → allow), and cx's own ASCA
+    filter sees the same, so real Python source reaches disk unscanned with an `allow` audit record.
+
+    Applied on EVERY OS, not just Windows: the payload can name a path on a Windows share or be
+    replayed cross-platform, and stripping a trailing space/dot can only ever make the gate MORE
+    conservative. A stream suffix yields `""` — everything after `::` is not part of the filename, so
+    the target is genuinely unknown and the caller must gate. `""` rather than a distinct sentinel
+    because "stripped to nothing" and "cannot tell" lead to the same verdict at the only call site."""
+    if "::" in base:
+        return ""
+    return base.rstrip(" .")
+
+
+def _is_scannable_file(hook_input):
+    """True when this call targets a file one of the Checkmarx engines can analyse — i.e. when the
+    readiness chain is worth enforcing. Reads config/cx-scannable-files via _load_scannable_files.
+
+    FAIL CLOSED on every uncertainty, so this can only ever narrow the gate for files that are
+    PROVABLY unscannable:
+      - a tool that is not a known FILE-WRITE tool (MCP calls, shell commands, and any assistant
+        whose tool names this gate does not know) → True
+      - a missing / empty / non-string path → True
+      - an unloadable or empty config → True
+    Only a positively identified non-scannable path on a known file-write tool returns False.
+    Force-gate everything with CX_GATE_ALL_FILES=1.
+
+    The tool-name check is not redundant with the path lookup: an `mcp__Checkmarx__*` remediation call
+    can legitimately carry a `file_path` argument, and keying only off the PRESENCE of that key would
+    let such a call skip the entire readiness chain — cx is required for the MCP to work at all, so it
+    must always be gated.
+
+    Comparison is case-insensitive. ASCA and KICS lowercase before matching; SCA's basename lookup is
+    case-SENSITIVE in Go, so `Package.json` is gated here but would not be scanned there — over-gating
+    by a hair, which is the fail-closed direction."""
+    if os.environ.get("CX_GATE_ALL_FILES") == "1":
+        return True
+    if _tool_name(hook_input) not in _FILE_WRITE_TOOLS:
+        return True
+    tool_input = _tool_input(hook_input)
+    if not isinstance(tool_input, dict):
+        return True
+    path = None
+    for key in _FILE_TOOL_PATH_KEYS:
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            path = value
+            break
+    if path is None:
+        return True
+    table = _load_scannable_files()
+    if table is None:
+        return True
+    # Normalize separators before taking the basename: the gate may run under Git-Bash (POSIX
+    # semantics) while the agent types a native Windows path, where os.path.basename would not split
+    # on backslashes. `""` from _effective_basename means "cannot determine the real target" (an NTFS
+    # stream suffix, or a name that strips to nothing) — both gate.
+    base = _effective_basename(os.path.basename(path.replace("\\", "/").rstrip("/")).lower())
+    if not base:
+        return True
+    if base in table["base"]:
+        return True
+    _root, ext = os.path.splitext(base)
+    if ext and ext in table["ext"]:
+        return True
+    if any(base.endswith(suffix) for suffix in table["suffix"]):
+        return True
+    if ext == ".txt" and any(base.startswith(prefix) for prefix in table["txtprefix"]):
+        return True
+    return False
 
 
 def _normalize_path(p):
@@ -594,31 +788,78 @@ def _load_admin_config(path=None):
     return result
 
 
-def _oauth_recovery_bullet(cfg):
-    """The 'Browser sign-in (OAuth)' bullet for an auth-recovery deny context, branched on whether the
-    admin config supplied a VALIDATED base-auth-uri AND tenant. Both present -> embed the real values
-    and tell the agent to use them as-is (skip the URL/tenant question). Otherwise -> the original
-    ask-the-developer / never-guess guidance, now with the regional-URLs doc link. The embedded values
-    are pre-validated to a shell-inert charset, so the resulting `"<cx>" auth login ...` command still
-    passes _is_auth_recovery_command's bare-command guard."""
+# The shared opening of every _oauth_recovery_bullet branch — one copy, so a wording change cannot
+# silently miss a branch (there are three of them now).
+_OAUTH_BULLET_LEAD = (
+    "- Browser sign-in (OAuth) -- only if the developer picks this: you may run it yourself "
+    "(it opens the developer's browser with MFA; no secret passes through you; it resolves cx "
+    "by absolute path so it works before cx is on PATH). "
+)
+
+
+def _oauth_recovery_bullet(cfg, history=None):
+    """The 'Browser sign-in (OAuth)' bullet for an auth-recovery deny context, in precedence order:
+
+      1. the admin config supplied a VALIDATED base-auth-uri AND tenant -> embed the real values and
+         tell the agent to use them as-is (skip the URL/tenant question);
+      2. else the login history holds previously used (URL, tenant) pairs -> list them as CHOICES the
+         developer must pick from (never auto-used);
+      3. else the ask-the-developer / never-guess guidance, with the regional-URLs doc link.
+
+    Every embedded value is pre-validated to a shell-inert charset, so each resulting
+    `"<cx>" auth login ...` command still passes _is_auth_recovery_command's bare-command guard.
+    `history=None` (the production call) loads the confirmed pairs LAZILY -- only once the admin
+    branch has not short-circuited -- so admin-over-history precedence lives exactly once, as branch
+    order; tests inject explicit lists."""
     base = cfg.get("cx_base_auth_uri")
     tenant = cfg.get("cx_tenant")
     if base and tenant:
         cmd = _cx_recovery_command_str(
             "auth login --base-auth-uri {0} --tenant {1}".format(base, tenant))
-        return (
-            "- Browser sign-in (OAuth) -- only if the developer picks this: you may run it yourself "
-            "(it opens the developer's browser with MFA; no secret passes through you; it resolves cx "
-            "by absolute path so it works before cx is on PATH). The --base-auth-uri and --tenant "
+        return _OAUTH_BULLET_LEAD + (
+            "The --base-auth-uri and --tenant "
             "below were PRECONFIGURED BY YOUR ADMINISTRATOR (the plugin's "
             "config/cx-onboarding.properties) -- use them AS-IS and do NOT ask the developer for a URL "
             "or tenant:\n    " + cmd
         )
+    if history is None:
+        history = _confirmed_login_pairs()
+    if history:
+        pairs = "".join(
+            "\n    [{0}] {1} @ {2}\n        {3}".format(
+                i + 1, t, b,
+                _cx_recovery_command_str(
+                    "auth login --base-auth-uri {0} --tenant {1}".format(b, t)))
+            for i, (b, t) in enumerate(history))
+        _log("login_history", action="offered", count=len(history))
+        if _GEMINI_CLI_MODE:
+            pick_instruction = (
+                "chosen, list the numbered environments below in chat and ask the developer to pick "
+                "ONE (or reply with a different URL + tenant if none fit) -- and do NOT run any login "
+                "until the developer explicitly picks one (they may want a different tenant this time). "
+                "If they supply a different URL/tenant, ask per the checkmarx-cli-setup skill's "
+                "oauth.md Question 2 (free-text form) -- NEVER guess or default values that are not "
+                "listed. Ready-to-run command for each:"
+            )
+        else:
+            pick_instruction = (
+                "chosen, present them with the AskUserQuestion tool -- one option per environment, most "
+                "recent first; the tool's built-in \"Other\" lets the developer type a different URL + "
+                "tenant instead -- and do NOT run any login until the developer explicitly picks one "
+                "(they may want a different tenant this time). If they pick \"Other\", ask for the "
+                "URL/tenant per the checkmarx-cli-setup skill's oauth.md Question 2 (free-text form) -- NEVER "
+                "guess or default values that are not listed. Ready-to-run command for each:"
+            )
+        return _OAUTH_BULLET_LEAD + (
+            "The environment(s) below were used in an EARLIER `cx auth login` "
+            "from this machine and are offered as a shortcut, NOT as verified history -- the plugin "
+            "infers success from the credential file changing, which a login the developer abandoned "
+            "can also produce. Treat each as a suggestion to confirm, never as fact. Most recent "
+            "first. Only AFTER OAuth is " + pick_instruction + pairs
+        )
     cmd = _cx_recovery_command_str("auth login --base-auth-uri <url> --tenant <tenant>")
-    return (
-        "- Browser sign-in (OAuth) -- only if the developer picks this: you may run it yourself (it "
-        "opens the developer's browser with MFA; no secret passes through you; it resolves cx by "
-        "absolute path so it works before cx is on PATH). Only AFTER OAuth is chosen, ask for the "
+    return _OAUTH_BULLET_LEAD + (
+        "Only AFTER OAuth is chosen, ask for the "
         "URL/tenant -- NEVER guess or default the --base-auth-uri or --tenant values (e.g. do not try "
         "'iam.checkmarx.net' or a tenant of 'checkmarx') -- ask the developer, per the checkmarx-cli-setup "
         "skill's oauth.md Question 2. Regional URL examples: US https://ast.checkmarx.net, "
@@ -627,6 +868,245 @@ def _oauth_recovery_bullet(cfg):
         "URL. Full region list + how to find your tenant: " + _CX_ENV_URLS_DOC
         + "\n    " + cmd
     )
+
+
+# --- OAuth login history (previously used base-URL/tenant pairs) -----------------------------------
+# The cx CLI deliberately never persists --base-auth-uri/--tenant, so every fresh OAuth login used to
+# re-ask the developer for both. The gate is the one deterministic observer of every login the agent
+# can run (the auth-recovery carve-out) AND of the subsequent auth success, so it remembers the pairs
+# itself: RECORD a pair as `pending` when a `cx auth login` is admitted through the carve-out
+# (snapshotting the credential-file mtime at that moment), PROMOTE it to `confirmed` once auth
+# validates AND the stored credential has CHANGED since the attempt was recorded, and OFFER only
+# confirmed pairs in the auth-recovery deny -- as choices the developer must pick from
+# (AskUserQuestion), never silently auto-used. Admin pre-fill (cx-onboarding.properties) keeps
+# absolute precedence. Everything here is a CONVENIENCE, not a gate control: any read/write error,
+# tampered file, or missing state dir degrades to "no history" and never blocks or raises.
+_LOGIN_HISTORY_FILE = _state_path("cx_login_history.json")
+_LOGIN_HISTORY_MAX = 5        # entries kept on disk
+_LOGIN_HISTORY_OFFER_MAX = 3  # entries rendered in a deny (fits AskUserQuestion's 4-option limit)
+_LOGIN_HISTORY_MAX_BYTES = 16384
+_LOGIN_PENDING_TTL = 3600     # an unpromoted (failed/abandoned) attempt expires after an hour
+
+# Record ONLY `auth login` -- the carve-out also admits `cx auth validate/logout` and `cx configure`
+# (the API-key path), none of which carry a URL/tenant pair worth remembering.
+_AUTH_LOGIN_RE = re.compile(r"\bauth\s+login\b")
+# Flag extraction, `--flag value` and `--flag=value` forms, one optional layer of matched quotes.
+# Lenient by design: the command already passed the bare-command guard (no chaining/substitution/
+# unsafe redirect), and extracted values must still pass the STRICT _ADMIN_URL_RE/_ADMIN_TENANT_RE
+# below -- validation, not extraction, is the security boundary.
+_LOGIN_FLAG_RE = re.compile(
+    r'--(base-auth-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
+
+
+def _parse_login_flags(command):
+    """(base_auth_uri, tenant) from a `cx auth login ...` command, or None. Both flags must be present
+    AND pass the strict admin-config validators -- a half-parsed or invalid pair is never recorded.
+    A repeated flag takes the LAST occurrence, mirroring the CLI's own (cobra) last-flag-wins
+    semantics -- recording the first would remember a pair the login never actually used."""
+    if not command or not _AUTH_LOGIN_RE.search(command):
+        return None
+    found = {}
+    for m in _LOGIN_FLAG_RE.finditer(command):
+        found[m.group(1)] = next(g for g in m.groups()[1:] if g is not None)  # later wins
+    base = found.get("base-auth-uri")
+    tenant = found.get("tenant")
+    if base is None or tenant is None:
+        return None
+    if not (_ADMIN_URL_RE.match(base) and _ADMIN_TENANT_RE.match(tenant)):
+        return None
+    return base, tenant
+
+
+def _valid_login_entry(entry):
+    """The normalized history entry dict, or None if ANY field fails re-validation -- the same
+    strict regexes as the admin config, so a tampered file can at most lose entries; it can never
+    smuggle flags or free text into a deny message or a composed login command. fullmatch, not
+    match: Python's `$` also matches immediately before a trailing newline, so a value carrying one
+    could otherwise be rendered verbatim into a deny message, turning one command into two shell
+    lines. .strip() first mirrors _load_admin_config."""
+    if not isinstance(entry, dict):
+        return None
+    url, tenant = entry.get("base_auth_uri"), entry.get("tenant")
+    status, last_used, cred = entry.get("status"), entry.get("last_used"), entry.get("cred_before")
+    if isinstance(url, str):
+        url = url.strip()
+    if isinstance(tenant, str):
+        tenant = tenant.strip()
+    if not (isinstance(url, str) and _ADMIN_URL_RE.fullmatch(url)):
+        return None
+    if not (isinstance(tenant, str) and _ADMIN_TENANT_RE.fullmatch(tenant)):
+        return None
+    if status not in ("pending", "confirmed") or not _is_number(last_used):
+        return None
+    if cred is not None and not _is_number(cred):
+        return None
+    return {"base_auth_uri": url, "tenant": tenant, "status": status,
+            "last_used": last_used, "cred_before": cred}
+
+
+def _load_login_history(path=None):
+    """The validated entry list from cx_login_history.json (possibly empty), NEWEST FIRST and capped
+    at _LOGIN_HISTORY_MAX -- this loader is the single owner of entry validation and ordering, so
+    every consumer can iterate as-is. FAIL SOFT: missing/oversized/corrupt file or any unexpected
+    error yields [] and never raises (an escaped exception would trip _fail_closed_on_crash).
+    `path` is a test hook."""
+    try:
+        if path is None:
+            path = _LOGIN_HISTORY_FILE
+        if not path:
+            return []
+        raw = _read_capped(path, _LOGIN_HISTORY_MAX_BYTES, encoding="utf-8")
+        if raw is None:
+            return []
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            return []
+        version = data.get("version") if isinstance(data, dict) else None
+        if version != 1 or isinstance(version, bool):
+            return []
+        entries = data.get("entries")
+        if not isinstance(entries, list):
+            return []
+        result = [e for e in (_valid_login_entry(entry) for entry in entries) if e is not None]
+        if len(result) < len(entries):
+            # One capped event per load, not one per entry -- a tampered file with hundreds of
+            # garbage entries must not turn every gated call into hundreds of log writes.
+            _log("login_history", action="invalid", count=min(len(entries) - len(result), 255))
+        result.sort(key=lambda e: e["last_used"], reverse=True)
+        return result[:_LOGIN_HISTORY_MAX]
+    except Exception:
+        return []
+
+
+def _save_login_history(entries, path=None):
+    """Best-effort ATOMIC write (temp file in the same dir + os.replace -- atomic on NTFS too) so a
+    concurrent gate run never reads a torn file; last writer wins, which at worst loses one
+    convenience entry. Ordering is not this writer's concern -- _load_login_history re-normalizes
+    (sorts newest-first) on every read. Never raises."""
+    try:
+        if path is None:
+            path = _LOGIN_HISTORY_FILE
+        if not path:
+            return
+        entries = entries[:_LOGIN_HISTORY_MAX]
+        directory = os.path.dirname(path) or "."
+        fd, tmp = tempfile.mkstemp(prefix=".cx_login_history-", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps({"version": 1, "entries": entries}))
+            _chmod_600(tmp)
+            os.replace(tmp, path)
+        except Exception:
+            # Broad on purpose: ANY failure after mkstemp (not just OSError) must not orphan the
+            # temp file in the state dir. Re-swallowed by the outer handler either way.
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
+# An admitted `cx configure set ...` means the developer took the API-key path (or is repairing
+# config) -- any in-flight pending OAuth attempt is abandoned, and keeping it would risk promoting a
+# FAILED login off the credential write the configure is about to make.
+_CX_CONFIGURE_SET_RE = re.compile(r"\bconfigure\s+set\b")
+
+
+def _record_login_attempt(command, path=None):
+    """Note an admitted recovery command in the login history. Two peer cases: an admitted
+    `cx configure set ...` DROPS all pendings (see _CX_CONFIGURE_SET_RE); a parseable
+    `cx auth login ...` upserts its (URL, tenant) pair as a PENDING entry, snapshotting the
+    credential-file mtime so promotion can require the credential to have CHANGED since this
+    attempt. Deduped case-insensitively; re-recording a pair that is already `confirmed` keeps it
+    confirmed (a re-login that merely fails on the network must not demote a known-good pair).
+    Anything else is a no-op. Never raises."""
+    try:
+        if command and _CX_CONFIGURE_SET_RE.search(command):
+            _drop_pending_logins(path)
+            return
+        parsed = _parse_login_flags(command)
+        if parsed is None:
+            return
+        base, tenant = parsed
+        key = (base.lower(), tenant.lower())
+        status = "pending"
+        entries = []
+        for entry in _load_login_history(path):
+            if (entry["base_auth_uri"].lower(), entry["tenant"].lower()) == key:
+                if entry["status"] == "confirmed":
+                    status = "confirmed"
+                continue
+            entries.append(entry)
+        entries.insert(0, {"base_auth_uri": base, "tenant": tenant, "status": status,
+                           "last_used": time.time(), "cred_before": _credential_mtime()})
+        _save_login_history(entries, path)
+        _log("login_history", action="recorded")
+    except Exception:
+        pass
+
+
+def _drop_pending_logins(path=None):
+    """Remove all PENDING entries (confirmed ones stay). No file write when nothing changes.
+    Never raises."""
+    try:
+        entries = _load_login_history(path)
+        kept = [e for e in entries if e["status"] != "pending"]
+        if len(kept) != len(entries):
+            _save_login_history(kept, path)
+            _log("login_history", action="pruned", count=len(entries) - len(kept))
+    except Exception:
+        pass
+
+
+def _promote_pending_login(path=None):
+    """Called once auth validates: promote the newest PENDING attempt whose credential-mtime
+    snapshot DIFFERS from the current one -- i.e. the stored credential changed after that attempt
+    was recorded, which (together with auth now validating) is the best available evidence the
+    attempt succeeded. NOT a proof: a credential written out-of-band between record and promote
+    (e.g. the developer runs `cx configure set` in their OWN terminal, invisible to the gate) can
+    promote a failed pair -- bounded by the developer having to confirm every offered pair before
+    use. Older pendings are superseded -> dropped once something promotes; an untouched-credential
+    pending is still in-flight -> kept until _LOGIN_PENDING_TTL. Cheap when idle: one stat when no
+    history file exists. Never raises."""
+    try:
+        if path is None:
+            path = _LOGIN_HISTORY_FILE
+        if not path or not os.path.exists(path):
+            return
+        entries = _load_login_history(path)  # newest first, per the loader's contract
+        if not any(e["status"] == "pending" for e in entries):
+            return
+        cred = _credential_mtime()
+        now = time.time()
+        kept = []
+        promoted = False
+        for entry in entries:
+            if entry["status"] != "pending":
+                kept.append(entry)
+            elif not promoted and cred is not None and cred != entry.get("cred_before"):
+                kept.append(dict(entry, status="confirmed", last_used=now))
+                promoted = True
+            elif not promoted and (now - entry["last_used"]) <= _LOGIN_PENDING_TTL:
+                kept.append(entry)  # still in-flight (login command may not have finished yet)
+            # else: superseded by the newer promoted attempt, or stale/abandoned -> dropped
+        if promoted or len(kept) != len(entries):
+            _save_login_history(kept, path)
+            _log("login_history", action="promoted" if promoted else "pruned")
+    except Exception:
+        pass
+
+
+def _confirmed_login_pairs(path=None):
+    """The offerable (base_auth_uri, tenant) pairs: CONFIRMED entries only, most recent first (the
+    loader's order), capped at _LOGIN_HISTORY_OFFER_MAX. Never raises."""
+    try:
+        confirmed = [(e["base_auth_uri"], e["tenant"])
+                     for e in _load_login_history(path) if e["status"] == "confirmed"]
+        return confirmed[:_LOGIN_HISTORY_OFFER_MAX]
+    except Exception:
+        return []
 
 
 _SCANNER_PROBE_TIMEOUT = 12
@@ -1095,6 +1575,17 @@ def cx_check():
         _log("gate_decision", decision="allow", reason_code="read_only", tool_name=tool)
         return
 
+    # 2b. Files no Checkmarx engine can scan are not worth gating: ASCA, KICS and SCA each self-skip
+    #     an unsupported path, so a README.md / .css / .sql write would have gone through UNSCANNED
+    #     even on a healthy cx — blocking it on "cx isn't authenticated" is pure friction. Placed
+    #     BEFORE the CX_BINARY check below so such a write is not blocked by a bad CX_BINARY either.
+    #     Fails CLOSED on any uncertainty (unknown tool, missing path, unreadable config), so MCP
+    #     calls and unrecognised assistants stay gated exactly as before. Restore the previous
+    #     behaviour with CX_GATE_ALL_FILES=1.
+    if not _is_scannable_file(hook_input):
+        _log("gate_decision", decision="allow", reason_code="unscannable_file", tool_name=tool)
+        return
+
     # 2.5 CX_BINARY override: validate before trusting it. A set-but-invalid value fails CLOSED
     #     (never silently use a different binary). When valid, every gate probe below uses it,
     #     and the version/capability/auth gates then prove it's a real, recent, capable, authed cx.
@@ -1108,6 +1599,9 @@ def cx_check():
             context=(
                 cx_err + ". Set CX_BINARY to the ABSOLUTE path of a real, executable cx binary, "
                 "or unset it to use cx from PATH. All agent actions are blocked fail-closed."
+                # A set-but-invalid CX_BINARY IS the pin case by definition — pass it literally. The
+                # note owns the remediation options, so don't restate them here.
+                + _cx_binary_pin_note("binary")
             ),
             reason_code="cx_binary_invalid",
             tool_name=tool,
@@ -1296,6 +1790,12 @@ def cx_check():
             version_state=state,
         )
 
+    # Auth verified — if a recorded `cx auth login` changed the stored credential, promote its
+    # URL/tenant pair to offerable. Unconditional on purpose: the first gated call after a login can
+    # come arbitrarily late (next-day session), so any freshness gate here would silently strand
+    # pendings forever. Steady-state cost is one stat (no history file -> immediate return).
+    _promote_pending_login()
+
     # 6b. Scanner readiness. `cx auth validate` (step 6) and the native scanner authenticate
     #     DIFFERENTLY: validate accepts an OAuth refresh token, but `cx hooks claude-*` only
     #     extracts an API key and otherwise runs in SILENT PASS-THROUGH (allow everything, NO scan).
@@ -1418,7 +1918,86 @@ def _fail_closed_on_crash():
         pass
 
 
+# The OBSERVER's matcher: any cx-looking executable token followed by `auth`/`configure`.
+#
+# Deliberately NOT _is_auth_recovery_command. That is a PERMISSION guard: it pins the absolute form
+# to the gate's own resolved _cx_exe() so an attacker-chosen path can never be admitted, and its
+# false negatives used to be self-correcting — a command it failed to match simply got denied, and
+# the developer saw why. As an OBSERVATION filter that safety property inverts: a false negative is
+# silent data loss, and the remembered-environments feature just never fires with nothing logged to
+# explain it.
+#
+# Accepting any path that ends in cx / cx.exe is safe here because this drives recording only, never
+# a permission decision: the extracted values still pass _parse_login_flags + _valid_login_entry, and
+# an offered pair is always presented to the developer to choose, never used automatically. The
+# _bare_bash_command shape guard is still applied by the caller, so a chained command or one that
+# redirects its (token-bearing) stdout to a real file is not recorded.
+_OBSERVABLE_LOGIN_RE = re.compile(
+    r'^\s*&?\s*"?(?:[^"\s]*[/\\])?cx(?:\.exe)?"?\s+(?:auth|configure)\b', re.IGNORECASE
+)
+
+
+def _is_observable_login_command(hook_input):
+    """True for a bare shell `<any cx path> auth|configure …` worth recording — see
+    _OBSERVABLE_LOGIN_RE for why this is looser than the auth-recovery permission guard.
+
+    MUST accept the documented oauth.md forms, or login history is silently never written:
+      Unix:    `"$HOME/.checkmarx/bin/cx" auth login … 1>/dev/null`
+      Windows: `& "C:/Users/…/cx.exe" auth login … 1>$null`
+    `_bare_bash_command` rejects both the PowerShell call operator (`&` is in _SHELL_CHAINING)
+    and `1>$null` (only `/dev/null` is a bash-safe sink). This observer strips those sanctioned
+    tokens first, then applies the same no-chaining / no-real-file-redirect rule."""
+    command = _bash_command(hook_input)
+    if not command:
+        return False
+    stripped = _NULL_REDIRECT_RE.sub(" ", command)
+    stripped = _PS_NULL_REDIRECT_RE.sub(" ", stripped)
+    if ">" in stripped or "<" in stripped:
+        return False
+    s = stripped.lstrip()
+    if s.startswith("&"):
+        s = s[1:].lstrip()
+    if any(tok in s for tok in _SHELL_CHAINING):
+        return False
+    return _OBSERVABLE_LOGIN_RE.match(s) is not None
+
+
+def cx_record_login():
+    """OBSERVER-ONLY mode, invoked as `cx_check.py record-login` by hooks/cx_record_login.sh on the
+    run_shell_command hook. Notes the URL/tenant of a `cx auth login` so a later logged-out session
+    can offer it instead of re-asking the developer from scratch.
+
+    It exists because for an AGENT-ISSUED login the command line is the only place those values ever
+    appear (ast-cli's `cx auth login` persists a URL/tenant to disk only on its INTERACTIVE path,
+    which an agent cannot drive — see cx_record_login.sh's header for the full auth_login.go
+    reasoning).
+
+    This function CANNOT block: it never calls _deny, and main() forces exit 0 on every path. The
+    run_shell_command matcher in hooks.json carries no readiness gate at all — only this observer —
+    so a broken cx can never stop a shell command.
+
+    Recording keeps the bare-command shape guard (no chaining, no redirect of the token-bearing
+    stdout to a real file) but uses the LOOSER _is_observable_login_command rather than the gate's
+    pinned permission guard — see _OBSERVABLE_LOGIN_RE. That matcher also admits the PowerShell
+    `& "abs-path" auth login … 1>$null` form oauth.md tells the Gemini agent to run on Windows.
+    Shell-tool only (mirrors _bash_command's recognised tool names, e.g. Gemini CLI's
+    `run_shell_command`)."""
+    hook_input = _read_hook_input()
+    if _is_observable_login_command(hook_input):
+        _record_login_attempt(_bash_command(hook_input))
+
+
 def main():
+    # OBSERVER mode: record-login must NEVER block a tool call, whatever happens inside it. Any
+    # failure is swallowed and the hook still exits 0 — a missing history file, an unwritable state
+    # dir, or a malformed payload must not cost the developer their command.
+    if len(sys.argv) > 1 and sys.argv[1] == "record-login":
+        try:
+            cx_record_login()
+        except BaseException:
+            pass
+        sys.exit(0)
+
     # _deny()/_allow_with_warning() raise SystemExit with the decision JSON already printed.
     # ANY other exception is an internal gate failure → fail CLOSED (deny).
     try:

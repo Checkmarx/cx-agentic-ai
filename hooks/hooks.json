@@ -2,7 +2,7 @@
   "hooks": {
     "BeforeTool": [
       {
-        "matcher": "run_shell_command|mcp_.*|WriteFile|write_file|write_.*|replace",
+        "matcher": "mcp_.*|WriteFile|write_file|write_.*|replace",
         "hooks": [
           {
             "name": "cx-gate",
@@ -14,7 +14,7 @@
         ]
       },
       {
-        "matcher": "run_shell_command|mcp_.*",
+        "matcher": "mcp_.*",
         "hooks": [
           {
             "name": "cx-guard-tool",
@@ -34,6 +34,18 @@
             "command": "sh -c \"CX_ASSISTANT=gemini-cli sh '${extensionPath}/hooks/cx_run.sh' hooks gemini-before-file-tool\"",
             "timeout": 60000,
             "description": "Checking file write against security policy..."
+          }
+        ]
+      },
+      {
+        "matcher": "run_shell_command",
+        "hooks": [
+          {
+            "name": "cx-record-login",
+            "type": "command",
+            "command": "sh -c \"CX_ASSISTANT=gemini-cli sh '${extensionPath}/hooks/cx_record_login.sh'\"",
+            "timeout": 10000,
+            "description": "Noting Checkmarx environment..."
           }
         ]
       }

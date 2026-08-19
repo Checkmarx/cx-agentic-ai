@@ -181,7 +181,27 @@ class TestGeminiExtension(unittest.TestCase):
                 for h in entry.get("hooks", []):
                     cmds.append(h.get("command", ""))
         self.assertTrue(any("gemini-before-tool" in c for c in cmds),
-                        "run_shell_command/mcp_.* must route to gemini-before-tool")
+                        "mcp_.* must route to gemini-before-tool")
+
+    def test_run_shell_command_is_observer_only(self):
+        hooks = json.loads(_read(_GEMINI_PLUGIN_ROOT, "hooks", "hooks.json"))
+        shell_entries = [e for e in hooks["hooks"]["BeforeTool"]
+                         if e.get("matcher") == "run_shell_command"]
+        self.assertEqual(1, len(shell_entries), "run_shell_command must have exactly one matcher entry")
+        cmds = [h.get("command", "") for h in shell_entries[0].get("hooks", [])]
+        self.assertTrue(any("cx_record_login.sh" in c for c in cmds),
+                        "run_shell_command must route only to cx_record_login.sh")
+        self.assertFalse(any("cx_check.sh" in c for c in cmds),
+                         "run_shell_command must not run the readiness gate")
+
+    def test_scannable_files_config_present(self):
+        path = os.path.join(_GEMINI_PLUGIN_ROOT, "config", "cx-scannable-files")
+        self.assertTrue(os.path.isfile(path), "config/cx-scannable-files must ship with the extension")
+        with open(path, "rb") as f:
+            self.assertIn(b"ext:.py", f.read())
+
+    def test_cx_record_login_script_present(self):
+        self.assertTrue(os.path.isfile(os.path.join(_GEMINI_PLUGIN_ROOT, "hooks", "cx_record_login.sh")))
 
     def test_asca_skill_requires_hook_triage(self):
         asca = _read(_GEMINI_PLUGIN_ROOT, "skills", "checkmarx-devassist-asca", "SKILL.md")
@@ -195,6 +215,17 @@ class TestGeminiExtension(unittest.TestCase):
         self.assertIn("remediate** it", ctx)
         self.assertIn("suppress** it", ctx)
         self.assertIn("Never auto-remediate", ctx)
+
+    def test_gemini_md_requires_post_remediation_rescan(self):
+        ctx = _read(_GEMINI_PLUGIN_ROOT, "GEMINI.md")
+        self.assertIn("Step 4 re-scan is mandatory", ctx)
+        self.assertIn("retry the original blocked", ctx)
+
+    def test_asca_skill_requires_step4_rescan(self):
+        asca = _read(_GEMINI_PLUGIN_ROOT, "skills", "checkmarx-devassist-asca", "SKILL.md")
+        self.assertIn("Step 4 — Re-scan (mandatory)", asca)
+        self.assertIn("Do not skip Step 4", asca)
+        self.assertIn("file-write tool", asca)
 
     def test_skill_files_have_no_utf8_bom(self):
         """Gemini CLI's SKILL.md parser requires frontmatter to start with '---'; a UTF-8 BOM breaks discovery."""
@@ -256,6 +287,10 @@ class TestShippedBytes(unittest.TestCase):
         ("hooks", "cx_log.py"),
     ]
 
+    _GEMINI_ONLY_LF_FILES = [
+        ("config", "cx-scannable-files"),
+    ]
+
     def _bytes(self, plugin_root, *parts):
         with open(os.path.join(plugin_root, *parts), "rb") as f:
             return f.read()
@@ -266,6 +301,9 @@ class TestShippedBytes(unittest.TestCase):
                 self.assertNotIn(b"\r", self._bytes(plugin_root, *parts),
                                  "%s/%s contains CR bytes — must be LF-only" % (
                                      os.path.basename(plugin_root), parts[-1]))
+        for parts in self._GEMINI_ONLY_LF_FILES:
+            self.assertNotIn(b"\r", self._bytes(_GEMINI_PLUGIN_ROOT, *parts),
+                             "cx-agentic-ai/%s contains CR bytes — must be LF-only" % parts[-1])
 
     def test_cx_min_version_is_pure_ascii(self):
         for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT, _GEMINI_PLUGIN_ROOT):

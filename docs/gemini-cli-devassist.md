@@ -24,8 +24,10 @@ hook event — see the
 
 | Tool event | Gate | Native scanner | What it checks |
 |---|---|---|---|
-| `WriteFile` / `write_file` / `write_.*` / `replace` | `cx_check` | `cx hooks gemini-before-file-tool` | Static analysis (ASCA / SAST) of the proposed file content |
-| `run_shell_command` / `mcp_.*` | `cx_check` | `cx hooks gemini-before-tool` | Command-policy scan before shell/MCP tool execution |
+| `WriteFile` / `write_file` / `write_.*` / `replace` — **scannable file** | `cx_check` | `cx hooks gemini-before-file-tool` | Static analysis (ASCA / SAST, KICS / IaC, SCA / manifests) of the proposed content |
+| `WriteFile` / `write_file` / `write_.*` / `replace` — any other file type | — | — | Nothing: no engine can scan it, so the write proceeds |
+| `run_shell_command` | — | — | **Not gated.** One non-blocking observer runs (`cx_record_login`) — see below |
+| `mcp_.*` | `cx_check` | `cx hooks gemini-before-tool` | Policy check before the MCP call is allowed |
 
 Route names (`gemini-before-tool`, `gemini-before-file-tool`, …) match the dispatch routes ast-cx-hooks'
 route catalog defines for Gemini CLI — the same routes `cx hooks install` writes into
@@ -43,6 +45,18 @@ no manual registration step. It exposes code- and package-remediation tools
 (`mcp__Checkmarx__codeRemediation`, …) that the agent calls directly. A single `cx` sign-in covers both
 the CLI and the MCP. See
 [`skills/checkmarx-cli-setup/references/mcp.md`](skills/checkmarx-cli-setup/references/mcp.md).
+
+**End-to-end flow after a hook deny (finding):**
+
+1. Agent presents findings and asks **remediate** vs **suppress** (see `GEMINI.md`).
+2. **Remediate** → activate `checkmarx-devassist-asca` or `checkmarx-devassist-sca` and run **Flow 2
+   Steps 2–5** (MCP fix → apply via file-write tool → **mandatory Step 4 re-scan** → summary).
+3. When Step 4 is clean for in-scope findings → **retry the original blocked write once** (hooks
+   re-scan proposed content).
+4. **Suppress** → run `cx ignore-vulnerability` from the deny message, then retry the write once.
+
+Fixes must use the **file-write tool**, not `run_shell_command` — shell commands are never scanned.
+Step 4 re-scan (`cx scan asca` / `cx scan oss-realtime`) is verification, not optional proactive scanning.
 
 ---
 
@@ -67,6 +81,53 @@ the cross-OS holes that would otherwise let an unscanned action through:
 If cx is missing, below the minimum version, missing the required subcommands (`incapable`), or
 unauthenticated, the gate denies with a clear, actionable message pointing at `/checkmarx-cli-setup`.
 
+**What that deny covers:** writes to [scannable files](#scannable-file-types) and Checkmarx MCP calls.
+**What it does not:** shell commands — ever. So a developer whose cx is broken can still run `git`,
+`npm`, `mvn`, `pytest` and `docker`, and — crucially — install and authenticate cx to unblock
+themselves. The `run_shell_command` matcher carries a single observer,
+[`hooks/cx_record_login.sh`](../hooks/cx_record_login.sh), which notes the URL + tenant of a
+`cx auth login` (see [Remembered login environments](#remembered-login-environments-automatic)) and
+never blocks.
+
+### Scannable file types
+
+The gate blocks a file write only when one of the three engines can analyse that file. The list is
+[`config/cx-scannable-files`](../config/cx-scannable-files), and it mirrors the realtime-scanner
+filters in `ast-vscode-extension` (`packages/core/src/utils/common/constants.ts`), plus — for SCA
+manifests only — the wider package-manager coverage added in `ast-jetbrains-plugin` PR #452
+(`DevAssistConstants.MANIFEST_FILE_PATTERNS`):
+
+| Engine | Files |
+|---|---|
+| **ASCA** (SAST) | `.java` `.cs` `.go` `.py` `.js` `.jsx` |
+| **KICS** (IaC) | `.tf` `.yaml` `.yml` `.json` `.proto` `.dockerfile` `.auto.tfvars` `.terraform.tfvars`, and `Dockerfile` |
+| **SCA** (manifests) | `.csproj` `.sbt` `.gradle` `.gradle.kts` `.podspec` `.podspec.json`; `pom.xml` `package.json` `Directory.Packages.props` `packages.config` `go.mod` `libs.versions.toml` `setup.cfg` `setup.py` `pyproject.toml` `Podfile` `Cartfile` `Cartfile.private` `Package.swift` `Gemfile` `bower.json` `composer.json` `pubspec.yaml`; and `*.txt` starting `requirement`/`constraint` |
+
+`Package@swift-*.swift` (a versioned Swift Package Manager manifest) has no exact representation in
+this file's `ext`/`suffix`/`base`/`txtprefix` vocabulary and is knowingly not covered — adding it would
+mean gating every `.swift` file.
+
+Everything else — `.md`, `.txt`, `.html`, `.css`, `.sql`, `.sh`, `.rb`, `.php`, `.c`, `.rs` — is not
+gated, because no engine would scan it; the write would have gone through unscanned even on a healthy
+cx, so blocking it was friction rather than protection. Two consequences worth knowing:
+
+- `.json` and `.yaml` **are** gated, because KICS scans them. A `tsconfig.json` write still runs the
+  full readiness check even though it is not IaC.
+- A plain `.tfvars` is **not** gated: KICS lists only the compound `.auto.tfvars` /
+  `.terraform.tfvars` suffixes, so it would not be scanned either.
+
+The file has exactly one reader — `cx_check.py`'s `_is_scannable_file`. An earlier revision mirrored
+the rule in POSIX shell so the two shell deny paths could apply it too; keeping two implementations of
+one security decision in agreement proved unworkable (three fail-open divergences shipped), so the
+shell copy was removed. Neither path needed one: when cx is missing entirely, stage 2 **defers** to
+stage 1, which has already applied the rule correctly (it denies a scannable write on cx-absence and
+allows an unscannable one). Only **no working Python 3** denies every file write, since the rule cannot
+be evaluated at all without it. If the config file is unreadable or empty, every write is gated again:
+fail-closed, never fail-open.
+
+Editing it is how an administrator adjusts coverage; distribute it in your forked/internal copy of the
+extension, not in a live install directory (same boundary as `config/cx-onboarding.properties`).
+
 ---
 
 ## Plugin structure
@@ -81,12 +142,14 @@ cx-agentic-ai/                   # repo root — also the extension root
 ├── gemini-extension.json
 ├── GEMINI.md                    # extension context — hooks vs skills routing (loaded every session)
 ├── config/
-│   └── cx-onboarding.properties # OPTIONAL admin pre-fill of Checkmarx One URL + tenant (onboarding)
+│   ├── cx-onboarding.properties # OPTIONAL admin pre-fill of Checkmarx One URL + tenant (onboarding)
+│   └── cx-scannable-files       # the file types the gate blocks on — mirrors ASCA/KICS/SCA filters
 ├── hooks/
 │   ├── hooks.json               # Gemini CLI BeforeTool/hook registration config
 │   ├── cx_check.sh              # POSIX launcher — resolves Git Bash + Python 3, then runs the gate
 │   ├── cx_check.py              # the fail-closed gate (present → recent → capable → authenticated)
 │   ├── _cx_bootstrap_match.sh   # shared bootstrap-command matcher for the shell stages
+│   ├── cx_record_login.sh       # non-blocking observer: remembers OAuth URL + tenant
 │   ├── cx_run.sh                # resolves cx by absolute path; runs the native scanner + MCP bridge
 │   └── cx_log.py                # structured, redacted JSONL logging
 ├── scripts/
@@ -128,6 +191,30 @@ an end-user's live install, which is overwritten on extension update. Values are
 strictly validated (https-only host for the URL; a shell-inert charset for the tenant); an invalid value
 is ignored and the developer is asked as usual. There is deliberately no out-of-tree (`~/.checkmarx` /
 env) override.
+
+### Remembered login environments (automatic)
+
+Without an admin pre-fill, every fresh OAuth sign-in used to re-ask the developer for their Checkmarx
+One URL **and** tenant. `cx auth login` takes two paths in `ast-cli`:
+
+| Form | Prompt | Persisted to `checkmarxcli.yaml` |
+|---|---|---|
+| `cx auth login --base-uri … --tenant …` | skipped | refresh token **only** |
+| `cx auth login` (bare, interactive) | interactive | token **+** URL / tenant |
+
+An agent cannot answer an interactive prompt, so an agent-issued login is always the **flag** form —
+the one that persists nothing. Observing the command as it is issued is therefore the mechanism used,
+which is why the `run_shell_command` matcher keeps one hook:
+[`hooks/cx_record_login.sh`](../hooks/cx_record_login.sh). It records the pair as *pending*
+(snapshotting the credential file's timestamp **before** the login runs), the gate promotes it to
+*confirmed* on the next successful authenticated call, and a later logged-out deny offers up to 3
+confirmed pairs as choices the developer picks from — never auto-used. Stored in `cx_login_history.json` under
+`~/.checkmarx/agent-logs/<assistant>/` (Gemini CLI: `…/gemini-cli/cx_login_history.json`; honours
+`CX_LOG_DIR`).
+
+The observer is **not** a gate: it emits no decision and exits 0 on every path, including a missing
+Python or an unwritable state dir. It cannot block a command. OAuth only — an API-key setup
+(`cx configure set --prop-name cx_apikey …`) carries no URL/tenant to record.
 
 ---
 
@@ -255,6 +342,7 @@ All optional — sensible defaults apply.
 | `CX_LOG_DISABLE=1` | Turn structured logging off entirely. |
 | `CX_ASSISTANT` | Label the assistant in logs (set to `gemini-cli` by `hooks.json`). |
 | `CX_REQUIRE_CHECKSUM=0` | Downgrade `cx-bootstrap.sh` to warn-and-proceed when it can't checksum-verify a download (checksum verification is **required by default**; not recommended). |
+| `CX_GATE_ALL_FILES=1` | Gate **every** file write, not just [scannable types](#scannable-file-types) — restores the previous blocking behaviour for files. |
 | `CX_ALLOW_UNSCANNED=1` | Audited emergency bypass — runs the action **unscanned** and records it to the audit log. |
 
 ---

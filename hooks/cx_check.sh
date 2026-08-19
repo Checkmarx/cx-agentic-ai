@@ -104,9 +104,12 @@ if [ -z "$PYTHON_BIN" ]; then
         . "$SCRIPT_DIR/_cx_bootstrap_match.sh"
         cx_is_bootstrap_command "$INPUT" "$SCRIPT_DIR" && exit 0
     fi
-    # No working Python 3 ⇒ the gate cannot evaluate ⇒ fail CLOSED.
+    # NO file-type carve-out here, deliberately. The scannable-file rule lives in exactly ONE place —
+    # cx_check.py's _is_scannable_file — and cannot be evaluated without Python.
+    # No working Python 3 ⇒ fail CLOSED for every file type. Shell commands are unaffected (they no
+    # longer reach this launcher at all), so the developer can install Python 3 and cx from here.
     _NO_PY_REASON="The Checkmarx security gate could not run: no working Python 3 interpreter was found, so the scanner is inactive. This operation is BLOCKED fail-closed."
-    _NO_PY_CONTEXT="Install Python 3, then retry. Windows: install from https://python.org (NOT the Microsoft Store stub). macOS: \`xcode-select --install\` or \`brew install python3\`. Linux: \`apt install python3\` / \`dnf install python3\` / \`apk add python3\`. The plugin's bundled bootstrap (scripts/cx-bootstrap.sh) installs the cx CLI and itself needs NO Python, but this version/auth gate does. All agent actions remain blocked until a Python 3 interpreter is available."
+    _NO_PY_CONTEXT="Install Python 3, then retry. Windows: install from https://python.org (NOT the Microsoft Store stub). macOS: \`xcode-select --install\` or \`brew install python3\`. Linux: \`apt install python3\` / \`dnf install python3\` / \`apk add python3\`. The plugin's bundled bootstrap (scripts/cx-bootstrap.sh) installs the cx CLI and itself needs NO Python, but this version/auth gate does. Without Python 3 the gate cannot tell which files Checkmarx can scan, so ALL file writes and Checkmarx MCP calls are blocked. Shell commands are never blocked, so you can install Python 3 and cx from here."
     case "$*" in
         *--gemini-cli*)
             printf '{"decision":"deny","reason":"%s %s","systemMessage":"%s"}\n' \

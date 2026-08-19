@@ -132,11 +132,13 @@ When a **hook deny** blocked a write and SAST findings are already in context:
    > code fix) or **suppress** it (mark as a confirmed false positive and unblock the write)?
 
 4. **Wait** for the developer's answer.
-5. **If remediate** → proceed to Flow 2.
+5. **If remediate** → proceed to Flow 2 (all steps — do not stop after MCP or applying the fix).
 6. **If suppress** (confirmed false positive only) → run the `cx ignore-vulnerability` command from
    the hook deny message **verbatim** (use the per-shell line for your environment), then retry the
    original write **once**. Do not improvise JSON or paths.
 7. If the answer is unclear, ask again — do not default to remediate.
+8. **After Flow 2** — when Step 4 shows in-scope findings are resolved, **retry the original blocked
+   write once** (file-write tool) so the hook chain confirms the remediated content passes.
 
 ---
 
@@ -145,7 +147,8 @@ When a **hook deny** blocked a write and SAST findings are already in context:
 Triggered **only** after the developer explicitly chooses **remediate** in Flow 1 or Flow 1b, or
 explicitly asks you to fix ASCA findings.
 
-Once Flow 2 starts, perform all steps **completely and autonomously** — no further user prompts.
+Once Flow 2 starts, perform **all steps (2 through 5) completely and autonomously** — no further user
+prompts. Flow 2 is incomplete if MCP is called or fixes are applied without the Step 4 re-scan.
 
 ### Step 1 — Detect Language
 
@@ -172,8 +175,8 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
   generic fix, and do not apply the `remediationAdvise` text yourself. Leave the finding **unfixed**
   (do not write or edit any code). Then recover the MCP:
 
-  1. The plugin **declares this MCP in `.mcp.json`**, so it starts automatically when the plugin is
-     enabled. If the tool is missing, the usual cause is that cx is not configured/authenticated —
+  1. The extension **declares this MCP in `gemini-extension.json`** (`mcpServers`), so it starts
+     automatically when the extension is enabled. If the tool is missing, the usual cause is that
      the bridge can't derive the URL or auth header without a valid key. Verify with cx by its
      canonical absolute path — `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) or
      `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth validate` (Windows), or a bare `cx auth validate` when
@@ -192,6 +195,8 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
 ### Step 3 — Apply the Fix
 
 - Execute each instruction in `remediation_steps` in order.
+- Apply changes with the **file-write tool** (`WriteFile` / `write_file` / `replace`) — not
+  `run_shell_command`. Shell writes bypass hook scanning.
 - **Only modify code at or around the problematic line** (`line` from scan results) — do not touch unrelated code.
 - For each change, track:
   - File modified
@@ -199,9 +204,10 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
   - Type of change (e.g., input validation, sanitization, secure API usage)
   - Before → after values
 
-### Step 4 — Re-scan
+### Step 4 — Re-scan (mandatory)
 
-After all fixes are applied, re-run (same shell rules as Flow 1 Step 2; bare `cx` only when on PATH):
+After all fixes are applied, re-run (same shell rules as Flow 1 Step 2; bare `cx` only when on PATH).
+**Do not skip this step** — it verifies remediation worked; it is not optional "proactive scanning".
 
 ```bash
 # Unix (macOS/Linux) or Git Bash:
@@ -264,6 +270,7 @@ Pre-existing findings (NOT fixed — outside the scope of this remediation):
 
 - **All remediation MUST come from `mcp__Checkmarx__codeRemediation`. Never apply a manual, generic, or
   non-MCP fix — if the MCP is unavailable, stop and recover it (Step 2), do not improvise.**
+- **Do not skip Step 4** — re-scan is mandatory verification after every remediation
 - Do not prompt the user **during** Flow 2 (triage in Flow 1/1b already happened)
 - Do not skip or reorder fix steps
 - Only modify code corresponding to the identified problematic line
