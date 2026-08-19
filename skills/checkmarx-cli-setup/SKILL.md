@@ -134,6 +134,9 @@ further questions. The credential is stored in plaintext in `~/.checkmarx/checkm
 
 ## Phase 3 — Verify Connectivity
 
+When Path B's `cx auth login` tool call **returns** (browser finished or timed out), run this
+**immediately** — do not wait for the developer to type "done" or "logged in":
+
 ```bash
 cx auth validate
 ```
@@ -155,8 +158,10 @@ The hooks resolve `cx` in a separate process with a different PATH snapshot, so 
    (`references/mcp.md`).
 
 Only once the gate clears: "Setup complete. The `cx` CLI is installed, configured, and
-authenticated, and the security hooks are enforcing." If a gated action is still denied after `cx
-version` works in the shell, see `references/troubleshooting.md`.
+authenticated, and the security hooks are enforcing." If a **scannable** file write is still denied
+after `cx version` works in the shell, see `references/troubleshooting.md`. Shell commands (`git`,
+`npm`, `pytest`, …) are never gated — only writes to file types in `config/cx-scannable-files` and
+Checkmarx MCP calls require a ready `cx`.
 
 ## Error Handling (Any Phase)
 

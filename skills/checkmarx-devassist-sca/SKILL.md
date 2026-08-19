@@ -129,11 +129,13 @@ When a **hook deny** blocked a manifest write and SCA findings are already in co
    > fix) or **suppress** it (mark as a confirmed false positive and unblock the write)?
 
 4. **Wait** for the developer's answer.
-5. **If remediate** → proceed to Flow 2.
+5. **If remediate** → proceed to Flow 2 (all steps — do not stop after MCP or applying the fix).
 6. **If suppress** (confirmed false positive only) → run the `cx ignore-vulnerability` command from
    the hook deny message **verbatim** (use the per-shell line for your environment), then retry the
    original write **once**. Do not improvise JSON or paths.
 7. If the answer is unclear, ask again — do not default to remediate.
+8. **After Flow 2** — when Step 4 shows in-scope findings are resolved, **retry the original blocked
+   write once** (file-write tool) so the hook chain confirms the remediated content passes.
 
 ---
 
@@ -142,7 +144,8 @@ When a **hook deny** blocked a manifest write and SCA findings are already in co
 Triggered **only** after the developer explicitly chooses **remediate** in Flow 1 or Flow 1b, or
 explicitly asks you to fix SCA findings.
 
-Once Flow 2 starts, perform all steps **completely and autonomously** — no further user prompts.
+Once Flow 2 starts, perform **all steps (2 through 5) completely and autonomously** — no further user
+prompts. Flow 2 is incomplete if MCP is called or fixes are applied without the Step 4 re-scan.
 
 ### Step 1 — Gather Finding Details
 
@@ -172,8 +175,9 @@ field naming.
 - If the tool is **not available**: **STOP. Do NOT remediate by any other means** — no manual manifest
   edit, no guessed version bump. Leave the dependency **unchanged**. Then recover the MCP:
 
-  1. The plugin **declares this MCP in `.mcp.json`**, so it starts automatically when the plugin is
-     enabled. If the tool is missing, the usual cause is that cx is not configured/authenticated —
+  1. The extension **declares this MCP in `gemini-extension.json`** (`mcpServers`), so it starts
+     automatically when the extension is enabled. If the tool is missing, the usual cause is that
+     cx is not configured/authenticated —
      verify with `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) /
      `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth validate` (Windows), or a bare `cx auth validate` when
      cx is on PATH; if it fails, run `/checkmarx-cli-setup`.
@@ -188,22 +192,25 @@ field naming.
 
   Then end the remediation flow without modifying any dependency.
 
-  > Note: do **not** run any `cx_mcp_register.sh` script — this plugin registers its MCP via
-  > `.mcp.json`, and `/restart` is the correct recovery.
+  > Note: do **not** run any `cx_mcp_register.sh` script — this extension registers its MCP via
+  > `gemini-extension.json`, and `/restart` is the correct recovery.
 
 ### Step 3 — Apply the Fix
 
 - Execute each instruction in `remediation_steps` in order (typically an upgrade to a fixed version, or
   removal for a malicious package).
+- Apply manifest/lockfile changes with the **file-write tool** (`WriteFile` / `write_file` / `replace`)
+  — not `run_shell_command`. Shell writes bypass hook scanning.
 - **Only modify the affected dependency entry** in the manifest/lockfile — do not touch unrelated
   dependencies. For each change, track: file modified, package, old version → new version (or removal).
 - Regenerate the lockfile if the ecosystem requires it (e.g. `npm install`, `pip install -r`,
   `go mod tidy`) only when the user's workflow expects it; otherwise note that a lockfile refresh is
   needed.
 
-### Step 4 — Re-scan
+### Step 4 — Re-scan (mandatory)
 
-Re-run the Flow 1 Step 2 command on the same manifest.
+Re-run the Flow 1 Step 2 command on the same manifest. **Do not skip this step** — it verifies
+remediation worked; it is not optional "proactive scanning".
 
 The scan reads the WHOLE manifest, so it also reports vulnerable packages you never touched.
 **Remediate only the findings that belong to the packages you changed in Step 3** — everything else is
@@ -259,6 +266,7 @@ Run the `cx ignore-vulnerability` command from the hook deny message verbatim. E
 
 - **All remediation MUST come from `mcp__Checkmarx__packageRemediation`. Never apply a manual, generic,
   or non-MCP fix — if the MCP is unavailable, stop and recover it (Step 2), do not improvise.**
+- **Do not skip Step 4** — re-scan is mandatory verification after every remediation
 - Do not prompt the user **during** Flow 2 (triage in Flow 1/1b already happened)
 - Only modify the dependency entries corresponding to the identified findings.
 - Insert clear `TODO` comments where a finding cannot be safely auto-remediated.

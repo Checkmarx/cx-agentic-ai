@@ -39,7 +39,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Numeric floor only (capability is decided by the gate's probe, not this number). Keep IDENTICAL
 # to scripts/cx-min-version and the fallback in hooks/cx_check.py. (search marker: CX_MIN_VERSION)
-MIN_CX_VERSION_FALLBACK="2.3.58"
+MIN_CX_VERSION_FALLBACK="2.3.59"
 
 GITHUB_RELEASES="https://github.com/Checkmarx/ast-cli/releases"
 GITHUB_LATEST="$GITHUB_RELEASES/latest/download"
@@ -492,7 +492,6 @@ main() {
     _CX_STAGING="$(mktemp -d "${TMP_BASE%/}/cx-bootstrap.XXXXXX")" || die "could not create a staging directory"
     local staged resolved="" tag
     tag="$(resolve_latest_tag)" || tag=""
-    staged="$(download_and_extract "$tag")"
     if [[ -n "$tag" ]]; then
         ASSET="ast-cli_${tag}_${OS}_${ASSET#ast-cli_${OS}_}"
     fi
