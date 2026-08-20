@@ -10,9 +10,6 @@ gated: nothing would have been scanned there, so blocking them cost developers t
 protection. MCP calls are still fully gated. A separate, advisory-only hook fires when the agent tries
 to stop — it cannot block the agent from stopping.
 
-Part of [Checkmarx Agentic AI](../../README.md). This plugin is entirely independent of
-[`cx-devassist`](../cx-devassist/README.md) (the Claude Code plugin) — no files, hooks, or state
-directories are shared between the two.
 
 ### Contents
 
