@@ -145,19 +145,35 @@ field naming.
      `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) /
      `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth validate` (Windows), or a bare `cx auth validate` when
      cx is on PATH; if it fails, run `$codex-cli-setup`.
-  2. Then tell the user the **one** step only they can perform (Codex CLI loads MCP servers at
-     startup, so it can't become live in this running session on its own):
+  2. Do NOT stop here and ask the user to edit `config.toml` themselves — write it yourself. Read
+     `~/.codex/config.toml` (or `<repo>/.codex/config.toml`, whichever this session uses); if
+     `[mcp_servers.Checkmarx]` is already present with the correct `cx_run.sh` path, skip to step 3.
+     Otherwise resolve the plugin's absolute path and use the Edit/Write tool to add or correct the
+     stanza exactly as specified in `references/mcp.md`:
 
-     > "The Checkmarx remediation MCP isn't connected in this session. Please confirm the
-     > `[mcp_servers.Checkmarx]` entry exists in your `~/.codex/config.toml` (or `.codex/config.toml`)
-     > — see `$codex-cli-setup` → `references/mcp.md` for the exact snippet — then restart the Codex
-     > CLI session so it re-reads config.toml and reconnects the server — then ask me to remediate
-     > again. I won't apply a non-Checkmarx fix in the meantime."
+     ```toml
+     [mcp_servers.Checkmarx]
+     command = "sh"
+     args = ["<absolute-path-to-plugin>/hooks/cx_run.sh", "mcp", "bridge"]
+     ```
+
+     Substitute `<absolute-path-to-plugin>` with the real resolved path — never leave the
+     placeholder literal in the file.
+  3. Codex CLI only loads MCP servers when the process starts, and there is no in-session `/restart`
+     or hot-reload — so quitting and relaunching Codex CLI is the **one** step only the user can
+     perform. Tell them:
+
+     > "The Checkmarx remediation MCP wasn't connected, so I've added/verified the
+     > `[mcp_servers.Checkmarx]` entry in your config.toml. Please quit this Codex CLI session (e.g.
+     > `/exit`) and start it again — optionally with `codex resume --last` to pick this conversation
+     > back up — so it re-reads the config and connects the server. Once you're back, ask me to
+     > remediate again. I won't apply a non-Checkmarx fix in the meantime."
 
   Then end the remediation flow without modifying any dependency.
 
   > Note: do **not** run any `cx_mcp_register.sh` script — this plugin registers its MCP via the
-  > `config.toml` snippet above, and restarting the Codex CLI session is the correct recovery.
+  > `config.toml` snippet above, and quitting and relaunching Codex CLI is the correct recovery (there
+  > is no in-session `/restart`).
 
 - If the tool call **errors with "Transport closed"** (or any other connection/transport error) instead
   of returning a result: the MCP server was available but its connection has died mid-session — this is
@@ -165,10 +181,11 @@ field naming.
   **STOP. Do NOT remediate by any other means.** Leave the dependency **unchanged**, then tell the user:
 
   > "The Checkmarx remediation MCP's connection was lost mid-session (Transport closed). Codex CLI has
-  > no hot-reload for MCP servers, so please **restart the Codex CLI session and resume this
-  > conversation** (Codex will reconnect the MCP server on startup). Once you're back, ask me to
-  > continue and I'll proceed with the remediation for the remaining/unfixed findings — you won't need
-  > to repeat the scan or re-describe what's left."
+  > no in-session `/restart` or hot-reload for MCP servers, so please **quit this session (e.g.
+  > `/exit`) and run `codex resume --last`** to pick this conversation back up — Codex will reconnect
+  > the MCP server on the next launch. Once you're back, ask me to continue and I'll proceed with the
+  > remediation for the remaining/unfixed findings — you won't need to repeat the scan or re-describe
+  > what's left."
 
   Then end the remediation flow without modifying any dependency. Do not retry the same tool call in a
   loop — a dead transport will not recover within the same session.

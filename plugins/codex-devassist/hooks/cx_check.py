@@ -787,6 +787,20 @@ def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, versio
             "permissionDecision": "deny",
             "permissionDecisionReason": reason + "\n\n" + context,
         }
+    elif _CODEX_MODE:
+        # Codex CLI renders additionalContext as passive display/log text rather than feeding
+        # it back into the model's turn as actionable instruction (confirmed live: the model saw
+        # "hook context: ..." in the transcript but never acted on the bootstrap command inside
+        # it). Fold reason + context into permissionDecisionReason, same as Copilot, so the
+        # actionable command lives in the one field Codex's model actually treats as an
+        # instruction to comply with.
+        output = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason + "\n\n" + context,
+            }
+        }
     else:
         # Claude Code nested wrapper format.
         output = {
@@ -810,6 +824,16 @@ def _allow_with_warning(context: str, *, reason_code=None, tool_name=None) -> No
         output = {
             "permissionDecision": "allow",
             "permissionDecisionReason": context,
+        }
+    elif _CODEX_MODE:
+        # See _deny(): Codex renders additionalContext as passive display text, not actionable
+        # instruction. Use permissionDecisionReason so the warning is actually seen as such.
+        output = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "permissionDecisionReason": context,
+            }
         }
     else:
         output = {

@@ -263,8 +263,12 @@ case "${1:-} ${2:-}" in
                 printf '{"permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: cx CLI not found (not in CX_BINARY, canonical store, or PATH). This operation is BLOCKED fail-closed. Run /checkmarx-cli-setup to install cx, then retry."}\n'
                 ;;
             *codex*)
+                # Codex renders additionalContext as passive display text rather than feeding it
+                # back into the model's turn as actionable instruction (see cx_check.py's
+                # _deny/_allow_with_warning and cx_check.sh's no-Python branch for the same fix).
+                # Fold reason + context into permissionDecisionReason so Codex actually acts on it.
                 cat <<'JSON'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.","additionalContext":"Run $codex-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. All agent actions remain blocked until cx is available."}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.\n\nRun $codex-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. All agent actions remain blocked until cx is available."}}
 JSON
                 ;;
             *)

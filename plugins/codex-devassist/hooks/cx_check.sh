@@ -96,12 +96,23 @@ if [ -z "$PYTHON_BIN" ]; then
     # documented as "write the reason to stderr instead" (plain text, no JSON) — so exit 2 here
     # with a Codex invocation would produce an unparsed, reason-less hook failure instead of a
     # deny. Detect via the same --codex argv flag cx_check.py uses.
-    cat <<'JSON'
+    case " $* " in
+        *' --codex '*)
+            # Codex renders additionalContext as passive display text rather than feeding it
+            # back into the model's turn as actionable instruction — fold reason + context into
+            # permissionDecisionReason (same fix as cx_check.py's _deny/_allow_with_warning), so
+            # the actual remediation steps aren't silently dropped for Codex.
+            cat <<'JSON'
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security gate could not run: no working Python 3 interpreter was found, so the scanner is inactive. This operation is BLOCKED fail-closed.\n\nInstall Python 3, then retry. Windows: install from https://python.org (NOT the Microsoft Store stub). macOS: `xcode-select --install` or `brew install python3`. Linux: `apt install python3` / `dnf install python3` / `apk add python3`. The plugin's bundled bootstrap (scripts/cx-bootstrap.sh) installs the cx CLI and itself needs NO Python, but this version/auth gate does. All agent actions remain blocked until a Python 3 interpreter is available."}}
+JSON
+            exit 0
+            ;;
+        *)
+            cat <<'JSON'
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security gate could not run: no working Python 3 interpreter was found, so the scanner is inactive. This operation is BLOCKED fail-closed.","additionalContext":"Install Python 3, then retry. Windows: install from https://python.org (NOT the Microsoft Store stub). macOS: `xcode-select --install` or `brew install python3`. Linux: `apt install python3` / `dnf install python3` / `apk add python3`. The plugin's bundled bootstrap (scripts/cx-bootstrap.sh) installs the cx CLI and itself needs NO Python, but this version/auth gate does. All agent actions remain blocked until a Python 3 interpreter is available."}}
 JSON
-    case " $* " in
-        *' --codex '*) exit 0 ;;
-        *)             exit 2 ;;
+            exit 2
+            ;;
     esac
 fi
 
