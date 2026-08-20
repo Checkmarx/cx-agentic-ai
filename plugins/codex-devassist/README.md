@@ -121,8 +121,8 @@ plugins/codex-devassist/
 │   └── cx-min-version           # minimum cx version (numeric floor)
 └── skills/
     ├── codex-cli-setup/            # guided cx install + authentication (router + references/)
-    ├── codex-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
-    └── codex-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
+    ├── cx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
+    └── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
 ```
 
 > Tests live at the **repo root** (`tests/`), outside the shipped plugin, so they aren't
@@ -136,8 +136,8 @@ MCP. Codex CLI invokes skills with a **`$name`** prefix (not a `/slash-command` 
 
 | Ask | Skill | Engine |
 |---|---|---|
-| "scan this file" / "check app.py" (source code) | `$codex-devassist-asca` | SAST (ASCA) → `mcp__Checkmarx__codeRemediation` |
-| "scan my dependencies" / "check package.json" (manifest/lockfile) | `$codex-devassist-sca` | SCA / OSS → `mcp__Checkmarx__packageRemediation` |
+| "scan this file" / "check app.py" (source code) | `$cx-devassist-asca` | SAST (ASCA) → `mcp__Checkmarx__codeRemediation` |
+| "scan my dependencies" / "check package.json" (manifest/lockfile) | `$cx-devassist-sca` | SCA / OSS → `mcp__Checkmarx__packageRemediation` |
 | whole project / cloud-scale scan | Checkmarx MCP (Cx1 cloud) tools | — |
 
 A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile

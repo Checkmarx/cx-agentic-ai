@@ -1,6 +1,6 @@
 # The Checkmarx Remediation MCP (bundled)
 
-The `codex-devassist-asca` and `codex-devassist-sca` skills remediate findings via the **Checkmarx
+The `cx-devassist-asca` and `cx-devassist-sca` skills remediate findings via the **Checkmarx
 Security MCP** (`mcp__Checkmarx__codeRemediation`). The plugin ships a best-effort `.mcp.json` as a
 forward-compat bet, but the **supported, reliable path for Codex CLI is manual registration** in
 `config.toml` — Codex is not confirmed to auto-discover a bundled `.mcp.json`.
@@ -22,9 +22,11 @@ is only meaningful at hook-invocation time, not inside a config file the agent w
 must be substituted with the literal path when writing this stanza. Never leave the
 `<absolute-path-to-plugin>` placeholder literal in the file.
 
-Once the stanza is written (or confirmed already correct), the only step left for the developer is
-the restart below — Codex CLI loads MCP servers at startup and has no confirmed hot-reload, so the
-agent cannot make the server live in the current session by itself.
+Once the stanza is written (or confirmed already correct), **retry the remediation tool call once
+before assuming a restart is needed** — whether Codex CLI hot-reloads a freshly-written `config.toml`
+MCP server is not consistently confirmed; it has been observed to connect live in the same session
+without a restart. Only fall back to asking the developer to quit-and-relaunch (below) if the retry
+still shows the tool unavailable.
 
 The server command is the native **`cx mcp bridge`** subcommand, which reads the credential from the
 cx config, derives the realm-scoped URL from its JWT, and proxies to the remote MCP over Streamable

@@ -1,12 +1,12 @@
 ---
-name: codex-devassist-sca
-description: "Runs a Checkmarx SCA (Software Composition Analysis / OSS) scan on dependency manifests and lockfiles to detect vulnerable and malicious open-source packages, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan dependencies, check packages, audit a manifest/lockfile (package.json, requirements.txt, go.mod, pom.xml, build.gradle, …), or fix SCA/OSS findings. Invoke as: $codex-devassist-sca"
+name: cx-devassist-sca
+description: "Runs a Checkmarx SCA (Software Composition Analysis / OSS) scan on dependency manifests and lockfiles to detect vulnerable and malicious open-source packages, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan dependencies, check packages, audit a manifest/lockfile (package.json, requirements.txt, go.mod, pom.xml, build.gradle, …), or fix SCA/OSS findings. Invoke as: $cx-devassist-sca"
 ---
 
 # CX DevAssist SCA
 
 Detects and remediates vulnerable / malicious open-source dependencies using Checkmarx SCA (OSS
-realtime). This is the **dependency / package** counterpart to `codex-devassist-asca` (which scans source
+realtime). This is the **dependency / package** counterpart to `cx-devassist-asca` (which scans source
 code for SAST vulnerabilities).
 
 ## When to Use
@@ -26,12 +26,12 @@ The plugin exposes three scan surfaces; pick by the target, and ask if it is amb
 
 | The user wants to scan… | Use |
 |---|---|
-| A **source code file** (`.py`, `.js`, `.java`, `.go`, …) for code vulnerabilities | `codex-devassist-asca` (SAST) |
+| A **source code file** (`.py`, `.js`, `.java`, `.go`, …) for code vulnerabilities | `cx-devassist-asca` (SAST) |
 | A **dependency manifest / lockfile** (package.json, requirements.txt, go.mod, pom.xml, …) | **this skill** (SCA/OSS) |
 | An **entire project / repository** at cloud scale, or existing platform scan results | the Checkmarx MCP (Cx1 cloud) tools |
 
 A bare "scan this file" refers to whatever file is in context: a manifest/lockfile → this skill; source
-code → `codex-devassist-asca`. If it is unclear which, ask the user.
+code → `cx-devassist-asca`. If it is unclear which, ask the user.
 
 ## Prerequisites
 
@@ -159,15 +159,19 @@ field naming.
 
      Substitute `<absolute-path-to-plugin>` with the real resolved path — never leave the
      placeholder literal in the file.
-  3. Codex CLI only loads MCP servers when the process starts, and there is no in-session `/restart`
-     or hot-reload — so quitting and relaunching Codex CLI is the **one** step only the user can
-     perform. Tell them:
+  3. **Retry before asking for a restart.** Whether Codex CLI picks up a freshly-written
+     `config.toml` MCP server without a process restart is not consistently confirmed — it has been
+     observed to connect live in some sessions. So immediately re-attempt the
+     `mcp__Checkmarx__packageRemediation` call once. If it now succeeds, continue the remediation
+     normally — do not mention a restart at all. Only if the retry still shows the tool unavailable,
+     tell the user:
 
      > "The Checkmarx remediation MCP wasn't connected, so I've added/verified the
-     > `[mcp_servers.Checkmarx]` entry in your config.toml. Please quit this Codex CLI session (e.g.
-     > `/exit`) and start it again — optionally with `codex resume --last` to pick this conversation
-     > back up — so it re-reads the config and connects the server. Once you're back, ask me to
-     > remediate again. I won't apply a non-Checkmarx fix in the meantime."
+     > `[mcp_servers.Checkmarx]` entry in your config.toml, but it's still not available in this
+     > session. Please quit this Codex CLI session (e.g. `/exit`) and start it again — optionally with
+     > `codex resume --last` to pick this conversation back up — so it re-reads the config and
+     > connects the server. Once you're back, ask me to remediate again. I won't apply a non-Checkmarx
+     > fix in the meantime."
 
   Then end the remediation flow without modifying any dependency.
 
