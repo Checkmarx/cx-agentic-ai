@@ -79,9 +79,11 @@ _EVENTS = {
         # recorded (a `cx auth login` attempt was captured as pending), promoted (auth succeeded →
         # the pair becomes offerable), offered (pairs were embedded into an auth-recovery deny),
         # invalid (a tampered/garbled entry was dropped on read), pruned (a stale or superseded
-        # pending attempt was discarded). NEVER carries the URL or tenant value itself — only the
+        # pending attempt was discarded), skipped (an `auth login` went past that could NOT be
+        # parsed into a valid URL/tenant pair, so nothing was remembered — the one event that makes
+        # a silent drop diagnosable). NEVER carries the URL or tenant value itself — only the
         # action and, for offers, how many pairs were shown.
-        "action": _enum({"recorded", "promoted", "offered", "invalid", "pruned"}),
+        "action": _enum({"recorded", "promoted", "offered", "invalid", "pruned", "skipped"}),
         "count": _as_int,
     },
     "admin_config": {

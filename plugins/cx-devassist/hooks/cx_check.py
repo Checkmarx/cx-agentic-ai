@@ -499,9 +499,61 @@ _CX_ENV_URLS_DOC = "https://docs.checkmarx.com/en/34965-68530-logging-in-to-chec
 _ADMIN_TENANT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}$")
 _ADMIN_URL_RE = re.compile(r"^https://[A-Za-z0-9][A-Za-z0-9.\-]{0,127}(?::[0-9]{2,5})?$")
 _ADMIN_CONFIG_MAX_BYTES = 8192
+
+
+def _valid_base_uri(value):
+    """THE canonical base-auth-uri, or None if the value is not one. Every boundary that accepts a
+    base URI — a parsed `cx auth login` flag, a stored history entry, the admin properties file —
+    goes through here, so "what counts as canonical" is defined ONCE instead of being re-assembled
+    from a strip/normalize/validate recipe at each call site (the drift that caused the bug below:
+    the validator came from a table, the canonicalization from the call site).
+
+    Canonicalization is SURROUNDING WHITESPACE AND TRAILING SLASHES ONLY, and that limit is
+    deliberate. `https://host/` and `https://host` are the same environment and ast-cli accepts
+    both, but _ADMIN_URL_RE's charset has no '/' and its `$` anchors the end — so the slashed
+    spelling could never validate, and a developer who typed it had EVERY login silently dropped
+    while `cx auth login` itself succeeded. Dropping a trailing slash preserves the meaning.
+
+    Dropping a PATH would not, so it is not done here even though skills/cx-cli-setup's oauth.md
+    tells the AGENT to strip one: that is an elicitation rule for turning a pasted browser address
+    bar into flags, not a rewrite rule for an already-issued command. An on-prem reverse-proxy
+    prefix (`https://onprem.corp/cxone`) is meaningful, and silently truncating it would remember a
+    URL the developer never ran and later offer it back as ready-to-run. A path-bearing URL is
+    therefore REJECTED rather than truncated — by decision, not by omission.
+
+    Canonicalizing rather than widening _ADMIN_URL_RE keeps that regex strictly shell- and
+    flag-inert, which is what makes it safe to embed these values in the `cx auth login` command an
+    auth-recovery deny renders; and it keeps STORED values canonical, so the case-insensitive
+    (url, tenant) dedup key in _record_login_attempt collapses both spellings into one remembered
+    environment. Not every equivalent spelling is folded — an explicit `:443` still dedups as its
+    own entry — so this is a fix for the observed drop, not a general URL canonicalizer.
+
+    fullmatch, not match: Python's `$` ALSO matches immediately before a trailing newline, so
+    `_ADMIN_URL_RE.match("https://evil.example\n")` is True. A value carrying that newline would be
+    rendered verbatim into the "Ready-to-run command for each:" line of an auth-recovery deny,
+    turning one command into TWO shell lines whose first is a complete `cx auth login` against an
+    attacker-chosen host. Using fullmatch at the single funnel makes that structural rather than an
+    argument repeated per call site."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip().rstrip("/")
+    return value if _ADMIN_URL_RE.fullmatch(value) else None
+
+
+def _valid_tenant(value):
+    """The canonical tenant, or None. Peer of _valid_base_uri — see it for why whitespace is
+    stripped before validating and why this is fullmatch rather than match."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value if _ADMIN_TENANT_RE.fullmatch(value) else None
+
+
+# key -> canonicalize-and-validate. This table is the ONLY declaration of a key's handling, so a key
+# added here cannot end up validated but un-canonicalized.
 _ADMIN_CONFIG_VALIDATORS = {
-    "cx_base_auth_uri": _ADMIN_URL_RE,
-    "cx_tenant": _ADMIN_TENANT_RE,
+    "cx_base_auth_uri": _valid_base_uri,
+    "cx_tenant": _valid_tenant,
 }
 
 
@@ -542,8 +594,9 @@ def _load_admin_config(path=None):
             validator = _ADMIN_CONFIG_VALIDATORS.get(key)
             if validator is None:
                 continue  # unknown key — silently dropped
-            if value and validator.match(value):
-                result[key] = value
+            canonical = validator(value)
+            if canonical:
+                result[key] = canonical
             else:
                 _log("admin_config", result="invalid", key=key)
         return result
@@ -643,8 +696,8 @@ _LOGIN_PENDING_TTL = 3600     # an unpromoted (failed/abandoned) attempt expires
 _AUTH_LOGIN_RE = re.compile(r"\bauth\s+login\b")
 # Flag extraction, `--flag value` and `--flag=value` forms, one optional layer of matched quotes.
 # Lenient by design: the command already passed the bare-command guard (no chaining/substitution/
-# unsafe redirect), and extracted values must still pass the STRICT _ADMIN_URL_RE/_ADMIN_TENANT_RE
-# below — validation, not extraction, is the security boundary.
+# unsafe redirect), and extracted values must still pass the STRICT _valid_base_uri/_valid_tenant
+# funnels — validation, not extraction, is the security boundary.
 _LOGIN_FLAG_RE = re.compile(
     r'--(base-auth-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
 
@@ -659,39 +712,25 @@ def _parse_login_flags(command):
     found = {}
     for m in _LOGIN_FLAG_RE.finditer(command):
         found[m.group(1)] = next(g for g in m.groups()[1:] if g is not None)  # later wins
-    base = found.get("base-auth-uri")
-    tenant = found.get("tenant")
+    base = _valid_base_uri(found.get("base-auth-uri"))
+    tenant = _valid_tenant(found.get("tenant"))
     if base is None or tenant is None:
-        return None
-    if not (_ADMIN_URL_RE.match(base) and _ADMIN_TENANT_RE.match(tenant)):
         return None
     return base, tenant
 
 
 def _valid_login_entry(entry):
-    """The normalized history entry dict, or None if ANY field fails re-validation — the same
-    strict regexes as the admin config, so a tampered file can at most lose entries; it can never
-    smuggle flags or free text into a deny message or a composed login command.
-
-    fullmatch, not match: Python's `$` ALSO matches immediately before a trailing newline, so
-    `_ADMIN_URL_RE.match("https://evil.example
-")` is True. A value carrying that newline would be
-    rendered verbatim into the "Ready-to-run command for each:" line of an auth-recovery deny, turning
-    one command into TWO shell lines whose first is a complete `cx auth login` against an
-    attacker-chosen host — the exact smuggling this docstring promises cannot happen. .strip() first
-    mirrors _load_admin_config, which strips before validating so an admin value can never carry
-    whitespace either. Both are pure hardening: a legitimate URL/tenant is unaffected."""
+    """The normalized history entry dict, or None if ANY field fails re-validation. The URL and
+    tenant go through the SAME _valid_base_uri/_valid_tenant funnels as the parse and admin-config
+    boundaries, so a tampered or hand-edited file can at most lose entries — it can never smuggle
+    flags or free text into a deny message or a composed login command, and a merely non-canonical
+    spelling (stray whitespace, a trailing slash) is canonicalized rather than dropped."""
     if not isinstance(entry, dict):
         return None
-    url, tenant = entry.get("base_auth_uri"), entry.get("tenant")
+    url = _valid_base_uri(entry.get("base_auth_uri"))
+    tenant = _valid_tenant(entry.get("tenant"))
     status, last_used, cred = entry.get("status"), entry.get("last_used"), entry.get("cred_before")
-    if isinstance(url, str):
-        url = url.strip()
-    if isinstance(tenant, str):
-        tenant = tenant.strip()
-    if not (isinstance(url, str) and _ADMIN_URL_RE.fullmatch(url)):
-        return None
-    if not (isinstance(tenant, str) and _ADMIN_TENANT_RE.fullmatch(tenant)):
+    if url is None or tenant is None:
         return None
     if status not in ("pending", "confirmed") or not _is_number(last_used):
         return None
@@ -783,8 +822,15 @@ def _record_login_attempt(command, path=None):
         if command and _CX_CONFIGURE_SET_RE.search(command):
             _drop_pending_logins(path)
             return
+        if not (command and _AUTH_LOGIN_RE.search(command)):
+            return  # `cx auth validate`, `cx configure …` — admitted by the caller, nothing to remember
         parsed = _parse_login_flags(command)
         if parsed is None:
+            # An `auth login` whose URL/tenant we could not accept. This used to return in TOTAL
+            # SILENCE, which is what hid a whole session of dropped logins: no entry appeared and no
+            # log line explained why. The value itself is NOT logged — see cx_log.py's login_history
+            # contract.
+            _log("login_history", action="skipped")
             return
         base, tenant = parsed
         key = (base.lower(), tenant.lower())

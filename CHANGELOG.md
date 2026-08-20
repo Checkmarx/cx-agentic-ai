@@ -69,6 +69,16 @@ a **non-blocking observer**:
   cannot silently open it.
 
 #### Fixed
+- **A trailing slash on `--base-auth-uri` silently discarded the remembered login.** `_ADMIN_URL_RE`
+  permits no `/` in its host charset, so `https://host/` never validated even though `cx auth login`
+  accepts that spelling and succeeds: `_parse_login_flags` returned `None` and the attempt was
+  dropped with no entry and no log line. Observed on a test VM where three successful logins left no
+  trace, while a failed one — typed without the slash — became the only remembered pair, and would
+  have been promoted to `confirmed` off the credential write of a later, unrecorded, successful
+  login. Base URIs are now canonicalized and validated by a single `_valid_base_uri` funnel shared by
+  the three boundaries that accept one: command parsing, stored history entries, and the admin
+  `config/cx-onboarding.properties`, which lost an admin's pre-fill the same way. A new
+  `login_history action=skipped` audit event records any `auth login` that could not be remembered.
 - **An invalid `CX_BINARY` sent agents into an unbreakable loop.** The `cx_binary_invalid` deny said
   "unset it to use cx from PATH" and nothing more, so an agent would suggest `/cx-cli-setup`, watch the
   bootstrap install `cx` successfully, and hit the identical deny again — forever — because a pin

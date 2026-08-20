@@ -14,6 +14,10 @@ from _gatelib import (_URL_ANZ, _URL_EU, _URL_IND, _URL_US, _bash, _HistoryFileM
                       cx_check, cx_log)
 
 
+# The exact URL from the VM report that exposed the trailing-slash bug.
+_URL_DEV = "https://ast-master-components.dev.cxast.net"
+
+
 class ParseLoginFlags(unittest.TestCase):
     def test_space_form(self):
         self.assertEqual(
@@ -103,6 +107,34 @@ class ParseLoginFlags(unittest.TestCase):
             (_URL_US, "beta"))
 
 
+class ParseLoginFlagsTrailingSlash(unittest.TestCase):
+    """A trailing slash names the SAME environment — ast-cli accepts `https://host/` and
+    `https://host` interchangeably — but _ADMIN_URL_RE's charset has no '/' and its `$` anchors the
+    end, so the slashed spelling could never validate. _parse_login_flags returned None and
+    _record_login_attempt dropped it in silence."""
+
+    def test_trailing_slash_is_canonicalized_away(self):
+        for raw, want in ((_URL_DEV + "/", _URL_DEV),   # verbatim from the VM report
+                          (_URL_EU + "/", _URL_EU),
+                          (_URL_EU + "//", _URL_EU),
+                          (_URL_EU, _URL_EU),           # already canonical: unchanged
+                          ("https://cx.internal:8443/", "https://cx.internal:8443")):
+            self.assertEqual(
+                cx_check._parse_login_flags(
+                    "cx auth login --base-auth-uri %s --tenant acme" % raw),
+                (want, "acme"), raw)
+
+    def test_canonicalization_does_not_widen_the_charset(self):
+        """The strip happens only at the END, so nothing previously rejected becomes acceptable —
+        these values are embedded into a ready-to-run `cx auth login`, so the charset is a security
+        boundary, not a formatting preference. `https://` and `https:///` both reduce to `https:`,
+        which must NOT be mistaken for a valid host."""
+        for bad in (_URL_EU + "/../evil", "https://", "https:///"):
+            self.assertIsNone(
+                cx_check._parse_login_flags(
+                    "cx auth login --base-auth-uri %s --tenant acme" % bad), bad)
+
+
 class RecordLoginAttempt(_HistoryFileMixin):
     def test_record_creates_pending(self):
         cx_check._record_login_attempt(
@@ -174,6 +206,54 @@ class RecordLoginAttempt(_HistoryFileMixin):
         self.assertEqual(entries[0]["tenant"], "newest")
         # the oldest (t0) fell off
         self.assertNotIn("t0", [e["tenant"] for e in entries])
+
+
+class RecordLoginTrailingSlash(_HistoryFileMixin):
+    def test_both_spellings_are_one_remembered_environment(self):
+        """Why this is a normalizer and not a `/?$` added to the regex: the dedup key is the
+        (url, tenant) pair, so storing the slash verbatim would offer the same tenant twice."""
+        self._entries((_URL_EU, "acme", "confirmed", 100))
+        cx_check._record_login_attempt(
+            "cx auth login --base-auth-uri %s/ --tenant acme" % _URL_EU, self.path)
+        entries = cx_check._load_login_history(self.path)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["base_auth_uri"], _URL_EU)
+        self.assertEqual(entries[0]["status"], "confirmed")  # not demoted by the re-record
+        # Proves the re-record actually HAPPENED: without normalization the slashed form
+        # parses to None, nothing is written, and the seeded entry survives untouched --
+        # which would make every assertion above pass vacuously.
+        self.assertGreater(entries[0]["last_used"], 100)
+
+
+class RecordLoginSkippedSignal(_HistoryFileMixin):
+    """An unrememberable `auth login` used to return in TOTAL silence — no entry, no log line. That
+    is what made the trailing-slash bug cost a whole VM session to find."""
+
+    def _log_actions(self, command):
+        seen = []
+        orig = cx_check._log
+        cx_check._log = lambda event, **kw: seen.append((event, kw.get("action")))
+        try:
+            cx_check._record_login_attempt(command, self.path)
+        finally:
+            cx_check._log = orig
+        return [a for e, a in seen if e == "login_history"]
+
+    def test_unparseable_auth_login_is_logged_as_skipped(self):
+        self.assertIn("skipped", self._log_actions(
+            "cx auth login --base-auth-uri %s/auth/realms/x --tenant acme" % _URL_EU))
+
+    def test_successful_record_does_not_log_skipped(self):
+        actions = self._log_actions(
+            "cx auth login --base-auth-uri %s/ --tenant acme" % _URL_EU)
+        self.assertIn("recorded", actions)
+        self.assertNotIn("skipped", actions)
+
+    def test_non_login_commands_do_not_log_skipped(self):
+        # The caller also admits these; they legitimately parse to None and must not spam the log.
+        for cmd in ("cx auth validate --retry 0",
+                    "cx configure set --prop-name cx_apikey --prop-value SECRET"):
+            self.assertNotIn("skipped", self._log_actions(cmd), cmd)
 
 
 class PromotePendingLogin(_HistoryFileMixin):
@@ -417,15 +497,67 @@ class ValidLoginEntryHardening(unittest.TestCase):
         self.assertEqual(_URL_EU, e["base_auth_uri"])
         self.assertEqual("acme-corp", e["tenant"])
 
-    def test_surrounding_whitespace_is_stripped_like_admin_config(self):
-        """_load_admin_config strips before validating, so an admin value can never carry whitespace;
-        the history path now matches. A legitimate pair is unaffected — this is pure hardening."""
+    def test_value_is_canonicalized_before_validating(self):
+        """Whitespace AND a trailing slash are stripped before the regex runs — the same funnel the
+        parse and admin-config boundaries use. A stored entry that is merely non-canonical must be
+        canonicalized, not silently dropped, or a hand-edited (or pre-fix) history file loses
+        entries on read."""
         e = cx_check._valid_login_entry(
-            {"base_auth_uri": "  " + _URL_EU + "  ", "tenant": " acme ",
+            {"base_auth_uri": "  " + _URL_EU + "/  ", "tenant": " acme ",
              "status": "confirmed", "last_used": 1.0})
         self.assertIsNotNone(e)
         self.assertEqual(_URL_EU, e["base_auth_uri"])
         self.assertEqual("acme", e["tenant"])
+
+    def test_path_bearing_stored_url_still_dropped(self):
+        """The canonicalizer must not have turned into a truncator: a path is meaningful (an on-prem
+        proxy prefix), so it is rejected rather than silently rewritten."""
+        self.assertIsNone(cx_check._valid_login_entry(
+            {"base_auth_uri": _URL_EU + "/auth/realms/x", "tenant": "acme",
+             "status": "confirmed", "last_used": 1.0}))
+
+
+class AdminConfigTrailingSlash(unittest.TestCase):
+    """config/cx-onboarding.properties carried the identical latent bug: an admin who wrote the URL
+    with a trailing slash lost the pre-fill entirely. Covered here rather than in
+    test_cx_check_admin_config.py, which imports the COPILOT plugin's cx_check."""
+
+    def _load(self, content):
+        f = tempfile.NamedTemporaryFile("w", suffix=".properties", delete=False, encoding="utf-8")
+        f.write(content)
+        f.close()
+        self.addCleanup(os.unlink, f.name)
+        return cx_check._load_admin_config(f.name)
+
+    def test_admin_url_trailing_slash_is_canonicalized(self):
+        cfg = self._load("cx_base_auth_uri=%s/\ncx_tenant=acme\n" % _URL_EU)
+        self.assertEqual(cfg.get("cx_base_auth_uri"), _URL_EU)
+        self.assertEqual(cfg.get("cx_tenant"), "acme")
+
+    def test_admin_url_with_path_still_rejected(self):
+        cfg = self._load("cx_base_auth_uri=%s/auth/realms/x\ncx_tenant=acme\n" % _URL_EU)
+        self.assertNotIn("cx_base_auth_uri", cfg)
+        self.assertEqual(cfg.get("cx_tenant"), "acme")
+
+    def test_canonical_pair_survives_unchanged(self):
+        cfg = self._load("cx_base_auth_uri=%s\ncx_tenant=acme-corp\n" % _URL_EU)
+        self.assertEqual(cfg, {"cx_base_auth_uri": _URL_EU, "cx_tenant": "acme-corp"})
+
+    def test_invalid_tenant_dropped_without_dropping_the_url(self):
+        # Each key is validated by its own funnel, so one bad value must not poison the other.
+        cfg = self._load("cx_base_auth_uri=%s\ncx_tenant=-leading-dash\n" % _URL_EU)
+        self.assertEqual(cfg.get("cx_base_auth_uri"), _URL_EU)
+        self.assertNotIn("cx_tenant", cfg)
+
+    def test_tenant_is_not_slash_stripped(self):
+        # The URL funnel strips trailing slashes; the tenant funnel must NOT -- doing so would
+        # silently widen the tenant charset instead of rejecting a malformed value.
+        cfg = self._load("cx_base_auth_uri=%s\ncx_tenant=acme/\n" % _URL_EU)
+        self.assertNotIn("cx_tenant", cfg)
+
+    def test_unknown_key_ignored(self):
+        cfg = self._load("cx_wat=1\ncx_tenant=acme\n")
+        self.assertEqual(cfg, {"cx_tenant": "acme"})
 
 
 class OAuthRecoveryBulletHistory(unittest.TestCase):
@@ -509,6 +641,9 @@ class LoginHistoryLogging(unittest.TestCase):
         self.assertIsNotNone(schema, "login_history event missing from cx_log allowlist")
         self.assertEqual(schema["action"]("recorded"), "recorded")
         self.assertEqual(schema["action"]("evil-value"), "other")
+        # Unregistered values are silently coerced to "other", so the new action must be declared
+        # in cx_log.py or the diagnostic it powers would be invisible in the audit log.
+        self.assertEqual(schema["action"]("skipped"), "skipped")
         self.assertEqual(schema["count"](2), 2)
         self.assertNotIn("base_auth_uri", schema)
         self.assertNotIn("tenant", schema)
