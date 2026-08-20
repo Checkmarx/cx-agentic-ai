@@ -89,12 +89,20 @@ if [ -z "$PYTHON_BIN" ]; then
         . "$SCRIPT_DIR/_cx_bootstrap_match.sh"
         cx_is_bootstrap_command "$INPUT" "$SCRIPT_DIR" && exit 0
     fi
-    # No working Python 3 ⇒ the gate cannot evaluate ⇒ fail CLOSED (deny + exit 2). A plain
-    # exit 1 would be treated as non-blocking by Claude Code and silently fail OPEN.
+    # No working Python 3 ⇒ the gate cannot evaluate ⇒ fail CLOSED (deny JSON on stdout).
+    # Exit code differs by client: Claude Code parses the JSON only when exit=2 (exit 1 is a
+    # non-blocking hook error there = fail OPEN). Codex CLI's contract is the OPPOSITE for this
+    # exact JSON-on-stdout shape: Codex only parses hookSpecificOutput when exit=0 — exit 2 is
+    # documented as "write the reason to stderr instead" (plain text, no JSON) — so exit 2 here
+    # with a Codex invocation would produce an unparsed, reason-less hook failure instead of a
+    # deny. Detect via the same --codex argv flag cx_check.py uses.
     cat <<'JSON'
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security gate could not run: no working Python 3 interpreter was found, so the scanner is inactive. This operation is BLOCKED fail-closed.","additionalContext":"Install Python 3, then retry. Windows: install from https://python.org (NOT the Microsoft Store stub). macOS: `xcode-select --install` or `brew install python3`. Linux: `apt install python3` / `dnf install python3` / `apk add python3`. The plugin's bundled bootstrap (scripts/cx-bootstrap.sh) installs the cx CLI and itself needs NO Python, but this version/auth gate does. All agent actions remain blocked until a Python 3 interpreter is available."}}
 JSON
-    exit 2
+    case " $* " in
+        *' --codex '*) exit 0 ;;
+        *)             exit 2 ;;
+    esac
 fi
 
 # Replay the captured stdin to Python (we already consumed it above, so it can't stream).

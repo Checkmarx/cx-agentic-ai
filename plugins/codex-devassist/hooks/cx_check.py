@@ -758,20 +758,26 @@ def _setup_invocation() -> str:
 
 def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, version_state=None) -> None:
     # Exit-code + output contract differs by client:
-    #   Claude Code / Codex CLI:  exit 2 + hookSpecificOutput JSON wrapper — both PARSE
-    #                 hookSpecificOutput.permissionDecision:"deny" and surface the reason.
-    #                 Codex CLI's PreToolUse deny contract is confirmed identical to Claude
-    #                 Code's, so codex mode takes this SAME branch — no separate output shape.
+    #   Claude Code:  exit 2 + hookSpecificOutput JSON wrapper on stdout — PARSES
+    #                 hookSpecificOutput.permissionDecision:"deny" and surfaces the reason.
+    #   Codex CLI:    exit 0 + the SAME hookSpecificOutput JSON wrapper on stdout. Codex's own
+    #                 docs (https://developers.openai.com/plugins/build/plugins /
+    #                 https://learn.chatgpt.com/docs/hooks) confirm exit code is INDEPENDENT of
+    #                 the JSON content for Codex: it accepts exit 0 + hookSpecificOutput JSON, OR
+    #                 exit 2 + a plain-text reason on STDERR (no JSON) — never exit 2 + JSON on
+    #                 stdout. That combination (which matches Claude's contract, not Codex's) was
+    #                 confirmed live to produce a generic, reason-less "hook exited with code 1" —
+    #                 Codex could not parse a deny out of it. So codex mode reuses Claude's JSON
+    #                 shape but with exit 0, matching Codex's actually-documented contract.
     #   Copilot CLI:  exit 0 + FLAT JSON (no hookSpecificOutput wrapper) — Copilot CLI reads
     #                 permissionDecision / permissionDecisionReason at the TOP LEVEL of the
     #                 JSON object (per https://docs.github.com/en/copilot/reference/hooks-reference).
     #                 Using exit 1 also blocks but degrades to a generic "hook errored" with no
     #                 reason shown — the flat-JSON path is strictly better.
-    # _COPILOT_CLI_MODE is set once per cx_check() call based on the --copilot-cli flag or
-    # Deny exit code differs by client: Claude Code/Codex CLI use exit 2 for deny (exit 1 =
-    # error = fail-open, exit 0 = allow). Copilot CLI uses exit 0 for everything — non-zero
-    # exits are treated as hook errors (fail-open), not denials.
-    _deny_exit = 0 if _COPILOT_CLI_MODE else 2
+    # _COPILOT_CLI_MODE / _CODEX_MODE are set once per cx_check() call from the --copilot-cli /
+    # --codex argv flags. Only Claude Code (neither flag set) uses exit 2; Codex CLI and Copilot
+    # CLI both use exit 0 for a deny (exit 1 = error = fail-open on all three clients).
+    _deny_exit = 0 if (_COPILOT_CLI_MODE or _CODEX_MODE) else 2
     _log("gate_decision", decision="deny", reason_code=reason_code, tool_name=tool_name,
          version_state=version_state, exit_code=_deny_exit)
     if _COPILOT_CLI_MODE:
@@ -1408,9 +1414,9 @@ def _fail_closed_on_crash():
     "deny" JSON) — see the exit-code contract note on _deny(). main() exits 0 after calling this
     so the JSON is actually read instead of being discarded as a generic hook error.
     Uses the correct JSON shape per client: flat for Copilot CLI, nested for Claude Code.
-    NOTE: reads sys.argv directly (not _COPILOT_CLI_MODE) because a crash inside
-    _is_bootstrap_command() or any pre-mode-set code path means _COPILOT_CLI_MODE may still
-    be False even for a Copilot CLI invocation — sys.argv is always reliable."""
+    NOTE: reads sys.argv directly (not _COPILOT_CLI_MODE/_CODEX_MODE) because a crash inside
+    _is_bootstrap_command() or any pre-mode-set code path means those flags may still be False
+    even for a Copilot CLI / Codex invocation — sys.argv is always reliable."""
     try:
         is_copilot = _COPILOT_CLI_MODE or "--copilot-cli" in sys.argv
         if is_copilot:
@@ -1446,7 +1452,8 @@ def main():
     # _deny()/_allow_with_warning() raise SystemExit with the decision JSON already printed.
     # ANY other exception is an internal gate failure → fail CLOSED (deny).
     # Claude Code: exit 2 (non-zero = deny; exit 1 = uncaught error = fail-open).
-    # Copilot CLI: exit 0 (non-zero is treated as hook error = fail-open, not a denial).
+    # Codex CLI / Copilot CLI: exit 0 (non-zero is treated as a hook ERROR — fail-open — not a
+    # denial; see the exit-code contract note on _deny()).
     try:
         cx_check()
     except SystemExit:
@@ -1454,7 +1461,8 @@ def main():
     except BaseException:
         _fail_closed_on_crash()
         is_copilot = _COPILOT_CLI_MODE or "--copilot-cli" in sys.argv
-        sys.exit(0 if is_copilot else 2)
+        is_codex = _CODEX_MODE or "--codex" in sys.argv
+        sys.exit(0 if (is_copilot or is_codex) else 2)
 
 
 if __name__ == "__main__":

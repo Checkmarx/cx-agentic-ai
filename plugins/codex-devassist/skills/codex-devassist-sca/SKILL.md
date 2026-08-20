@@ -159,6 +159,20 @@ field naming.
   > Note: do **not** run any `cx_mcp_register.sh` script — this plugin registers its MCP via the
   > `config.toml` snippet above, and restarting the Codex CLI session is the correct recovery.
 
+- If the tool call **errors with "Transport closed"** (or any other connection/transport error) instead
+  of returning a result: the MCP server was available but its connection has died mid-session — this is
+  a different failure from "tool not available" above and is **not recoverable by config changes**.
+  **STOP. Do NOT remediate by any other means.** Leave the dependency **unchanged**, then tell the user:
+
+  > "The Checkmarx remediation MCP's connection was lost mid-session (Transport closed). Codex CLI has
+  > no hot-reload for MCP servers, so please **restart the Codex CLI session and resume this
+  > conversation** (Codex will reconnect the MCP server on startup). Once you're back, ask me to
+  > continue and I'll proceed with the remediation for the remaining/unfixed findings — you won't need
+  > to repeat the scan or re-describe what's left."
+
+  Then end the remediation flow without modifying any dependency. Do not retry the same tool call in a
+  loop — a dead transport will not recover within the same session.
+
 ### Step 3 — Apply the Fix
 
 - Execute each instruction in `remediation_steps` in order (typically an upgrade to a fixed version, or
