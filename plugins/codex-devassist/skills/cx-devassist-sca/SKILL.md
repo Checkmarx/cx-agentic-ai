@@ -187,7 +187,7 @@ field naming.
   > "The Checkmarx remediation MCP's connection was lost mid-session (Transport closed). Codex CLI has
   > no in-session `/restart` or hot-reload for MCP servers, so please **quit this session (e.g.
   > `/exit`) and run `codex resume --last`** to pick this conversation back up — Codex will reconnect
-  > the MCP server on the next launch. Once you're back, ask me to continue and I'll proceed with the
+  > the MCP server on the next launch. Once you're back, ask me to "remediate" to continue with remediation and I'll proceed with the
   > remediation for the remaining/unfixed findings — you won't need to repeat the scan or re-describe
   > what's left."
 

@@ -48,7 +48,7 @@ this skill that says "reload the MCP" means quit-and-relaunch Codex CLI, not an 
 > "I've added/verified the Checkmarx MCP registration in config.toml. Please quit this Codex CLI
 > session (e.g. `/exit`) and start it again — optionally with `codex resume --last` to pick this
 > conversation back up — so it re-reads the config and re-spawns the bridge. Once you're back, confirm
-> the Checkmarx MCP server is connected and ask me to continue. After that it connects automatically
+> the Checkmarx MCP server is connected and ask me to remediate. After that it connects automatically
 > on every launch — no re-registration and no re-auth needed unless the config changes."
 
 ## Verify
