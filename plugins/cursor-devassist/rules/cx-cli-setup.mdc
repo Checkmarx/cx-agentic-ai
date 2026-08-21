@@ -1,0 +1,68 @@
+---
+description: Install, upgrade, and authenticate the Checkmarx cx CLI when hooks deny due to missing, outdated, or unauthenticated cx.
+alwaysApply: false
+---
+
+# CX CLI Setup
+
+Use when cx is missing, below minimum version, incapable, or not authenticated — or when the user runs `/cx-cli-setup`.
+
+## Shell syntax (read first on Windows)
+
+Cursor's Shell tool uses the workspace default shell — **PowerShell** on Windows. Write every command
+for the shell you are in; full table in `skills/cx-cli-setup/references/shells.md`:
+
+| | PowerShell | cmd.exe | bash / sh |
+|---|---|---|---|
+| Run a quoted/absolute path | `& "<path>" args` (**`&` required**) | `"<path>" args` | `"<path>" args` |
+| Path separator | `\` | `\` | `/` |
+| Discard stdout | `1>$null` | `1>NUL` | `1>/dev/null` |
+| Env var | `$env:LOCALAPPDATA` | `%LOCALAPPDATA%` | `$LOCALAPPDATA` |
+
+A bare `cx …` and `bash "<script>" install` are identical in all shells. Never chain (`;`/`&&`/`|`),
+substitute (`$(...)`/backticks), or redirect to a real file — the gate blocks those.
+
+## Entry
+
+1. Check presence: `which cx` (bash/sh) · `where cx` (cmd) · `Get-Command cx` (PowerShell)
+2. If present: `cx auth validate` (distinguish credential vs network failures from error text)
+
+| CLI | Auth | Action |
+|-----|------|--------|
+| No | — | Bootstrap install (see deny `agent_message` for exact path) |
+| Yes | OK | Confirm ready; offer reconfigure only if asked |
+| Yes | Credential fail | Phase 2 auth only |
+| Yes | Network fail | Fix network/proxy; do not re-auth |
+
+## Install
+
+- Use the **exact bootstrap command** from a hook deny `agent_message`: `bash "<resolved-path>/scripts/cx-bootstrap.sh" install`
+- Never substitute `${CURSOR_PLUGIN_ROOT}` — it is empty in the agent shell
+- Ask once: "Install/upgrade Checkmarx CLI now? (Y/n)"
+
+## Verify
+
+- Invoke cx by **canonical absolute path** when not on PATH, in your shell's form:
+  - PowerShell: `& "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe"`
+  - cmd.exe: `"%LOCALAPPDATA%\Checkmarx\cx\cx.exe"`
+  - bash/sh (Git Bash): `"$LOCALAPPDATA/Checkmarx/cx/cx.exe"`
+  - bash/sh (Unix): `"$HOME/.checkmarx/bin/cx"`
+- A bare `cx` returning 127 after first install is expected; trust the **next gate deny reason** (not authenticated → proceed to auth; not installed → re-run bootstrap)
+
+## Authenticate
+
+Ask the developer **once** which method (API key first):
+
+- **API key** — developer runs in their terminal (secret): `cx configure set --prop-name cx_apikey --prop-value <key>`
+- **OAuth** — agent may run `cx auth login --base-auth-uri <url> --tenant <tenant>` after developer chooses; use admin pre-fill from deny message when present; never guess URL/tenant. Discard stdout (it prints a live token) with your shell's null device — `1>$null` / `1>NUL` / `1>/dev/null`.
+
+Deny messages render these commands **per shell already**, detected shell first — copy the matching
+line verbatim. Every rendered form is accepted by the gate's trusted-setup carve-out, so an
+auth/bootstrap command is never blocked for being written in the "wrong" shell's syntax.
+
+## Complete when
+
+1. **Gate clears** — next gated tool call is not denied
+2. **MCP loaded** — developer runs **Developer: Reload Window**; Checkmarx MCP shows connected
+
+Full workflow: read skill `skills/cx-cli-setup/SKILL.md` and its `references/` docs.

@@ -1,0 +1,9 @@
+# The shell + Python hook scripts MUST stay LF on every platform. A stray CR byte breaks `sh` on
+# Windows Git Bash (the fail-OPEN hole the gate is hardened against) and corrupts the Python shebang.
+# The version floor and the onboarding properties file are parsed line-by-line and are pinned for the
+# same determinism. (Python's universal-newline read tolerates CRLF, but we pin anyway.)
+*.sh                 text eol=lf
+*.py                 text eol=lf
+cx-min-version       text eol=lf
+cx-scannable-files   text eol=lf
+*.properties         text eol=lf

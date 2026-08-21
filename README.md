@@ -45,6 +45,20 @@ Refer **→ [README-MCP.md](README-MCP.md)** for more details on the MCP server.
 
 For more details **→ [plugins/cx-cursor-plugin/README.md](plugins/cx-cursor-plugin/README.md)**
 
+## cursor-devassist
+
+**→ [plugins/cursor-devassist/README.md](plugins/cursor-devassist/README.md)**
+
+A fail-closed security gate for [Cursor](https://cursor.com/). Before Cursor writes or edits a
+scannable file or calls a Checkmarx MCP tool, the Checkmarx `cx` CLI scans the proposed action. Real
+vulnerabilities are **blocked rather than silently allowed** — and so is the case where the scanner
+itself can't be trusted to run. Findings are remediated through the bundled Checkmarx MCP server.
+
+**Reach for this when** you want the check to be automatic and non-optional rather than something
+someone remembers to ask for.
+
+For more details **→ [plugins/cursor-devassist/README.md](plugins/cursor-devassist/README.md)**
+
 ## copilot-devassist
 
 **→ [plugins/copilot-devassist/README.md](plugins/copilot-devassist/README.md)**

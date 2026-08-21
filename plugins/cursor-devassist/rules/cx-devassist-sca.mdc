@@ -1,0 +1,63 @@
+---
+description: Scan and remediate vulnerable or malicious open-source packages in dependency manifests and lockfiles using Checkmarx SCA and the Checkmarx MCP packageRemediation tool.
+alwaysApply: false
+globs: "**/{package.json,package-lock.json,yarn.lock,pnpm-lock.yaml,requirements.txt,Pipfile,Pipfile.lock,go.mod,go.sum,pom.xml,build.gradle,build.sbt,Cargo.toml,Cargo.lock,Gemfile,Gemfile.lock,composer.json,composer.lock}"
+---
+
+# CX DevAssist SCA (OSS)
+
+Use for **dependency manifest/lockfile** scan/fix. For source code SAST, use `cx-devassist-asca` instead.
+
+## Routing
+
+| Target | Use |
+|--------|-----|
+| Source file | `cx-devassist-asca` |
+| Manifest/lockfile | This rule / `/cx-devassist-sca` |
+| Whole repo / cloud scans | Checkmarx MCP scan tools |
+
+If SCA findings are already in context, **skip scan — go straight to remediation**.
+
+## Scan
+
+```bash
+# Unix:
+"$HOME/.checkmarx/bin/cx" scan oss-realtime -s "<manifest-path>"
+# Windows:
+"$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan oss-realtime -s "<manifest-path>"
+```
+
+Interpret `Status`: `OK` clean, `Unknown` unverified (not safe), `Malicious` remove, other → vulnerable.
+
+Report findings and ask the user whether to **remediate** (upgrade/remove) or **suppress** (accept the risk) before proceeding.
+
+## Remediation (MCP-only)
+
+For each finding, call **`mcp__plugin-cx-devassist-Checkmarx__packageRemediation`** — follow the tool's input schema (package manager, name, version, CVEs).
+
+- **MCP available** → apply `remediation_steps`; change only affected dependency entries
+- **MCP unavailable** → **STOP.** No manual version bumps. Run `/cx-cli-setup` if auth fails; ask developer to **Developer: Reload Window** for MCP
+- **No fixed version in the response** → check the response for a suggested alternative package and apply that instead; **never web-search or self-research a fix or alternative**. If the response offers neither, suppress the finding and tell the user — see `skills/cx-devassist-sca/SKILL.md` Step 3.
+
+After fixes, re-scan. Remediate **only packages you changed**; leave pre-existing findings unfixed.
+
+## Skill compliance (mandatory)
+
+**Invoke and follow `skills/cx-devassist-sca/SKILL.md` exactly as written — as-is, with no paraphrasing, summarizing, or reimplementing its steps inline in this rule or in chat. Do not skip, abbreviate, substitute your own judgment for, or reorder any step.**
+
+The **Step 5 SCA Remediation Summary** is mandatory output — **always** produce and show it to the user **verbatim**, in full, after remediation completes, even for a single finding. Never omit it, shorten it, or fold it into other output:
+
+```
+SCA Remediation Summary
+
+Package:   [PackageName] [old-version] → [new-version | REMOVED]
+Manager:   [PackageManager]
+Issue:     [CVE list] ([highest severity])
+File:      [FilePath]
+
+Pre-existing findings (NOT fixed — outside the scope of this remediation):
+- [package@version] — [CVE list] — [severity]
+- (omit this section entirely when the re-scan reports none)
+```
+
+Final status line is required: ✅ completed / ⚠️ partially completed / ❌ failed.
