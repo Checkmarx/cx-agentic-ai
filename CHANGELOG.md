@@ -4,7 +4,7 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 
 ---
 
-### Changed in cx-devassist (unreleased)
+### Changed in cx-devassist v1.0.1 (21-08-2026)
 
 #### The readiness gate now blocks only what Checkmarx can actually scan
 
@@ -54,9 +54,32 @@ a **non-blocking observer**:
 - `config/cx-scannable-files` — the scannable file types, with exactly one reader
   (`cx_check.py`'s `_is_scannable_file`).
 - `tests/test_cx_check_scannable_files.py` and `tests/test_cx_check_login_history.py`, plus the shared
-  `tests/_gatelib.py` harness. These run via `python -m unittest discover -s tests`; the older suites
-  under `tests/hooks/`, `tests/scripts/` and `tests/test_packaging.py` target the copilot plugin and
-  currently fail on a stale `plugins/copilot/checkmarx-devassist` path (pre-existing).
+  `tests/_gatelib.py` harness. Run them with `tests/run-tests.sh`, which executes each suite in its
+  OWN process: both plugin roots ship a module named `cx_check`, so a flat
+  `python -m unittest discover -s tests` lets whichever suite imports first win `sys.modules` and
+  silently swaps the module under test. Two copilot-side packaging checks fail on a clean tree — a
+  marketplace name mismatch, and a `cx-mcp-guard.sh` floor of `2.3.57` against a `cx-min-version` of
+  `2.3.58` — both pre-existing and outside this plugin.
+
+#### Added — Apple and Ruby dependency manifests
+`config/cx-scannable-files` now lists the SCA manifests for CocoaPods, Carthage, Swift PM, Ruby and
+Dart: `Podfile`, `Cartfile`, `Cartfile.private`, `Gemfile`, `Package.swift`, `*.podspec` and
+`*.podspec.json`.
+
+Swift PM's multi-toolchain variants (`Package@swift-5.9.swift`) needed a new match kind,
+`swiftprefix:` — a `.swift` file is a manifest only when its basename carries that prefix, exactly as
+`requirements.txt` is one but `changelog.txt` is not. Gating on the `.swift` extension alone would
+have pulled in every Swift source file in the repo; `App.swift` stays ungated, because no engine
+scans it.
+
+Both prefix rules are now keyed by extension in `_PREFIX_KINDS_BY_EXT`, from which `_SCANNABLE_KINDS`
+is derived, so adding a kind is one entry in one place. That mattered: `swiftprefix:` first shipped in
+the config while the parser still recognised four kinds, and an unrecognised kind is dropped
+SILENTLY — the line read correctly and gated nothing. Drift guards now fail the build in both
+directions: a kind the config declares but the code does not implement, and a kind the code
+implements but the config never uses.
+
+Measured across 68 filenames: 8 newly gated, **0 newly ungated**.
 
 #### Notes
 - The file-type rule is implemented **once**, in `cx_check.py`. A shell mirror was written so the
