@@ -15,7 +15,7 @@ import unittest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _CLAUDE_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "cx-devassist"))
-_COPILOT_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "copilot", "checkmarx-devassist"))
+_COPILOT_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "copilot-devassist"))
 _REPO_ROOT = os.path.normpath(os.path.join(_HERE, ".."))
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 

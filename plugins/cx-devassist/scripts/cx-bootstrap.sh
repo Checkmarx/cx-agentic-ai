@@ -39,7 +39,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Numeric floor only (capability is decided by the gate's probe, not this number). Keep IDENTICAL
 # to scripts/cx-min-version and the fallback in hooks/cx_check.py. (search marker: CX_MIN_VERSION)
-MIN_CX_VERSION_FALLBACK="2.3.57"
+MIN_CX_VERSION_FALLBACK="2.3.59"
 
 GITHUB_RELEASES="https://github.com/Checkmarx/ast-cli/releases"
 GITHUB_LATEST="$GITHUB_RELEASES/latest/download"

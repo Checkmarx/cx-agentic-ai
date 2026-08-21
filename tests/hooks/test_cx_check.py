@@ -20,7 +20,7 @@ from contextlib import redirect_stdout, redirect_stderr
 
 # Source under test lives in the plugin's hooks/ (tests live at the repo root, outside the plugin).
 _HOOKS_DIR = os.path.normpath(os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "copilot", "checkmarx-devassist", "hooks"))
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "copilot-devassist", "hooks"))
 sys.path.insert(0, _HOOKS_DIR)
 import cx_check  # noqa: E402
 

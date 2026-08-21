@@ -13,7 +13,7 @@ Resources); this router is the spine.
 ## When to Use
 
 - The `cx` CLI is not installed or not found in PATH
-- A hook blocked an operation because `cx` is missing or below the minimum version
+- A hook blocked a file write because `cx` is missing or below the minimum version
 - The developer explicitly runs `/cx-cli-setup` to reconfigure or reauthenticate
 - The plugin detected expired credentials and needs a re-auth step
 
@@ -50,7 +50,7 @@ Unix). It needs only `bash` (Git Bash on Windows) — no Python.
 > an on-PATH folder or "activate" it, and you must **never hand-place a second copy**. (The
 > remediation MCP resolves cx by absolute path too, via `cx_run.sh`; it activates after one `/reload-plugins`.)
 
-When a hook blocked an operation, its deny message already contains the exact command by resolved
+When a hook blocked a file write, its deny message already contains the exact command by resolved
 absolute path — e.g. `bash "/…/plugins/cx-devassist/scripts/cx-bootstrap.sh" install`. Use it
 verbatim. **Do not** substitute `${CLAUDE_PLUGIN_ROOT}` — it is injected only into hook execution
 and is empty in the Bash shell, so a path built from it will not resolve.
@@ -81,8 +81,9 @@ cx version
   `"$HOME/.checkmarx/bin/cx" version` (Unix) or `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" version` (Windows).
 
 **Version gate:** the minimum is `scripts/cx-min-version` — the oldest ast-cli release this plugin
-supports. A build **below** it is a hard block on every gated action — including
-`cx auth login` — so upgrade via `references/upgrade.md`. A `cx version` reporting the literal `dev`
+supports. A build **below** it blocks every write to a file Checkmarx can scan, and every Checkmarx
+MCP call, until it is upgraded via `references/upgrade.md`. Shell commands are never blocked, so you
+can run `cx version` and the bootstrap freely to diagnose and fix it. A `cx version` reporting the literal `dev`
 sentinel bypasses the numeric check (auth still applies); don't treat `dev` as a failure.
 
 ## Phase 2 — Authenticate the CLI
@@ -145,21 +146,24 @@ cx auth validate
 **Acceptance is that the _hook path_ is live — not merely that `cx version` prints in the shell.**
 The hooks resolve `cx` in a separate process with a different PATH snapshot, so confirm both:
 
-1. **The gate clears** — the next gated tool call proceeds (no longer denied) and the `Stop` hook no
-   longer errors with `cx: command not found`. After a bootstrap install this happens on the very next
-   call with **no restart**, because the gate resolves the canonical store by absolute path.
+1. **The gate clears** — the next write to a file Checkmarx can scan (`.py`, `.java`, `.tf`,
+   `package.json`, …) proceeds, and the `Stop` hook no longer errors with `cx: command not found`.
+   After a bootstrap install this happens on the very next call with **no restart**, because the gate
+   resolves the canonical store by absolute path. A shell command succeeding proves NOTHING here —
+   shell is not gated, so it succeeds whether or not cx is ready.
 2. **The MCP is loaded** — run `/reload-plugins`, then `/mcp` shows `Checkmarx` Connected
    (`references/mcp.md`).
 
 Only once the gate clears: "Setup complete. The `cx` CLI is installed, configured, and
-authenticated, and the security hooks are enforcing." If a gated action is still denied after `cx
-version` works in the shell, see `references/troubleshooting.md`.
+authenticated, and the security hooks are enforcing." If a scannable-file write is still denied after
+`cx version` works in the shell, see `references/troubleshooting.md`.
 
 ## Error Handling (Any Phase)
 
 - Surface the specific error — never a generic "something went wrong."
 - Identify which phase failed; let the developer correct and retry **that step only** — no restart.
-- If they cancel: "Setup is incomplete; the plugin stays blocked. Run `/cx-cli-setup` to resume."
+- If they cancel: "Setup is incomplete — writes to source code, IaC and dependency manifests stay
+  blocked. Other file types and all shell commands still work. Run `/cx-cli-setup` to resume."
 
 ## Re-Authentication Only (Expired Credentials)
 
