@@ -29,6 +29,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # No step here uses git after the checkout — mcp-publisher authenticates over DNS and
+          # publishes over HTTPS, and verification is curl — so the job never needs the token left
+          # behind in .git/config. (zizmor: artipacked)
+          persist-credentials: false
 
       - name: Download mcp-publisher
         env:
