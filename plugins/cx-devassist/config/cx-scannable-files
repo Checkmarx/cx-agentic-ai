@@ -40,6 +40,7 @@
 #   suffix:<.x>     path ends with this        — mirrors Go strings.HasSuffix(...)
 #   base:<name>     exact file basename
 #   txtprefix:<p>   a *.txt file whose basename starts with <p>
+#   swiftprefix:<p> a *.swift file whose basename starts with <p>
 #
 # Matching is CASE-INSENSITIVE here. ASCA and KICS lowercase before comparing; SCA's
 # basename lookup is case-SENSITIVE in Go, so a `Package.json` is gated by us but would
@@ -87,10 +88,11 @@ base:Dockerfile
 
 # --- SCA (dependency manifests) ----------------------------------------------
 # Mirrors validateSupportedManifestFile —
-#   ast-cli/internal/services/realtimeengine/ossrealtime/oss-realtime.go:200-238
-# Two extensions, an exact-filename set, and a *.txt prefix rule.
+#   ast-cli/internal/services/realtimeengine/ossrealtime/oss-realtime.go:194-255
+# Extensions, exact basenames, *.txt / *.swift prefix rules, and one suffix rule.
 ext:.csproj
 ext:.sbt
+ext:.podspec
 
 base:pom.xml
 base:package.json
@@ -105,10 +107,23 @@ base:libs.versions.toml
 base:setup.cfg
 base:setup.py
 base:pyproject.toml
+base:Podfile
+base:Cartfile
+base:Cartfile.private
+base:Gemfile
+base:composer.json
+base:pubspec.yaml
+base:Package.swift
 
-# oss-realtime.go:228-235 — a .txt file counts as a manifest when its basename
+# oss-realtime.go:247-249 — CocoaPods pod specifications in JSON format.
+suffix:.podspec.json
+
+# oss-realtime.go:238-244 — a .txt file counts as a manifest when its basename
 # starts with one of these (requirements.txt, requirements-dev.txt, packages.txt,
 # constraints.txt, …).
 txtprefix:requirement
 txtprefix:packages
 txtprefix:constraint
+
+# oss-realtime.go:252-255 — Swift PM multi-toolchain variant (Package@swift-5.9.swift, …).
+swiftprefix:package@swift-

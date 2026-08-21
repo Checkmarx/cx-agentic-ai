@@ -48,11 +48,17 @@ _SCANNABLE = [
     # KICS (params/filters.go:197-207)
     "main.tf", "k8s.yaml", "ci.yml", "tsconfig.json", "api.proto", "build.dockerfile",
     "vars.auto.tfvars", "vars.terraform.tfvars", "Dockerfile",
-    # SCA (oss-realtime.go:200-238)
+    # SCA (oss-realtime.go:194-255)
     "App.csproj", "build.sbt", "pom.xml", "package.json", "bower.json", "yarn.lock",
     "Directory.Packages.props", "packages.config", "go.mod", "build.gradle", "build.gradle.kts",
     "libs.versions.toml", "setup.cfg", "setup.py", "pyproject.toml",
     "requirements.txt", "requirements-dev.txt", "packages.txt", "constraints.txt",
+    # SCA, Apple/Ruby ecosystems
+    "Podfile", "Cartfile", "Cartfile.private", "Gemfile", "Package.swift",
+    "MyPod.podspec", "MyPod.podspec.json",
+    # Swift PM multi-toolchain variants — gated by the swiftprefix rule, NOT by the .swift
+    # extension, which would drag in every Swift source file in the repo.
+    "Package@swift-5.9.swift", "Package@swift-4.swift", "PACKAGE@SWIFT-6.0.SWIFT",
     # case-insensitivity
     "App.JAVA", "DOCKERFILE", "Pom.XML", "MAIN.TF",
 ]
@@ -60,7 +66,10 @@ _SCANNABLE = [
 # Files no engine can scan — these must stop being gated.
 _NOT_SCANNABLE = [
     "README.md", "notes.txt", "index.html", "style.css", "query.sql", "deploy.sh", "app.rb",
-    "index.php", "main.c", "main.cpp", "lib.rs", "App.kt", "App.swift", "notebook.ipynb",
+    "index.php", "main.c", "main.cpp", "lib.rs", "App.kt", "notebook.ipynb",
+    # plain Swift SOURCE stays ungated: no engine scans it. Only the Package@swift-*.swift
+    # manifest variants match, via swiftprefix — the .swift extension alone must never gate.
+    "App.swift", "ViewController.swift", "Package@other.swift",
     "LICENSE", "Makefile", "data.csv", "logo.png",
     # plain .tfvars is deliberately NOT gated: KICS lists only the compound .auto.tfvars /
     # .terraform.tfvars suffixes (kics.go:33 uses HasSuffix), so it would not be scanned.
@@ -76,7 +85,32 @@ class LoadScannableFiles(unittest.TestCase):
         self.assertIsNotNone(table, "the shipped config/cx-scannable-files must parse")
         for kind in cx_check._SCANNABLE_KINDS:
             self.assertIn(kind, table)
-        self.assertTrue(table["ext"] and table["suffix"] and table["base"] and table["txtprefix"])
+            # Also non-EMPTY: a kind implemented in code but never used in the config is a
+            # half-finished rule, and reads as "nothing of this kind is scannable".
+            self.assertTrue(table[kind], "%s: declared in code, unused in the config" % kind)
+
+    def test_every_kind_in_the_shipped_config_is_implemented(self):
+        """The other drift direction, and the one that actually bit: an unrecognised kind is dropped
+        SILENTLY, so a well-formed new line looks correct and does nothing. `swiftprefix:` shipped in
+        the config while _SCANNABLE_KINDS still listed four kinds, so Package@swift-5.9.swift went
+        ungated with no error anywhere. Fail in CI instead of in the field."""
+        with open(cx_check._scannable_files_path(), encoding="utf-8") as f:
+            raw = f.read()
+        used = set()
+        for line in raw.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and ":" in line:
+                used.add(line.partition(":")[0].strip().lower())
+        self.assertEqual(
+            set(), used - set(cx_check._SCANNABLE_KINDS),
+            "config/cx-scannable-files declares a kind cx_check.py does not implement — it is "
+            "being dropped silently and gates nothing")
+
+    def test_prefix_kinds_are_reachable_by_extension(self):
+        """Every *prefix kind needs an extension that routes to it, or its values are unreachable."""
+        for ext, kind in cx_check._PREFIX_KINDS_BY_EXT.items():
+            self.assertIn(kind, cx_check._SCANNABLE_KINDS)
+            self.assertTrue(ext.startswith("."), ext)
 
     def test_values_are_lowercased(self):
         table = cx_check._load_scannable_files()
@@ -435,17 +469,20 @@ class EngineDriftGuards(unittest.TestCase):
         self.assertIn("dockerfile", table["base"])
 
     def test_sca_manifests(self):
-        """Mirrors validateSupportedManifestFile — oss-realtime.go:200-238."""
+        """Mirrors validateSupportedManifestFile — oss-realtime.go:194-255."""
         table = cx_check._load_scannable_files()
-        self.assertTrue(frozenset({".csproj", ".sbt"}) <= table["ext"])
+        self.assertTrue(frozenset({".csproj", ".sbt", ".podspec"}) <= table["ext"])
         expected_bases = frozenset({
             "pom.xml", "package.json", "bower.json", "yarn.lock", "directory.packages.props",
             "packages.config", "go.mod", "build.gradle", "build.gradle.kts",
             "libs.versions.toml", "setup.cfg", "setup.py", "pyproject.toml",
+            "podfile", "cartfile", "cartfile.private", "gemfile", "package.swift",
         })
         self.assertTrue(expected_bases <= table["base"])
+        self.assertIn(".podspec.json", table["suffix"])
         self.assertEqual(frozenset({"requirement", "packages", "constraint"}),
                          table["txtprefix"])
+        self.assertEqual(frozenset({"package@swift-"}), table["swiftprefix"])
 
 
 class CxAbsentStageTwo(unittest.TestCase):

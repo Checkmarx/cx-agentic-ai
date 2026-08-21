@@ -274,12 +274,21 @@ _SCANNABLE_FILES_MAX_BYTES = 65536
 
 # The line kinds config/cx-scannable-files may declare. Each mirrors how the corresponding Go filter
 # compares, so the plugin gates exactly what the engines scan:
-#   ext       → filepath.Ext(...)        (ASCA asca.go:26, SCA oss-realtime.go:208)
-#   suffix    → strings.HasSuffix(...)   (KICS kics.go:33 — why `.auto.tfvars` matches but a plain
+#   ext         → filepath.Ext(...)      (ASCA asca.go:26, SCA oss-realtime.go:208)
+#   suffix      → strings.HasSuffix(...) (KICS kics.go:33 — why `.auto.tfvars` matches but a plain
 #                                         `.tfvars` is NOT scanned, and so must NOT be gated)
-#   base      → exact basename           (KICS `Dockerfile`, SCA's manifest filename set)
-#   txtprefix → a *.txt manifest         (SCA oss-realtime.go:228-235)
-_SCANNABLE_KINDS = ("ext", "suffix", "base", "txtprefix")
+#   base        → exact basename         (KICS `Dockerfile`, SCA's manifest filename set)
+#   txtprefix   → a *.txt manifest       (SCA oss-realtime.go:238-244)
+#   swiftprefix → a *.swift manifest     (SCA oss-realtime.go:252-255)
+#
+# The two *prefix kinds exist because SCA treats a GENERIC extension as a manifest only when the
+# basename also starts with a known prefix: `requirements.txt` is one but `changelog.txt` is not,
+# `Package@swift-5.9.swift` is one but `App.swift` is not. Extension alone would over-gate every
+# .txt and .swift file in the repo. Keyed by extension so adding the next one is a single entry —
+# _SCANNABLE_KINDS is derived from it rather than repeated, which is what let `swiftprefix:` ship
+# in the config and be silently dropped by the parser.
+_PREFIX_KINDS_BY_EXT = {".txt": "txtprefix", ".swift": "swiftprefix"}
+_SCANNABLE_KINDS = ("ext", "suffix", "base") + tuple(_PREFIX_KINDS_BY_EXT.values())
 
 # The tool_input key holding the target path, in priority order. NotebookEdit carries notebook_path
 # rather than file_path, so both are consulted before concluding "this is not a file write".
@@ -404,7 +413,8 @@ def _is_scannable_file(hook_input):
         return True
     if any(base.endswith(suffix) for suffix in table["suffix"]):
         return True
-    if ext == ".txt" and any(base.startswith(prefix) for prefix in table["txtprefix"]):
+    prefix_kind = _PREFIX_KINDS_BY_EXT.get(ext)
+    if prefix_kind and any(base.startswith(prefix) for prefix in table[prefix_kind]):
         return True
     return False
 
