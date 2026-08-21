@@ -396,7 +396,7 @@ _READONLY_COMMANDS = frozenset(name.lower() for name in {
 # The readiness chain is only worth ENFORCING for a file one of the engines would look at.
 # The set lives in config/cx-scannable-files; THIS is its only reader — see that file's header.
 _SCANNABLE_FILES_MAX_BYTES = 65536
-_SCANNABLE_KINDS = ("ext", "suffix", "base", "txtprefix")
+_SCANNABLE_KINDS = ("ext", "suffix", "base", "txtprefix", "swiftprefix")
 _FILE_TOOL_PATH_KEYS = ("file_path", "notebook_path")
 _FILE_WRITE_TOOLS = frozenset({"Write", "StrReplace", "Edit", "MultiEdit", "EditNotebook"})
 
@@ -470,6 +470,8 @@ def _is_scannable_file(hook_input):
     if any(base.endswith(suffix) for suffix in table["suffix"]):
         return True
     if ext == ".txt" and any(base.startswith(prefix) for prefix in table["txtprefix"]):
+        return True
+    if ext == ".swift" and any(base.startswith(prefix) for prefix in table["swiftprefix"]):
         return True
     return False
 
