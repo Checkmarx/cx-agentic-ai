@@ -1,0 +1,78 @@
+---
+description: Scan and remediate IaC (Infrastructure-as-Code) misconfigurations in Dockerfile, Terraform, Kubernetes YAML, and other IaC files using Checkmarx KICS and the Checkmarx MCP imageRemediation tool.
+alwaysApply: false
+globs: "**/{Dockerfile,.dockerfile,*.tf,*.yaml,*.yml,*.json,*.auto.tfvars,*.terraform.tfvars,*.proto}"
+---
+
+# CX DevAssist KICS (IaC)
+
+Use for **Infrastructure-as-Code** misconfiguration scan/fix (Dockerfile, Terraform, Kubernetes YAML, etc.). For source code SAST use `cx-devassist-asca`; for dependency manifests use `cx-devassist-sca`.
+
+## Routing
+
+| Target | Use |
+|--------|-----|
+| IaC file (Dockerfile, .tf, .yaml, …) | This rule / `cx-devassist-kics` |
+| Source code file (.py, .js, .java, …) | `cx-devassist-asca` |
+| Manifest/lockfile (package.json, go.mod, …) | `cx-devassist-sca` |
+| Whole repo / cloud scans | Checkmarx MCP scan tools |
+
+If KICS findings are already in context (hook deny `agent_message`, `CHECKMARX_HOOK_DENY` block), **skip scan — go straight to remediation**. Never retry a blocked Write/StrReplace or paste blocked code in chat.
+
+## Scan
+
+```bash
+# Unix:
+"$HOME/.checkmarx/bin/cx" scan iac-realtime -s "<file-path>"
+# Windows:
+"$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan iac-realtime -s "<file-path>"
+```
+
+Report findings (title, severity, line, description). KICS findings are **deterministic IaC rule matches** — they are never false positives caused by missing cross-file context. **Fix every finding; do not suppress or dismiss any as a false positive.**
+
+## Remediation (MCP-only)
+
+For each finding, call **`mcp__plugin-cx-devassist-Checkmarx__imageRemediation`** with:
+
+```json
+{
+  "type": "iac",
+  "metadata": {
+    "title": "[Title from finding]",
+    "description": "[Description from finding]",
+    "remediationAdvice": "[how to harden this configuration]"
+  }
+}
+```
+
+- **MCP available** → apply `remediation_steps` in order; change only code at/near the flagged line
+- **MCP unavailable** → **STOP.** No manual fixes. Run `/cx-cli-setup` if auth fails; ask developer to **Developer: Reload Window** for MCP
+
+After fixes, re-scan. Remediate **only in-scope findings** (your changes or the original target); leave pre-existing findings unfixed.
+
+If a fix genuinely requires resources outside this file (e.g. a separate KMS key or a centrally-managed policy), add them as part of your change rather than skipping the finding.
+
+## Skill compliance (mandatory)
+
+**Follow this rule's workflow exactly as written — as-is, with no paraphrasing, summarizing, or skipping steps. Do not abbreviate, substitute your own judgment for, or reorder any step (Scan → Report → Remediate via MCP → Re-scan → Step 5 summary).**
+
+The **Step 5 Remediation Summary** is mandatory output — **always** produce and show it to the user **verbatim**, in full, after remediation completes, even for a single finding. Never omit it, shorten it, or fold it into other output:
+
+```
+IaC Remediation Summary
+
+Rule:             [title]
+Severity:         [severity]
+Issue Type:       IaC Misconfiguration
+Problematic Line: [line]
+
+Files Modified:
+1. [file]
+   - Line [n]: [description of change]
+
+Pre-existing findings (NOT fixed — outside the scope of this remediation):
+- [title] — line [n] — [severity]
+- (omit this section entirely when the re-scan reports none)
+```
+
+Final status line is required: ✅ completed / ⚠️ partially completed / ❌ failed.

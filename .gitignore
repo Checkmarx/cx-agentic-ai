@@ -2,6 +2,11 @@
 mcp/mcp.json.local
 *.local
 
+# Python bytecode — the plugins' hook modules get compiled whenever a hook fires, and shipping
+# stale bytecode alongside the shipped .py sources would be worse than useless.
+__pycache__/
+*.py[cod]
+
 # IDE settings
 .vscode/settings.json
 .vscode/*.code-workspace
