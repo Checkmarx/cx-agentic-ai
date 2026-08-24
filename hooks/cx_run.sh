@@ -241,18 +241,18 @@ if [ -n "$CX_RESOLVED" ]; then
             # and drives the agent to install/upgrade cx. The MCP reconnects after /restart.
             case "$_CXRUN_MCP_REASON" in
                 below)
-                    printf 'cx v%s is below the required v%s. The security hook will prompt you to upgrade automatically on your next file edit, or run /checkmarx-cli-setup now to upgrade immediately.\n' \
+                    printf 'cx v%s is below the required v%s. The security hook will prompt you to upgrade automatically on your next file edit, or run /cx-cli-setup now to upgrade immediately.\n' \
                         "$_CXRUN_MCP_HAVE" "$_CXRUN_MCP_MIN" >&2
                     ;;
                 incapable)
-                    printf 'cx v%s is missing the MCP capability. The security hook will prompt you to upgrade automatically on your next file edit, or run /checkmarx-cli-setup now to upgrade immediately.\n' \
+                    printf 'cx v%s is missing the MCP capability. The security hook will prompt you to upgrade automatically on your next file edit, or run /cx-cli-setup now to upgrade immediately.\n' \
                         "$_CXRUN_MCP_HAVE" >&2
                     ;;
                 unrunnable)
-                    printf 'cx CLI could not be run. The security hook will prompt you to reinstall cx automatically on your next file edit, or run /checkmarx-cli-setup now to reinstall immediately.\n' >&2
+                    printf 'cx CLI could not be run. The security hook will prompt you to reinstall cx automatically on your next file edit, or run /cx-cli-setup now to reinstall immediately.\n' >&2
                     ;;
                 *)
-                    printf 'MCP not connected (%s). The security hook will guide you automatically on your next file edit, or run /checkmarx-cli-setup now.\n' \
+                    printf 'MCP not connected (%s). The security hook will guide you automatically on your next file edit, or run /cx-cli-setup now.\n' \
                         "$_CXRUN_MCP_REASON" >&2
                     ;;
             esac
@@ -300,11 +300,11 @@ case "${1:-} ${2:-}" in
         # (decision:"deny" blocks the tool). Exit 2 marks the hook FAILED and hides the message.
         case "$*" in
             *gemini-before*)
-                printf '{"decision":"deny","reason":"The Checkmarx security scanner could not run: cx CLI not found (not in CX_BINARY, canonical store, or PATH). This operation is BLOCKED fail-closed. Run /checkmarx-cli-setup to install cx, then retry. Shell commands and writes to file types Checkmarx cannot scan still run, so you can install cx from here.","systemMessage":"Checkmarx CLI (cx) is not installed — this action was blocked. Run /checkmarx-cli-setup or the bootstrap install command."}\n'
+                printf '{"decision":"deny","reason":"The Checkmarx security scanner could not run: cx CLI not found (not in CX_BINARY, canonical store, or PATH). This operation is BLOCKED fail-closed. Run /cx-cli-setup to install cx, then retry. Shell commands and writes to file types Checkmarx cannot scan still run, so you can install cx from here.","systemMessage":"Checkmarx CLI (cx) is not installed — this action was blocked. Run /cx-cli-setup or the bootstrap install command."}\n'
                 ;;
             *)
                 cat <<'JSON'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.","additionalContext":"Run /checkmarx-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. Shell commands and writes to file types Checkmarx cannot scan still run, so you can install cx from here."}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.","additionalContext":"Run /cx-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. Shell commands and writes to file types Checkmarx cannot scan still run, so you can install cx from here."}}
 JSON
                 ;;
         esac
@@ -323,9 +323,9 @@ JSON
     *)
         if [ "$_CXRUN_MCP" = 1 ]; then
             _cxrun_log mcp_connect "result=denied" "reason_code=cx_absent"
-            printf 'cx CLI is not installed. The security hook will prompt you to install cx automatically on your next file edit, or run /checkmarx-cli-setup now to install immediately.\n' >&2
+            printf 'cx CLI is not installed. The security hook will prompt you to install cx automatically on your next file edit, or run /cx-cli-setup now to install immediately.\n' >&2
         else
-            printf 'checkmarx-devassist: cx CLI not found (looked at CX_BINARY, the canonical store, and PATH). Run /checkmarx-cli-setup to install it.\n' >&2
+            printf 'checkmarx-devassist: cx CLI not found (looked at CX_BINARY, the canonical store, and PATH). Run /cx-cli-setup to install it.\n' >&2
         fi
         exit 1
         ;;

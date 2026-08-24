@@ -104,7 +104,7 @@ _EVENTS = {
         "count": _as_int,
     },
     "scan_decision": {
-        # The stage-2 native `cx hooks claude-pre-*` scanner's own allow/deny — distinct from
+        # The stage-2 native `cx hooks gemini-before-*` scanner's own allow/deny — distinct from
         # "gate_decision" (the stage-1 readiness gate). Never carries the finding/reason text
         # itself, only the outcome, so a real vulnerability's details never reach this log.
         # `reason_code` (not a raw exit code) says WHY: "vulnerability_detected" for a genuine,
@@ -142,12 +142,12 @@ _EVENTS = {
 _MCP_CONNECT_MESSAGES = {
     "ok": "cx v{have} is capable and current (>= v{min}) — mcp bridge starting.",
     "dev": "cx reports a 'dev' build and is capable — mcp bridge starting.",
-    "below": "cx v{have} is below the required v{min} — mcp bridge blocked; run /checkmarx-cli-setup to upgrade.",
+    "below": "cx v{have} is below the required v{min} — mcp bridge blocked; run /cx-cli-setup to upgrade.",
     "incapable": ("cx v{have} is missing the 'mcp bridge' subcommand (capability-incomplete build) — "
-                  "mcp bridge blocked; run /checkmarx-cli-setup."),
+                  "mcp bridge blocked; run /cx-cli-setup."),
     "unrunnable": "cx did not report a usable version ('cx version' failed or was unparseable) — mcp bridge blocked.",
     "cx_absent": ("cx CLI could not be resolved via CX_BINARY, the canonical store, or PATH — mcp "
-                  "bridge blocked; run /checkmarx-cli-setup to install."),
+                  "bridge blocked; run /cx-cli-setup to install."),
     "cx_binary_invalid": ("CX_BINARY is set but invalid (not absolute / missing / not executable); "
                           "ignored, falling back to the canonical store or PATH."),
 }

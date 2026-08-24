@@ -13,6 +13,8 @@ import unittest
 from _gemini_gatelib import (_URL_ANZ, _URL_EU, _URL_IND, _URL_US, _bash, _run_shell,
                              _HistoryFileMixin, cx_check, cx_log)
 
+_URL_DEV = "https://ast-master-components.dev.cxast.net"
+
 
 class ParseLoginFlags(unittest.TestCase):
     def test_space_form(self):
@@ -110,6 +112,30 @@ class ParseLoginFlags(unittest.TestCase):
             (_URL_US, "beta"))
 
 
+class ParseLoginFlagsTrailingSlash(unittest.TestCase):
+    """A trailing slash names the SAME environment — ast-cli accepts `https://host/` and
+    `https://host` interchangeably — but _ADMIN_URL_RE's charset has no '/' and its `$` anchors the
+    end, so the slashed spelling could never validate. _parse_login_flags returned None and
+    _record_login_attempt dropped it in silence."""
+
+    def test_trailing_slash_is_canonicalized_away(self):
+        for raw, want in ((_URL_DEV + "/", _URL_DEV),
+                          (_URL_EU + "/", _URL_EU),
+                          (_URL_EU + "//", _URL_EU),
+                          (_URL_EU, _URL_EU),
+                          ("https://cx.internal:8443/", "https://cx.internal:8443")):
+            self.assertEqual(
+                cx_check._parse_login_flags(
+                    "cx auth login --base-auth-uri %s --tenant acme" % raw),
+                (want, "acme"), raw)
+
+    def test_canonicalization_does_not_widen_the_charset(self):
+        for bad in (_URL_EU + "/../evil", "https://", "https:///"):
+            self.assertIsNone(
+                cx_check._parse_login_flags(
+                    "cx auth login --base-auth-uri %s --tenant acme" % bad), bad)
+
+
 class RecordLoginAttempt(_HistoryFileMixin):
     def test_record_creates_pending(self):
         cx_check._record_login_attempt(
@@ -181,6 +207,45 @@ class RecordLoginAttempt(_HistoryFileMixin):
         self.assertEqual(entries[0]["tenant"], "newest")
         # the oldest (t0) fell off
         self.assertNotIn("t0", [e["tenant"] for e in entries])
+
+
+class RecordLoginTrailingSlash(_HistoryFileMixin):
+    def test_both_spellings_are_one_remembered_environment(self):
+        self._entries((_URL_EU, "acme", "confirmed", 100))
+        cx_check._record_login_attempt(
+            "cx auth login --base-auth-uri %s/ --tenant acme" % _URL_EU, self.path)
+        entries = cx_check._load_login_history(self.path)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["base_auth_uri"], _URL_EU)
+        self.assertEqual(entries[0]["status"], "confirmed")
+        self.assertGreater(entries[0]["last_used"], 100)
+
+
+class RecordLoginSkippedSignal(_HistoryFileMixin):
+    def _log_actions(self, command):
+        seen = []
+        orig = cx_check._log
+        cx_check._log = lambda event, **kw: seen.append((event, kw.get("action")))
+        try:
+            cx_check._record_login_attempt(command, self.path)
+        finally:
+            cx_check._log = orig
+        return [a for e, a in seen if e == "login_history"]
+
+    def test_unparseable_auth_login_is_logged_as_skipped(self):
+        self.assertIn("skipped", self._log_actions(
+            "cx auth login --base-auth-uri %s/auth/realms/x --tenant acme" % _URL_EU))
+
+    def test_successful_record_does_not_log_skipped(self):
+        actions = self._log_actions(
+            "cx auth login --base-auth-uri %s/ --tenant acme" % _URL_EU)
+        self.assertIn("recorded", actions)
+        self.assertNotIn("skipped", actions)
+
+    def test_non_login_commands_do_not_log_skipped(self):
+        for cmd in ("cx auth validate --retry 0",
+                    "cx configure set --prop-name cx_apikey --prop-value SECRET"):
+            self.assertNotIn("skipped", self._log_actions(cmd), cmd)
 
 
 class PromotePendingLogin(_HistoryFileMixin):
@@ -433,6 +498,47 @@ class ValidLoginEntryHardening(unittest.TestCase):
         self.assertIsNotNone(e)
         self.assertEqual(_URL_EU, e["base_auth_uri"])
         self.assertEqual("acme", e["tenant"])
+
+    def test_value_is_canonicalized_before_validating(self):
+        e = cx_check._valid_login_entry(
+            {"base_auth_uri": "  " + _URL_EU + "/  ", "tenant": " acme ",
+             "status": "confirmed", "last_used": 1.0})
+        self.assertIsNotNone(e)
+        self.assertEqual(_URL_EU, e["base_auth_uri"])
+        self.assertEqual("acme", e["tenant"])
+
+    def test_path_bearing_stored_url_still_dropped(self):
+        self.assertIsNone(cx_check._valid_login_entry(
+            {"base_auth_uri": _URL_EU + "/auth/realms/x", "tenant": "acme",
+             "status": "confirmed", "last_used": 1.0}))
+
+
+class AdminConfigTrailingSlash(unittest.TestCase):
+    def _load(self, content):
+        f = tempfile.NamedTemporaryFile("w", suffix=".properties", delete=False, encoding="utf-8")
+        f.write(content)
+        f.close()
+        self.addCleanup(os.unlink, f.name)
+        return cx_check._load_admin_config(f.name)
+
+    def test_admin_url_trailing_slash_is_canonicalized(self):
+        cfg = self._load("cx_base_auth_uri=%s/\ncx_tenant=acme\n" % _URL_EU)
+        self.assertEqual(cfg.get("cx_base_auth_uri"), _URL_EU)
+        self.assertEqual(cfg.get("cx_tenant"), "acme")
+
+    def test_admin_url_with_path_still_rejected(self):
+        cfg = self._load("cx_base_auth_uri=%s/auth/realms/x\ncx_tenant=acme\n" % _URL_EU)
+        self.assertNotIn("cx_base_auth_uri", cfg)
+        self.assertEqual(cfg.get("cx_tenant"), "acme")
+
+    def test_canonical_pair_survives_unchanged(self):
+        cfg = self._load("cx_base_auth_uri=%s\ncx_tenant=acme-corp\n" % _URL_EU)
+        self.assertEqual(cfg, {"cx_base_auth_uri": _URL_EU, "cx_tenant": "acme-corp"})
+
+    def test_invalid_tenant_dropped_without_dropping_the_url(self):
+        cfg = self._load("cx_base_auth_uri=%s\ncx_tenant=-leading-dash\n" % _URL_EU)
+        self.assertEqual(cfg.get("cx_base_auth_uri"), _URL_EU)
+        self.assertNotIn("cx_tenant", cfg)
 
 
 class OAuthRecoveryBulletHistory(unittest.TestCase):

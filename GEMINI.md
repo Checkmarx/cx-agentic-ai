@@ -16,6 +16,10 @@ and **Checkmarx MCP calls** (`mcp_.*`) without skill activation:
 **Shell commands (`run_shell_command`) are not gated.** A single non-blocking observer records OAuth
 URL/tenant pairs from `cx auth login` so a later session can offer them — it never blocks.
 
+An **`AfterAgent` lifecycle hook** (`cx hooks gemini-after-agent`) runs at the end of each agent turn for
+advisory cleanup/telemetry — the Gemini equivalent of Claude Code's `Stop` → `claude-stop`. It is
+non-blocking and does not gate writes or MCP calls.
+
 Writes to file types Checkmarx **cannot** scan (`.md`, `.css`, `.sql`, `.sh`, plain `.txt`, etc.)
 proceed without the readiness gate. See `config/cx-scannable-files` and
 `docs/gemini-cli-devassist.md` for the full list.
@@ -23,7 +27,7 @@ proceed without the readiness gate. See `config/cx-scannable-files` and
 When the user asks you to **create, edit, scaffold, or add dependencies** as part of normal
 development — and is **not** explicitly asking for a security scan or audit:
 
-- **Do not** proactively activate `checkmarx-devassist-asca` or `checkmarx-devassist-sca`. Use the
+- **Do not** proactively activate `cx-devassist-asca` or `cx-devassist-sca`. Use the
   file-write tool directly instead.
 - **Scannable files** (`package.json`, `requirements.txt`, `app.py`, `main.tf`, … — see
   `config/cx-scannable-files`) are checked by the automatic hook chain: readiness gate first, then
@@ -32,7 +36,7 @@ development — and is **not** explicitly asking for a security scan or audit:
 - **Unscannable files** (`.md`, `.css`, `.sql`, `.sh`, plain `.txt`, …) are not gated — proceed
   with the write normally.
 - If a hook denies because **`cx` is missing, outdated, or unauthenticated**, activate
-  `checkmarx-cli-setup`, fix readiness, then **retry the same write** — do not skip setup and do not
+  `cx-cli-setup`, fix readiness, then **retry the same write** — do not skip setup and do not
   activate ASCA/SCA skills instead.
 - If a hook denies because of a **security finding**, follow the triage flow below (remediate vs
   suppress) — do not retry the write until the developer decides.
@@ -49,8 +53,8 @@ If a write is **denied by a hook** because a security finding was detected:
 4. **Wait for the answer** before doing anything else.
 5. **If remediate** — activate the relevant skill and run **Flow 2 in full (Steps 2–5)** — do not
    stop after MCP or after applying the fix:
-   - Source code (SAST/ASCA) → `checkmarx-devassist-asca`
-   - Dependency manifest (SCA/OSS) → `checkmarx-devassist-sca`
+   - Source code (SAST/ASCA) → `cx-devassist-asca`
+   - Dependency manifest (SCA/OSS) → `cx-devassist-sca`
    - **Step 4 re-scan is mandatory** — run `cx scan asca` or `cx scan oss-realtime` on the same
      file/manifest after fixes. This is verification, not "proactive scanning".
    - Apply fixes with the **file-write tool** (`WriteFile` / `write_file` / `replace`) — not
@@ -62,7 +66,7 @@ If a write is **denied by a hook** because a security finding was detected:
 8. **Never auto-remediate** on a hook deny. Calling `mcp__Checkmarx__codeRemediation` or
    `mcp__Checkmarx__packageRemediation` without the developer choosing **remediate** is wrong.
 
-For hook denies about missing/outdated/unauthenticated `cx`, activate `checkmarx-cli-setup` instead.
+For hook denies about missing/outdated/unauthenticated `cx`, activate `cx-cli-setup` instead.
 
 ## On-demand skills (explicit only)
 
@@ -72,9 +76,9 @@ skill's Flow 2 in full, including Step 4 re-scan).
 
 | User intent | Skill |
 |---|---|
-| Scan/audit **source code** for vulnerabilities | `checkmarx-devassist-asca` |
-| Scan/audit **dependencies / manifests** for vulnerabilities | `checkmarx-devassist-sca` |
-| Install, upgrade, or authenticate `cx` | `checkmarx-cli-setup` |
+| Scan/audit **source code** for vulnerabilities | `cx-devassist-asca` |
+| Scan/audit **dependencies / manifests** for vulnerabilities | `cx-devassist-sca` |
+| Install, upgrade, or authenticate `cx` | `cx-cli-setup` |
 
 **Do NOT activate skills for:**
 
@@ -87,7 +91,7 @@ skill's Flow 2 in full, including Step 4 re-scan).
 (Steps 2–5). Step 4 re-scan there is required verification, not proactive scanning.
 
 Hooks still scan scannable writes automatically (`config/cx-scannable-files`); this list only means
-do not proactively invoke the on-demand ASCA/SCA scan skills. `checkmarx-cli-setup` remains appropriate
+do not proactively invoke the on-demand ASCA/SCA scan skills. `cx-cli-setup` remains appropriate
 when hooks report `cx` is not ready.
 
 Mentioning a filename like `package.json` or a package name like `validator` in a **create/edit**

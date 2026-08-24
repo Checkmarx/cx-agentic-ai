@@ -273,9 +273,18 @@ _SCANNABLE_FILES_MAX_BYTES = 65536
 #   suffix    → endsWith / HasSuffix     (KICS — why `.auto.tfvars` matches but a plain `.tfvars`
 #                                         is NOT scanned, and so must NOT be gated — and SCA
 #                                         `*.gradle.kts`, whose final extname is `.kts`)
-#   base      → exact basename           (KICS `Dockerfile`, SCA's manifest filename set)
-#   txtprefix → a *.txt manifest         (SCA)
-_SCANNABLE_KINDS = ("ext", "suffix", "base", "txtprefix")
+#   base        → exact basename         (KICS `Dockerfile`, SCA's manifest filename set)
+#   txtprefix   → a *.txt manifest       (SCA)
+#   swiftprefix → a *.swift manifest     (SCA oss-realtime.go:252-255)
+#
+# The two *prefix kinds exist because SCA treats a GENERIC extension as a manifest only when the
+# basename also starts with a known prefix: `requirements.txt` is one but `changelog.txt` is not,
+# `Package@swift-5.9.swift` is one but `App.swift` is not. Extension alone would over-gate every
+# .txt and .swift file in the repo. Keyed by extension so adding the next one is a single entry —
+# _SCANNABLE_KINDS is derived from it rather than repeated, which is what let `swiftprefix:` ship
+# in the config and be silently dropped by the parser.
+_PREFIX_KINDS_BY_EXT = {".txt": "txtprefix", ".swift": "swiftprefix"}
+_SCANNABLE_KINDS = ("ext", "suffix", "base") + tuple(_PREFIX_KINDS_BY_EXT.values())
 
 # The tool_input key holding the target path, in priority order. NotebookEdit (Claude Code) carries
 # notebook_path rather than file_path; Gemini CLI's write_file/replace and Copilot CLI's create/edit
@@ -410,7 +419,8 @@ def _is_scannable_file(hook_input):
         return True
     if any(base.endswith(suffix) for suffix in table["suffix"]):
         return True
-    if ext == ".txt" and any(base.startswith(prefix) for prefix in table["txtprefix"]):
+    prefix_kind = _PREFIX_KINDS_BY_EXT.get(ext)
+    if prefix_kind and any(base.startswith(prefix) for prefix in table[prefix_kind]):
         return True
     return False
 
@@ -544,19 +554,17 @@ def _cx_version():
 
 # The numeric version is only a fast pre-filter: a build can satisfy the minimum version
 # yet still LACK the agent-security subcommands (a PUBLIC min-version build predates
-# `cx mcp bridge` / `cx hooks claude-*`). The real gate is whether those subcommands exist,
+# `cx mcp bridge` / `cx hooks gemini-before-*`). The real gate is whether those subcommands exist,
 # so probe them with --help (local, no network). All must exit 0 to count as capable.
-# Probe EVERY cx subcommand the hooks.json wiring actually invokes (the MCP bridge + all four
-# claude-* hook subcommands), not just two — otherwise a partial build that has pre-tool-use but
-# lacks e.g. claude-pre-file-write passes the gate, then the Write/Edit native scanner exits 1
-# (non-blocking) and the write goes UNSCANNED.
+# Probe EVERY cx subcommand the hooks.json wiring actually invokes (the MCP bridge + both
+# gemini-before-* scanners + the session-end hook), not just one — otherwise a partial build
+# that has before-tool but lacks e.g. gemini-before-file-tool passes the gate, then the Write/Edit
+# native scanner exits 1 (non-blocking) and the write goes UNSCANNED.
 _CAPABILITY_PROBES = (
     ("mcp", "bridge", "--help"),
-    ("hooks", "claude-pre-tool-use", "--help"),
-    ("hooks", "claude-pre-file-write", "--help"),
-    ("hooks", "claude-stop", "--help"),
     ("hooks", "gemini-before-tool", "--help"),
     ("hooks", "gemini-before-file-tool", "--help"),
+    ("hooks", "gemini-after-agent", "--help"),
 )
 
 
@@ -583,7 +591,7 @@ def _version_state_uncached():
     Parse a real semver first; a build that reports a bare `dev` sentinel (internal builds)
     bypasses the numeric gate; anything else (cx won't run / no parseable version) is
     'unrunnable'. A build that clears the numeric/dev pre-filter but is MISSING the required
-    subcommands (`cx mcp bridge` / `cx hooks claude-*`) is 'incapable' — the real gate, since
+    subcommands (`cx mcp bridge` / `cx hooks gemini-before-*`) is 'incapable' — the real gate, since
     a numeric version match alone does not guarantee the scanner/MCP exist."""
     output = _cx_version()
     if output is None:
@@ -702,7 +710,7 @@ def _is_authenticated(identity=None):
 # --- Scanner readiness: detect the native scanner's SILENT pass-through (the OAuth fail-open) -------
 # The gate's auth check (`cx auth validate`, _is_authenticated) and the native scanner's auth are
 # DIFFERENT notions. `cx auth validate` accepts an OAuth refresh token (from `cx auth login`); but
-# `cx hooks claude-*` authenticates ONLY by extracting a Checkmarx API key, and when it cannot it
+# `cx hooks gemini-before-*` authenticates ONLY by extracting a Checkmarx API key, and when it cannot it
 # runs in SILENT PASS-THROUGH — returning permissionDecision:allow for every file write / command
 # WITHOUT scanning (a textbook command-injection file slips straight through). So a
 # "validate-OK but scanner-pass-through" state is a silent fail-OPEN, and it is exactly what an OAuth
@@ -737,9 +745,40 @@ _CX_ENV_URLS_DOC = "https://docs.checkmarx.com/en/34965-68530-logging-in-to-chec
 _ADMIN_TENANT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}$")
 _ADMIN_URL_RE = re.compile(r"^https://[A-Za-z0-9][A-Za-z0-9.\-]{0,127}(?::[0-9]{2,5})?$")
 _ADMIN_CONFIG_MAX_BYTES = 8192
+
+
+def _valid_base_uri(value):
+    """THE canonical base-auth-uri, or None if the value is not one. Every boundary that accepts a
+    base URI — a parsed `cx auth login` flag, a stored history entry, the admin properties file —
+    goes through here, so "what counts as canonical" is defined ONCE instead of being re-assembled
+    from a strip/normalize/validate recipe at each call site.
+
+    Canonicalization is SURROUNDING WHITESPACE AND TRAILING SLASHES ONLY. `https://host/` and
+    `https://host` are the same environment and ast-cli accepts both, but _ADMIN_URL_RE's charset
+    has no '/' — so the slashed spelling could never validate and logins were silently dropped.
+
+    A path-bearing URL is REJECTED rather than truncated — an on-prem reverse-proxy prefix is
+    meaningful. fullmatch, not match: Python's `$` also matches immediately before a trailing newline."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip().rstrip("/")
+    return value if _ADMIN_URL_RE.fullmatch(value) else None
+
+
+def _valid_tenant(value):
+    """The canonical tenant, or None. Peer of _valid_base_uri — see it for why whitespace is
+    stripped before validating and why this is fullmatch rather than match."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value if _ADMIN_TENANT_RE.fullmatch(value) else None
+
+
+# key -> canonicalize-and-validate. This table is the ONLY declaration of a key's handling, so a key
+# added here cannot end up validated but un-canonicalized.
 _ADMIN_CONFIG_VALIDATORS = {
-    "cx_base_auth_uri": _ADMIN_URL_RE,
-    "cx_tenant": _ADMIN_TENANT_RE,
+    "cx_base_auth_uri": _valid_base_uri,
+    "cx_tenant": _valid_tenant,
 }
 
 
@@ -758,34 +797,39 @@ def _load_admin_config(path=None):
     (possibly empty). FAIL SOFT: a missing/garbled/oversized/undecodable file, an invalid value, or
     any unexpected error yields {} (no pre-fill). This must NEVER raise -- an escaped exception would
     trip _fail_closed_on_crash and brick every tool call -- and NEVER block. `path` is a test hook."""
-    if path is None:
-        path = _admin_config_path()
-    result = {}
     try:
-        # utf-8-sig (not plain utf-8): an admin editing this file with Windows Notepad can prepend
-        # a UTF-8 BOM, which would otherwise corrupt the first key name (cx_base_auth_uri ->
-        # \ufeffcx_base_auth_uri -> silently dropped). utf-8-sig strips a leading BOM and is a no-op
-        # when there isn't one.
-        with open(path, "r", encoding="utf-8-sig") as f:
-            raw = f.read(_ADMIN_CONFIG_MAX_BYTES + 1)
-        if len(raw) <= _ADMIN_CONFIG_MAX_BYTES:
-            for line in raw.splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _sep, value = line.partition("=")
-                key = key.strip()
-                value = value.strip()
-                validator = _ADMIN_CONFIG_VALIDATORS.get(key)
-                if validator is None:
-                    continue  # unknown key -- silently dropped
-                if value and validator.match(value):
-                    result[key] = value
-                else:
-                    _log("admin_config", result="invalid", key=key)
-    except (OSError, UnicodeDecodeError, Exception):
-        pass
-    return result
+        if path is None:
+            path = _admin_config_path()
+        try:
+            # utf-8-sig (not plain utf-8): an admin editing this file with Windows Notepad can prepend
+            # a UTF-8 BOM, which would otherwise corrupt the first key name (cx_base_auth_uri ->
+            # \ufeffcx_base_auth_uri -> silently dropped). utf-8-sig strips a leading BOM and is a no-op
+            # when there isn't one.
+            with open(path, "r", encoding="utf-8-sig") as f:
+                raw = f.read(_ADMIN_CONFIG_MAX_BYTES + 1)
+        except (OSError, UnicodeDecodeError):
+            return {}
+        if len(raw) > _ADMIN_CONFIG_MAX_BYTES:
+            return {}  # implausibly large for two values — refuse rather than parse
+        result = {}
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _sep, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            validator = _ADMIN_CONFIG_VALIDATORS.get(key)
+            if validator is None:
+                continue  # unknown key -- silently dropped
+            canonical = validator(value)
+            if canonical:
+                result[key] = canonical
+            else:
+                _log("admin_config", result="invalid", key=key)
+        return result
+    except Exception:
+        return {}
 
 
 # The shared opening of every _oauth_recovery_bullet branch — one copy, so a wording change cannot
@@ -837,7 +881,7 @@ def _oauth_recovery_bullet(cfg, history=None):
                 "chosen, list the numbered environments below in chat and ask the developer to pick "
                 "ONE (or reply with a different URL + tenant if none fit) -- and do NOT run any login "
                 "until the developer explicitly picks one (they may want a different tenant this time). "
-                "If they supply a different URL/tenant, ask per the checkmarx-cli-setup skill's "
+                "If they supply a different URL/tenant, ask per the cx-cli-setup skill's "
                 "oauth.md Question 2 (free-text form) -- NEVER guess or default values that are not "
                 "listed. Ready-to-run command for each:"
             )
@@ -847,7 +891,7 @@ def _oauth_recovery_bullet(cfg, history=None):
                 "recent first; the tool's built-in \"Other\" lets the developer type a different URL + "
                 "tenant instead -- and do NOT run any login until the developer explicitly picks one "
                 "(they may want a different tenant this time). If they pick \"Other\", ask for the "
-                "URL/tenant per the checkmarx-cli-setup skill's oauth.md Question 2 (free-text form) -- NEVER "
+                "URL/tenant per the cx-cli-setup skill's oauth.md Question 2 (free-text form) -- NEVER "
                 "guess or default values that are not listed. Ready-to-run command for each:"
             )
         return _OAUTH_BULLET_LEAD + (
@@ -861,7 +905,7 @@ def _oauth_recovery_bullet(cfg, history=None):
     return _OAUTH_BULLET_LEAD + (
         "Only AFTER OAuth is chosen, ask for the "
         "URL/tenant -- NEVER guess or default the --base-auth-uri or --tenant values (e.g. do not try "
-        "'iam.checkmarx.net' or a tenant of 'checkmarx') -- ask the developer, per the checkmarx-cli-setup "
+        "'iam.checkmarx.net' or a tenant of 'checkmarx') -- ask the developer, per the cx-cli-setup "
         "skill's oauth.md Question 2. Regional URL examples: US https://ast.checkmarx.net, "
         "US2 https://us.ast.checkmarx.net, EU https://eu.ast.checkmarx.net, "
         "ANZ https://anz.ast.checkmarx.net, India https://ind.ast.checkmarx.net, or their on-prem "
@@ -892,8 +936,8 @@ _LOGIN_PENDING_TTL = 3600     # an unpromoted (failed/abandoned) attempt expires
 _AUTH_LOGIN_RE = re.compile(r"\bauth\s+login\b")
 # Flag extraction, `--flag value` and `--flag=value` forms, one optional layer of matched quotes.
 # Lenient by design: the command already passed the bare-command guard (no chaining/substitution/
-# unsafe redirect), and extracted values must still pass the STRICT _ADMIN_URL_RE/_ADMIN_TENANT_RE
-# below -- validation, not extraction, is the security boundary.
+# unsafe redirect), and extracted values must still pass the STRICT _valid_base_uri/_valid_tenant
+# funnels -- validation, not extraction, is the security boundary.
 _LOGIN_FLAG_RE = re.compile(
     r'--(base-auth-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
 
@@ -908,33 +952,25 @@ def _parse_login_flags(command):
     found = {}
     for m in _LOGIN_FLAG_RE.finditer(command):
         found[m.group(1)] = next(g for g in m.groups()[1:] if g is not None)  # later wins
-    base = found.get("base-auth-uri")
-    tenant = found.get("tenant")
+    base = _valid_base_uri(found.get("base-auth-uri"))
+    tenant = _valid_tenant(found.get("tenant"))
     if base is None or tenant is None:
-        return None
-    if not (_ADMIN_URL_RE.match(base) and _ADMIN_TENANT_RE.match(tenant)):
         return None
     return base, tenant
 
 
 def _valid_login_entry(entry):
-    """The normalized history entry dict, or None if ANY field fails re-validation -- the same
-    strict regexes as the admin config, so a tampered file can at most lose entries; it can never
-    smuggle flags or free text into a deny message or a composed login command. fullmatch, not
-    match: Python's `$` also matches immediately before a trailing newline, so a value carrying one
-    could otherwise be rendered verbatim into a deny message, turning one command into two shell
-    lines. .strip() first mirrors _load_admin_config."""
+    """The normalized history entry dict, or None if ANY field fails re-validation. The URL and
+    tenant go through the SAME _valid_base_uri/_valid_tenant funnels as the parse and admin-config
+    boundaries, so a tampered or hand-edited file can at most lose entries — it can never smuggle
+    flags or free text into a deny message or a composed login command, and a merely non-canonical
+    spelling (stray whitespace, a trailing slash) is canonicalized rather than dropped."""
     if not isinstance(entry, dict):
         return None
-    url, tenant = entry.get("base_auth_uri"), entry.get("tenant")
+    url = _valid_base_uri(entry.get("base_auth_uri"))
+    tenant = _valid_tenant(entry.get("tenant"))
     status, last_used, cred = entry.get("status"), entry.get("last_used"), entry.get("cred_before")
-    if isinstance(url, str):
-        url = url.strip()
-    if isinstance(tenant, str):
-        tenant = tenant.strip()
-    if not (isinstance(url, str) and _ADMIN_URL_RE.fullmatch(url)):
-        return None
-    if not (isinstance(tenant, str) and _ADMIN_TENANT_RE.fullmatch(tenant)):
+    if url is None or tenant is None:
         return None
     if status not in ("pending", "confirmed") or not _is_number(last_used):
         return None
@@ -1026,8 +1062,13 @@ def _record_login_attempt(command, path=None):
         if command and _CX_CONFIGURE_SET_RE.search(command):
             _drop_pending_logins(path)
             return
+        if not (command and _AUTH_LOGIN_RE.search(command)):
+            return  # `cx auth validate`, `cx configure …` — admitted by the caller, nothing to remember
         parsed = _parse_login_flags(command)
         if parsed is None:
+            # An `auth login` whose URL/tenant we could not accept. The value itself is NOT logged —
+            # see cx_log.py's login_history contract.
+            _log("login_history", action="skipped")
             return
         base, tenant = parsed
         key = (base.lower(), tenant.lower())
@@ -1185,9 +1226,9 @@ def _probe_scanner_passthrough():
 
 
 def _legacy_probe_scanner_passthrough():
-    """Fallback for a cx that predates `cx hooks check-auth`: run `cx hooks claude-pre-file-write
+    """Fallback for a cx that predates `cx hooks check-auth`: run `cx hooks gemini-before-file-tool
     --debug` on a BENIGN in-memory payload and inspect stderr.
-    A PreToolUse hook only INSPECTS the proposed content — it never writes the file — and benign
+    A BeforeTool hook only INSPECTS the proposed content — it never writes the file — and benign
     content yields no finding even when the scanner does run, so the probe has no side effect and
     never blocks on a real vuln. Returns _SCANNER_PASSTHROUGH when the scanner reports it is
     unauthenticated, _SCANNER_SCAN when it ran without that marker, _SCANNER_UNKNOWN on any spawn
@@ -1195,13 +1236,12 @@ def _legacy_probe_scanner_passthrough():
     probe_path = _state_path("cx_scanner_probe.txt") or os.path.join(
         tempfile.gettempdir(), "cx_scanner_probe.txt")
     payload = json.dumps({
-        "hook_event_name": "PreToolUse",
-        "tool_name": "Write",
+        "tool_name": "write_file",
         "tool_input": {"file_path": probe_path, "content": "x"},
     }).encode("utf-8")
     try:
         result = subprocess.run(
-            [_cx_exe(), "hooks", "claude-pre-file-write", "--debug"],
+            [_cx_exe(), "hooks", "gemini-before-file-tool", "--debug"],
             input=payload,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -1628,12 +1668,12 @@ def cx_check():
         _deny(
             reason=(
                 "The Checkmarx CLI (cx) is not installed. Security scanning cannot run, so this "
-                "operation is BLOCKED. Run /checkmarx-cli-setup to install and authenticate it, then retry."
+                "operation is BLOCKED. Run /cx-cli-setup to install and authenticate it, then retry."
             ),
             context=(
                 "cx CLI is not installed on this machine (not found via CX_BINARY, the canonical "
                 "store, or PATH). All agent actions are blocked fail-closed until it is installed and "
-                "authenticated. IMMEDIATELY invoke the checkmarx-cli-setup skill (via /checkmarx-cli-setup). "
+                "authenticated. IMMEDIATELY invoke the cx-cli-setup skill (via /cx-cli-setup). "
                 + _install_instruction
             ),
             reason_code="cx_absent",
@@ -1653,7 +1693,7 @@ def cx_check():
         min_ver = ".".join(str(n) for n in _load_min_version())
         _upgrade_instruction = (
             _bootstrap_gemini_cli_instruction("upgrade") if _GEMINI_CLI_MODE else
-            "Invoke /checkmarx-cli-setup (Phase 1b — Upgrade). To self-upgrade now, run "
+            "Invoke /cx-cli-setup (Phase 1b — Upgrade). To self-upgrade now, run "
             "the plugin's bundled bootstrap by its resolved absolute path:\n    {0}{1}".format(
                 _bootstrap_command_str("upgrade"), _cx_binary_pin_note(effective_tier)
             )
@@ -1675,7 +1715,7 @@ def cx_check():
     if state == "unrunnable":
         _reinstall_instruction = (
             _bootstrap_gemini_cli_instruction("install") if _GEMINI_CLI_MODE else
-            "Invoke /checkmarx-cli-setup. To reinstall now, run the plugin's bundled bootstrap "
+            "Invoke /cx-cli-setup. To reinstall now, run the plugin's bundled bootstrap "
             "by its resolved absolute path:\n    " + _bootstrap_command_str("install")
             + _cx_binary_pin_note(effective_tier)
         )
@@ -1764,15 +1804,15 @@ def cx_check():
         _deny(
             reason=(
                 "The Checkmarx CLI (cx) could not authenticate to Checkmarx One. If you JUST signed in, "
-                "the backend may have been slow — retry the operation once. Otherwise run /checkmarx-cli-setup "
+                "the backend may have been slow — retry the operation once. Otherwise run /cx-cli-setup "
                 "to (re)authenticate, then retry."
             ),
             context=(
                 "cx auth validate did not succeed within the gate's timeout — cx is either not "
                 "authenticated (credentials missing or expired) OR the backend was slow/unreachable, so "
                 "a valid session that simply timed out looks the same here. Retry once; if it persists, "
-                "invoke the checkmarx-cli-setup skill "
-                "(/checkmarx-cli-setup) for the guided flow. ASK THE DEVELOPER WHICH METHOD FIRST — do not "
+                "invoke the cx-cli-setup skill "
+                "(/cx-cli-setup) for the guided flow. ASK THE DEVELOPER WHICH METHOD FIRST — do not "
                 "assume OAuth and do not ask for a URL/tenant before this choice is made. There are two "
                 "ways to authenticate, and they differ in who runs them:\n"
                 "- API key (ask this first / simplest): the DEVELOPER runs this in their own terminal "
@@ -1797,11 +1837,11 @@ def cx_check():
     _promote_pending_login()
 
     # 6b. Scanner readiness. `cx auth validate` (step 6) and the native scanner authenticate
-    #     DIFFERENTLY: validate accepts an OAuth refresh token, but `cx hooks claude-*` only
+    #     DIFFERENTLY: validate accepts an OAuth refresh token, but `cx hooks gemini-before-*` only
     #     extracts an API key and otherwise runs in SILENT PASS-THROUGH (allow everything, NO scan).
     #     A validate-OK-but-scanner-pass-through state is therefore a silent fail-OPEN — exactly the
     #     gap an OAuth `cx auth login` opens. Treat it as NOT authenticated for scanning and fail
-    #     CLOSED with the same visible /checkmarx-cli-setup message. UNKNOWN (probe error/timeout) defers to
+    #     CLOSED with the same visible /cx-cli-setup message. UNKNOWN (probe error/timeout) defers to
     #     the real stage-2 scanner — no worse than before — so a flaky probe can't over-block a
     #     genuinely-authenticated user. (Carve-outs in steps 1/2/5 already returned, so the bootstrap,
     #     read-only commands, and `cx auth`/`cx configure` recovery commands never reach this probe.)
@@ -1855,7 +1895,7 @@ def cx_check():
                 "`cx auth validate` passed, but `cx hooks check-auth` reports the scanner is not "
                 "authenticated — the native scanner could not authenticate with the current "
                 "stored credential (stale/expired, or the backend was unreachable) and would silently "
-                "allow everything UNSCANNED. Re-authenticate via the checkmarx-cli-setup skill (/checkmarx-cli-setup). "
+                "allow everything UNSCANNED. Re-authenticate via the cx-cli-setup skill (/cx-cli-setup). "
                 "ASK THE DEVELOPER WHICH METHOD FIRST — do not assume OAuth and do not ask for a "
                 "URL/tenant before this choice is made.\n"
                 "- API key (ask this first / simplest): the DEVELOPER runs this in their own terminal "
@@ -1890,12 +1930,12 @@ def _fail_closed_on_crash():
                 "decision": "deny",
                 "reason": (
                     "The Checkmarx security gate hit an internal error and could not evaluate "
-                    "this action, so it is BLOCKED fail-closed. Re-run /checkmarx-cli-setup, or set "
+                    "this action, so it is BLOCKED fail-closed. Re-run /cx-cli-setup, or set "
                     "CX_ALLOW_UNSCANNED=1 to bypass scanning (audited)."
                 ),
                 "systemMessage": (
                     "Checkmarx security gate error — this action was blocked. "
-                    "Run /checkmarx-cli-setup or check F12 debug logs."
+                    "Run /cx-cli-setup or check F12 debug logs."
                 ),
             }))
         else:
@@ -1909,7 +1949,7 @@ def _fail_closed_on_crash():
                     ),
                     "additionalContext": (
                         "An unexpected error occurred inside cx_check.py. All agent actions remain "
-                        "blocked until it is resolved. Re-run /checkmarx-cli-setup, or set CX_ALLOW_UNSCANNED=1 "
+                        "blocked until it is resolved. Re-run /cx-cli-setup, or set CX_ALLOW_UNSCANNED=1 "
                         "to bypass scanning (audited)."
                     ),
                 }

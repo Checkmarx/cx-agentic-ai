@@ -39,7 +39,8 @@
 #   ext:<.x>        exact final extension      — mirrors Go filepath.Ext(...)
 #   suffix:<.x>     path ends with this        — mirrors Go strings.HasSuffix(...)
 #   base:<name>     exact file basename
-#   txtprefix:<p>   a *.txt file whose basename starts with <p>
+#   txtprefix:<p>     a *.txt file whose basename starts with <p>
+#   swiftprefix:<p>   a *.swift file whose basename starts with <p>
 #
 # Matching is CASE-INSENSITIVE here. ASCA and KICS/IaC lowercase before comparing; SCA's
 # minimatch lookup is case-SENSITIVE, so a `Package.json` is gated by us but would
@@ -122,17 +123,20 @@ base:pubspec.yaml
 
 # Extension-less manifests added by ast-jetbrains-plugin's DevAssistConstants.MANIFEST_FILE_PATTERNS
 # (PR #452, "Enhance Package Manager Support"): CocoaPods, Carthage, Swift Package Manager, Ruby
-# Bundler. `Package@swift-*.swift` (a versioned SPM manifest) has no exact representation in this
-# file's ext/suffix/base/txtprefix vocabulary without either a new pattern kind or gating every
-# `.swift` file, so it is knowingly not covered.
+# Bundler.
 base:Podfile
 base:Cartfile
 base:Cartfile.private
 base:Package.swift
 base:Gemfile
 
-# requirement*.txt / constraints.txt / constraints-*.txt — a .txt file counts as
+# requirement*.txt / packages.txt / constraints.txt / constraints-*.txt — a .txt file counts as
 # a manifest when its basename starts with one of these (requirements.txt,
-# requirements-dev.txt, constraints.txt, constraints-prod.txt, …).
+# requirements-dev.txt, packages.txt, constraints.txt, constraints-prod.txt, …).
+# `packages` mirrors oss-realtime.go:238-244 (Claude plugin parity).
 txtprefix:requirement
+txtprefix:packages
 txtprefix:constraint
+
+# Swift PM multi-toolchain variant (Package@swift-5.9.swift, …) — oss-realtime.go:252-255.
+swiftprefix:package@swift-

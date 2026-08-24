@@ -1,6 +1,6 @@
 ---
-name: checkmarx-cli-setup
-description: "Installs, configures, and authenticates the Checkmarx cx CLI (API key or browser OAuth). Activate ONLY when cx is missing, outdated, or unauthenticated (e.g. a hook deny message instructs setup), the user runs /checkmarx-cli-setup, or credentials expired. Do NOT activate during normal coding, file creation, or dependency edits. Invoke as: cx-devassist:checkmarx-cli-setup"
+name: cx-cli-setup
+description: "Installs, configures, and authenticates the Checkmarx cx CLI (API key or browser OAuth). Activate ONLY when cx is missing, outdated, or unauthenticated (e.g. a hook deny message instructs setup), the user runs /cx-cli-setup, or credentials expired. Do NOT activate during normal coding, file creation, or dependency edits. Invoke as: cx-devassist:cx-cli-setup"
 ---
 
 # CX CLI Setup
@@ -14,7 +14,7 @@ Resources); this router is the spine.
 
 - The `cx` CLI is not installed or not found in PATH
 - A hook blocked an operation because `cx` is missing or below the minimum version
-- The developer explicitly runs `/checkmarx-cli-setup` to reconfigure or reauthenticate
+- The developer explicitly runs `/cx-cli-setup` to reconfigure or reauthenticate
 - The plugin detected expired credentials and needs a re-auth step
 
 **Do NOT activate** proactively during normal coding tasks (creating files, adding dependencies,
@@ -151,9 +151,10 @@ cx auth validate
 **Acceptance is that the _hook path_ is live — not merely that `cx version` prints in the shell.**
 The hooks resolve `cx` in a separate process with a different PATH snapshot, so confirm both:
 
-1. **The gate clears** — the next gated tool call proceeds (no longer denied) and the `Stop` hook no
-   longer errors with `cx: command not found`. After a bootstrap install this happens on the very next
-   call with **no restart**, because the gate resolves the canonical store by absolute path.
+1. **The gate clears** — the next gated tool call proceeds (no longer denied) and the session-end
+   lifecycle hook (`AfterAgent` → `gemini-after-agent` in Gemini CLI; `Stop` → `claude-stop` in Claude
+   Code) no longer errors with `cx: command not found`. After a bootstrap install this happens on the
+   very next call with **no restart**, because the gate resolves the canonical store by absolute path.
 2. **The MCP is loaded** — run `/restart`, then `/mcp show Checkmarx` shows `Checkmarx` Connected
    (`references/mcp.md`).
 
@@ -167,7 +168,7 @@ Checkmarx MCP calls require a ready `cx`.
 
 - Surface the specific error — never a generic "something went wrong."
 - Identify which phase failed; let the developer correct and retry **that step only** — no restart.
-- If they cancel: "Setup is incomplete; the plugin stays blocked. Run `/checkmarx-cli-setup` to resume."
+- If they cancel: "Setup is incomplete; the plugin stays blocked. Run `/cx-cli-setup` to resume."
 
 ## Re-Authentication Only (Expired Credentials)
 
