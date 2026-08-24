@@ -12,7 +12,7 @@ To print the exact release asset for this machine (instead of guessing the arch)
 bundled resolver and download the name it prints:
 
 ```bash
-bash "<plugin-root>/scripts/cx-asset-resolver.sh"   # e.g. ast-cli_v2.3.63-gemini-cliprerelease_linux_arm64.tar.gz
+bash "<plugin-root>/scripts/cx-asset-resolver.sh"   # e.g. ast-cli_2.3.63-gemini-cliprerelease_linux_arm64.tar.gz
 ```
 
 ## macOS
@@ -31,14 +31,14 @@ macOS binary — both Intel and Apple Silicon use it (Rosetta 2 translates on M-
 
 ```bash
 mkdir -p ~/.checkmarx/bin
-curl -fsSL https://github.com/Checkmarx/ast-cli/releases/download/v2.3.63-gemini-cliprerelease/ast-cli_v2.3.63-gemini-cliprerelease_darwin_x64.tar.gz -o /tmp/cx-cli.tar.gz && \
+curl -fsSL https://github.com/Checkmarx/ast-cli/releases/download/v2.3.63-gemini-cliprerelease/ast-cli_2.3.63-gemini-cliprerelease_darwin_x64.tar.gz -o /tmp/cx-cli.tar.gz && \
 tar -xzf /tmp/cx-cli.tar.gz -C ~/.checkmarx/bin cx && \
 chmod +x ~/.checkmarx/bin/cx && \
 rm /tmp/cx-cli.tar.gz
 ```
 
 If `curl` is unavailable, direct the developer to download
-`ast-cli_v2.3.63-gemini-cliprerelease_darwin_x64.tar.gz` from
+`ast-cli_2.3.63-gemini-cliprerelease_darwin_x64.tar.gz` from
 https://github.com/Checkmarx/ast-cli/releases/tag/v2.3.63-gemini-cliprerelease, extract `cx`, and move it to `~/.checkmarx/bin`
 (`chmod +x`). Homebrew or `/usr/local/bin` are fine alternatives **only if already on PATH**, but
 `~/.checkmarx/bin` is the reliable target the gate always finds.
@@ -51,7 +51,7 @@ substitute the resolved name):
 
 ```bash
 mkdir -p ~/.checkmarx/bin
-curl -fsSL https://github.com/Checkmarx/ast-cli/releases/download/v2.3.63-gemini-cliprerelease/ast-cli_v2.3.63-gemini-cliprerelease_linux_x64.tar.gz -o /tmp/cx-cli.tar.gz && \
+curl -fsSL https://github.com/Checkmarx/ast-cli/releases/download/v2.3.63-gemini-cliprerelease/ast-cli_2.3.63-gemini-cliprerelease_linux_x64.tar.gz -o /tmp/cx-cli.tar.gz && \
 tar -xzf /tmp/cx-cli.tar.gz -C ~/.checkmarx/bin cx && \
 chmod +x ~/.checkmarx/bin/cx && \
 rm /tmp/cx-cli.tar.gz
@@ -74,13 +74,13 @@ folder that happens to be on PATH. From Git Bash:
 
 ```bash
 mkdir -p "$LOCALAPPDATA/Checkmarx/cx"
-curl -fsSL https://github.com/Checkmarx/ast-cli/releases/download/v2.3.63-gemini-cliprerelease/ast-cli_v2.3.63-gemini-cliprerelease_windows_x64.zip -o /tmp/cx-cli.zip && \
+curl -fsSL https://github.com/Checkmarx/ast-cli/releases/download/v2.3.63-gemini-cliprerelease/ast-cli_2.3.63-gemini-cliprerelease_windows_x64.zip -o /tmp/cx-cli.zip && \
 unzip -o /tmp/cx-cli.zip cx.exe -d "$LOCALAPPDATA/Checkmarx/cx" && \
 rm /tmp/cx-cli.zip
 ```
 
 If `curl`/`unzip` are unavailable, direct the developer to download
-`ast-cli_v2.3.63-gemini-cliprerelease_windows_x64.zip` from
+`ast-cli_2.3.63-gemini-cliprerelease_windows_x64.zip` from
 https://github.com/Checkmarx/ast-cli/releases/tag/v2.3.63-gemini-cliprerelease, extract `cx.exe`, and place it at
 `%LOCALAPPDATA%\Checkmarx\cx\cx.exe`.
 
