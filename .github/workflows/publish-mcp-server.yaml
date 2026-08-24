@@ -24,13 +24,29 @@ jobs:
   publish:
     name: Publish MCP Server
     runs-on: cx-public-ubuntu-x64
+    environment: mcp-publisher
     permissions:
       contents: read
+      id-token: write # required for AWS OIDC federation via configure-aws-credentials (Secrets Manager)
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Configure AWS Credentials for Secrets Manager
+        uses: step-security/configure-aws-credentials@1448016543d4432bd608e0de7871c7bf9e9be925 # v6.2.1
+        with:
+          role-to-assume: ${{ secrets.SECRET_MANAGER_ROLE_ARN }}
+          aws-region: ${{ secrets.SECRET_MANAGER_AWS_REGION }}
+          role-session-name: mcp-publisher-secrets-fetch
+
+      - name: Fetch secrets from AWS Secrets Manager
+        uses: step-security/aws-secretsmanager-get-secrets@102b6b2a2528747bcc321bb99ef326d8be7ef58f # v3.0.1
+        with:
+          secret-ids: |
+            ${{ secrets.SECRET_MANAGER_SECRET_NAME }}
+          parse-json-secrets: true
 
       - name: Download mcp-publisher
         env:
@@ -46,7 +62,7 @@ jobs:
       - name: Authenticate (DNS) and publish
         env:
           MCP_DOMAIN: ${{ inputs.mcp-domain }}
-          PEM_CONTENT: ${{ secrets.MCP_TOKEN }}
+          PEM_CONTENT: ${{ env.MCP_TOKEN }}
         run: |
           # Extract Ed25519 private key bytes as hex — format required by mcp-publisher dns login
           PRIVATE_KEY_HEX=$(printf '%s' "${PEM_CONTENT}" \
