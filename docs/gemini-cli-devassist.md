@@ -14,24 +14,26 @@ run** — the action is **blocked**, not silently allowed. The agent then asks w
 
 `hooks/hooks.json` wires a **two-stage `BeforeTool` chain** (Gemini CLI's pre-tool-call
 hook event — see the
-[Gemini CLI hooks reference](https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md)):
+[Gemini CLI hooks reference](https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md)),
+plus an **advisory `AfterAgent` lifecycle hook** (Gemini's equivalent of Claude Code's `Stop` hook):
 
 1. **The gate** — `sh cx_check.sh --gemini-cli` → `cx_check.py` — proves the scanner is trustworthy
    before anything is scanned: cx is **present → recent enough → capable → authenticated**. If any step
    can't be proven, it denies and stage 2 never runs.
-2. **The scanner** — a native `cx hooks gemini-cli-*` subcommand that performs the actual analysis and
+2. **The scanner** — a native `cx hooks gemini-*` subcommand that performs the actual analysis and
    decides whether to allow or block the action.
 
-| Tool event | Gate | Native scanner | What it checks |
+| Tool / lifecycle event | Gate | Native scanner | What it checks |
 |---|---|---|---|
 | `WriteFile` / `write_file` / `write_.*` / `replace` — **scannable file** | `cx_check` | `cx hooks gemini-before-file-tool` | Static analysis (ASCA / SAST, KICS / IaC, SCA / manifests) of the proposed content |
 | `WriteFile` / `write_file` / `write_.*` / `replace` — any other file type | — | — | Nothing: no engine can scan it, so the write proceeds |
 | `run_shell_command` | — | — | **Not gated.** One non-blocking observer runs (`cx_record_login`) — see below |
 | `mcp_.*` | `cx_check` | `cx hooks gemini-before-tool` | Policy check before the MCP call is allowed |
+| `AfterAgent` (end of agent turn) | — | `cx hooks gemini-after-agent` | **Advisory only** — session-end cleanup/telemetry (peer of Claude's `Stop` → `claude-stop`). Non-blocking when cx is absent; never gates file writes or MCP |
 
-Route names (`gemini-before-tool`, `gemini-before-file-tool`, …) match the dispatch routes ast-cx-hooks'
-route catalog defines for Gemini CLI — the same routes `cx hooks install` writes into
-`~/.gemini/settings.json` when installing hooks natively without this plugin.
+Route names (`gemini-before-tool`, `gemini-before-file-tool`, `gemini-after-agent`, …) match the
+dispatch routes ast-cx-hooks' route catalog defines for Gemini CLI — the same routes `cx hooks install`
+writes into `~/.gemini/settings.json` when installing hooks natively without this plugin.
 
 The scanning logic itself lives in the `cx` CLI (maintained centrally by Checkmarx); this plugin is a
 thin, hardened wrapper that **guarantees cx is ready, installs it when missing, and wires the
@@ -44,12 +46,12 @@ declared in the `mcpServers` block of `gemini-extension.json` and started automa
 no manual registration step. It exposes code- and package-remediation tools
 (`mcp__Checkmarx__codeRemediation`, …) that the agent calls directly. A single `cx` sign-in covers both
 the CLI and the MCP. See
-[`skills/checkmarx-cli-setup/references/mcp.md`](skills/checkmarx-cli-setup/references/mcp.md).
+[`skills/cx-cli-setup/references/mcp.md`](skills/cx-cli-setup/references/mcp.md).
 
 **End-to-end flow after a hook deny (finding):**
 
 1. Agent presents findings and asks **remediate** vs **suppress** (see `GEMINI.md`).
-2. **Remediate** → activate `checkmarx-devassist-asca` or `checkmarx-devassist-sca` and run **Flow 2
+2. **Remediate** → activate `cx-devassist-asca` or `cx-devassist-sca` and run **Flow 2
    Steps 2–5** (MCP fix → apply via file-write tool → **mandatory Step 4 re-scan** → summary).
 3. When Step 4 is clean for in-scope findings → **retry the original blocked write once** (hooks
    re-scan proposed content).
@@ -79,7 +81,7 @@ the cross-OS holes that would otherwise let an unscanned action through:
   blocked.
 
 If cx is missing, below the minimum version, missing the required subcommands (`incapable`), or
-unauthenticated, the gate denies with a clear, actionable message pointing at `/checkmarx-cli-setup`.
+unauthenticated, the gate denies with a clear, actionable message pointing at `/cx-cli-setup`.
 
 **What that deny covers:** writes to [scannable files](#scannable-file-types) and Checkmarx MCP calls.
 **What it does not:** shell commands — ever. So a developer whose cx is broken can still run `git`,
@@ -159,9 +161,9 @@ cx-agentic-ai/                   # repo root — also the extension root
 │   ├── cx-path-probe.sh         # first writable on-PATH directory
 │   └── cx-min-version           # minimum cx version (numeric floor)
 └── skills/
-    ├── checkmarx-cli-setup/            # guided cx install + authentication (router + references/)
-    ├── checkmarx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
-    └── checkmarx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
+    ├── cx-cli-setup/            # guided cx install + authentication (router + references/)
+    ├── cx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
+    └── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
 ```
 
 > Tests live at the **repo root** (`tests/`), outside the shipped plugin, so they aren't distributed.
@@ -174,8 +176,8 @@ hooks already scan those writes. See `GEMINI.md` for routing rules.
 
 | Ask | Skill | Engine |
 |---|---|---|
-| "scan this file" / "check app.py" (source code) | `checkmarx-devassist-asca` | SAST (ASCA) → `mcp__Checkmarx__codeRemediation` |
-| "scan my dependencies" / "audit package.json for vulnerabilities" (manifest/lockfile) | `checkmarx-devassist-sca` | SCA / OSS → `mcp__Checkmarx__packageRemediation` |
+| "scan this file" / "check app.py" (source code) | `cx-devassist-asca` | SAST (ASCA) → `mcp__Checkmarx__codeRemediation` |
+| "scan my dependencies" / "audit package.json for vulnerabilities" (manifest/lockfile) | `cx-devassist-sca` | SCA / OSS → `mcp__Checkmarx__packageRemediation` |
 | whole project / cloud-scale scan | Checkmarx MCP (Cx1 cloud) tools | — |
 
 A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA.
@@ -185,7 +187,7 @@ Creating or editing `package.json` is **not** a scan request — just write the 
 
 An administrator can pre-seed the Checkmarx One **URL** and **tenant** for browser (OAuth) sign-in by
 editing `config/cx-onboarding.properties`. When set (and valid), the values are embedded straight into
-the gate's `cx auth login` recovery command and the `checkmarx-cli-setup` skill skips the URL/tenant
+the gate's `cx auth login` recovery command and the `cx-cli-setup` skill skips the URL/tenant
 question. Edit the file in your **forked / internal copy** (the reviewed, versioned artifact) — not in
 an end-user's live install, which is overwritten on extension update. Values are
 strictly validated (https-only host for the URL; a shell-inert charset for the tenant); an invalid value
@@ -235,7 +237,7 @@ the hook cannot spawn at all; whether that fails open or closed depends on how t
 version treats an unspawnable hook, so **Git for Windows is a hard prerequisite regardless** — install
 and verify it *before* relying on the gate.
 
-Then the **`cx` CLI** itself, which the bundled **`checkmarx-cli-setup`** skill installs (with download
+Then the **`cx` CLI** itself, which the bundled **`cx-cli-setup`** skill installs (with download
 checksum verification), puts on PATH, and authenticates (API key or OAuth). The minimum version is a
 numeric floor in `scripts/cx-min-version`; the real capability decision is a runtime probe (the
 `cx mcp bridge` and `cx hooks gemini-before-*` subcommands must all respond to `--help`).
@@ -274,8 +276,8 @@ Restart Gemini CLI (or run `/extensions reload`) so hooks, MCP, and skills are p
 /skills reload
 ```
 
-You should see extension `cx-devassist` and three skills (`checkmarx-cli-setup`,
-`checkmarx-devassist-asca`, `checkmarx-devassist-sca`). If `/skills list` is empty, the extension
+You should see extension `cx-devassist` and three skills (`cx-cli-setup`,
+`cx-devassist-asca`, `cx-devassist-sca`). If `/skills list` is empty, the extension
 was installed from the wrong directory — uninstall and reinstall using the path above.
 
 > `gemini extensions install` flags (`--ref` to pin a branch/tag, `--path` for monorepo subdirs, …)
@@ -283,7 +285,7 @@ was installed from the wrong directory — uninstall and reinstall using the pat
 > above doesn't match your installed version.
 
 On first use the gate will detect that `cx` is missing and walk you through installing and
-authenticating it via the **`checkmarx-cli-setup`** skill (`/checkmarx-cli-setup`).
+authenticating it via the **`cx-cli-setup`** skill (`/cx-cli-setup`).
 
 ---
 

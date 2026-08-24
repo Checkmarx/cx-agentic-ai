@@ -1,12 +1,12 @@
 ---
-name: checkmarx-devassist-sca
-description: "Runs a Checkmarx SCA (OSS) scan on dependency manifests/lockfiles and remediates SCA findings via MCP. Activate when the user explicitly asks to scan or audit dependencies, OR when a hook deny blocked a manifest write with SCA findings (triage first — ask remediate vs suppress before MCP). Do NOT activate for normal manifest create/edit. Invoke as: cx-devassist:checkmarx-devassist-sca"
+name: cx-devassist-sca
+description: "Runs a Checkmarx SCA (OSS) scan on dependency manifests/lockfiles and remediates SCA findings via MCP. Activate when the user explicitly asks to scan or audit dependencies, OR when a hook deny blocked a manifest write with SCA findings (triage first — ask remediate vs suppress before MCP). Do NOT activate for normal manifest create/edit. Invoke as: cx-devassist:cx-devassist-sca"
 ---
 
 # CX DevAssist SCA
 
 Detects and remediates vulnerable / malicious open-source dependencies using Checkmarx SCA (OSS
-realtime). This is the **dependency / package** counterpart to `checkmarx-devassist-asca` (which scans source
+realtime). This is the **dependency / package** counterpart to `cx-devassist-asca` (which scans source
 code for SAST vulnerabilities).
 
 ## When to Use
@@ -35,12 +35,12 @@ The plugin exposes three scan surfaces; pick by the target, and ask if it is amb
 
 | The user wants to scan… | Use |
 |---|---|
-| A **source code file** (`.py`, `.js`, `.java`, `.go`, …) for code vulnerabilities | `checkmarx-devassist-asca` (SAST) |
+| A **source code file** (`.py`, `.js`, `.java`, `.go`, …) for code vulnerabilities | `cx-devassist-asca` (SAST) |
 | A **dependency manifest / lockfile** (package.json, requirements.txt, go.mod, pom.xml, …) | **this skill** (SCA/OSS) |
 | An **entire project / repository** at cloud scale, or existing platform scan results | the Checkmarx MCP (Cx1 cloud) tools |
 
 A bare "scan this file" refers to whatever file is in context: a manifest/lockfile → this skill; source
-code → `checkmarx-devassist-asca`. If it is unclear which, ask the user.
+code → `cx-devassist-asca`. If it is unclear which, ask the user.
 
 ## Prerequisites
 
@@ -180,7 +180,7 @@ field naming.
      cx is not configured/authenticated —
      verify with `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) /
      `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth validate` (Windows), or a bare `cx auth validate` when
-     cx is on PATH; if it fails, run `/checkmarx-cli-setup`.
+     cx is on PATH; if it fails, run `/cx-cli-setup`.
   2. If auth validation **succeeds**, try calling an MCP tool (e.g. `mcp__Checkmarx__listProjects`)
      — the MCP may already be connected in this session despite any earlier connection warning.
      - If the tool responds → the MCP is live. Proceed with remediation immediately.

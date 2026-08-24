@@ -439,8 +439,8 @@ A capability-complete cx release is required (the public release may predate it;
             die "could not verify cx version after placement (state: $state)."
             ;;
     esac
-    "$cx_bin" hooks claude-pre-tool-use --help >/dev/null 2>&1 \
-        || die "placed cx is missing 'cx hooks claude-pre-tool-use' — this build cannot run the \
+    "$cx_bin" hooks gemini-before-file-tool --help >/dev/null 2>&1 \
+        || die "placed cx is missing 'cx hooks gemini-before-file-tool' — this build cannot run the \
 security scanner. A capability-complete cx release is required."
     log "Verified cx version + capability after placement."
     return 0

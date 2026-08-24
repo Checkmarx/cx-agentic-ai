@@ -1,6 +1,6 @@
 ---
-name: checkmarx-devassist-asca
-description: "Runs a Checkmarx ASCA SAST scan on SOURCE CODE files and remediates SAST findings via MCP. Activate when the user explicitly asks to scan or audit a source file, OR when a hook deny blocked a source-file write with SAST findings (triage first — ask remediate vs suppress before MCP). Do NOT activate for normal code creation or edits. For dependency manifests use checkmarx-devassist-sca. Invoke as: cx-devassist:checkmarx-devassist-asca"
+name: cx-devassist-asca
+description: "Runs a Checkmarx ASCA SAST scan on SOURCE CODE files and remediates SAST findings via MCP. Activate when the user explicitly asks to scan or audit a source file, OR when a hook deny blocked a source-file write with SAST findings (triage first — ask remediate vs suppress before MCP). Do NOT activate for normal code creation or edits. For dependency manifests use cx-devassist-sca. Invoke as: cx-devassist:cx-devassist-asca"
 ---
 
 # CX Security ASCA
@@ -14,7 +14,7 @@ This skill has two entry points:
 1. **On-demand scan** — User **explicitly** asks to scan a **source code file** for security
    vulnerabilities (e.g., "scan app.py for security issues", "audit this file for SAST findings"). If
    the target is a **dependency manifest/lockfile** (package.json, requirements.txt, go.mod, …), use
-   `checkmarx-devassist-sca` instead.
+   `cx-devassist-sca` instead.
 2. **Hook triage** — A hook deny blocked a source-file write with SAST findings (activate to present
    findings and ask remediate vs suppress; **do not** auto-call MCP).
 
@@ -34,11 +34,11 @@ Pick by the target, and ask if it is ambiguous:
 | The user wants to scan… | Use |
 |---|---|
 | A **source code file** (`.py`, `.js`, `.java`, `.go`, `.ts`, …) for code vulnerabilities | **this skill** (SAST/ASCA) |
-| A **dependency manifest / lockfile** (package.json, requirements.txt, go.mod, pom.xml, …) | `checkmarx-devassist-sca` (SCA/OSS) |
+| A **dependency manifest / lockfile** (package.json, requirements.txt, go.mod, pom.xml, …) | `cx-devassist-sca` (SCA/OSS) |
 | An **entire project / repository** at cloud scale, or existing platform scan results | the Checkmarx MCP (Cx1 cloud) tools |
 
 A bare "scan this file" refers to whatever file is in context: source code → this skill; a
-manifest/lockfile → `checkmarx-devassist-sca`. If it is unclear which, ask the user.
+manifest/lockfile → `cx-devassist-sca`. If it is unclear which, ask the user.
 
 ## Prerequisites
 
@@ -180,7 +180,7 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
      the bridge can't derive the URL or auth header without a valid key. Verify with cx by its
      canonical absolute path — `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) or
      `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth validate` (Windows), or a bare `cx auth validate` when
-     cx is on PATH; if it fails (or reports no API key), run `/checkmarx-cli-setup`.
+     cx is on PATH; if it fails (or reports no API key), run `/cx-cli-setup`.
   2. If auth validation **succeeds**, try calling an MCP tool (e.g. `mcp__Checkmarx__listProjects`)
      — the MCP may already be connected in this session despite any earlier connection warning.
      - If the tool responds → the MCP is live. Proceed with remediation immediately.

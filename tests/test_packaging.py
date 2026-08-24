@@ -75,7 +75,7 @@ class TestClaudeHookTriage(unittest.TestCase):
         self.assertNotIn("skip Flow 1", sca.lower())
 
     def test_gemini_oauth_admin_prefill_skip(self):
-        oauth = _read(_GEMINI_PLUGIN_ROOT, "skills", "checkmarx-cli-setup", "references", "oauth.md")
+        oauth = _read(_GEMINI_PLUGIN_ROOT, "skills", "cx-cli-setup", "references", "oauth.md")
         self.assertIn("SKIP Question 2", oauth)
         self.assertIn("preconfigured", oauth.lower())
 
@@ -88,6 +88,22 @@ class TestClaudeHookTriage(unittest.TestCase):
         block = m.group(0)
         self.assertIn("gemini-before-*", block)
         self.assertNotIn("claude-*", block)
+
+    def test_gemini_capability_probes_match_hooks_json(self):
+        py = _read(_GEMINI_PLUGIN_ROOT, "hooks", "cx_check.py")
+        start = py.find("_CAPABILITY_PROBES")
+        self.assertNotEqual(start, -1, "_CAPABILITY_PROBES not found")
+        block = py[start:start + 800]
+        for route in ("gemini-before-tool", "gemini-before-file-tool", "gemini-after-agent"):
+            self.assertIn(route, block, "missing %s in _CAPABILITY_PROBES" % route)
+        self.assertNotIn("claude-pre", block)
+        self.assertNotIn("claude-stop", block)
+        self.assertNotIn("gemini-before-agent", block)
+
+    def test_bootstrap_probes_gemini_file_scanner(self):
+        sh = _read(_GEMINI_PLUGIN_ROOT, "scripts", "cx-bootstrap.sh")
+        self.assertIn("gemini-before-file-tool", sh)
+        self.assertNotIn("claude-pre-tool-use", sh)
 
 
 class TestMarketplace(unittest.TestCase):
@@ -158,7 +174,7 @@ class TestGeminiExtension(unittest.TestCase):
             "gemini-extension.json contextFileName %r is missing" % ctx)
 
     def test_sca_skill_not_triggered_on_manifest_edits(self):
-        sca = _read(_GEMINI_PLUGIN_ROOT, "skills", "checkmarx-devassist-sca", "SKILL.md")
+        sca = _read(_GEMINI_PLUGIN_ROOT, "skills", "cx-devassist-sca", "SKILL.md")
         self.assertIn("Do NOT activate", sca,
                       "SCA skill must warn against activation on manifest create/edit")
         self.assertIn("BeforeTool", sca,
@@ -194,6 +210,15 @@ class TestGeminiExtension(unittest.TestCase):
         self.assertFalse(any("cx_check.sh" in c for c in cmds),
                          "run_shell_command must not run the readiness gate")
 
+    def test_after_agent_wires_session_end_hook(self):
+        """Peer of Claude's Stop → claude-stop; Gemini uses AfterAgent → gemini-after-agent."""
+        hooks = json.loads(_read(_GEMINI_PLUGIN_ROOT, "hooks", "hooks.json"))
+        entries = hooks["hooks"].get("AfterAgent", [])
+        self.assertTrue(entries, "AfterAgent lifecycle hook must be wired")
+        cmds = [h.get("command", "") for e in entries for h in e.get("hooks", [])]
+        self.assertTrue(any("gemini-after-agent" in c for c in cmds), cmds)
+        self.assertNotIn("BeforeAgent", hooks["hooks"])
+
     def test_scannable_files_config_present(self):
         path = os.path.join(_GEMINI_PLUGIN_ROOT, "config", "cx-scannable-files")
         self.assertTrue(os.path.isfile(path), "config/cx-scannable-files must ship with the extension")
@@ -204,7 +229,7 @@ class TestGeminiExtension(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(_GEMINI_PLUGIN_ROOT, "hooks", "cx_record_login.sh")))
 
     def test_asca_skill_requires_hook_triage(self):
-        asca = _read(_GEMINI_PLUGIN_ROOT, "skills", "checkmarx-devassist-asca", "SKILL.md")
+        asca = _read(_GEMINI_PLUGIN_ROOT, "skills", "cx-devassist-asca", "SKILL.md")
         self.assertIn("Flow 1b: Hook Triage", asca)
         self.assertIn("remediate** it", asca)
         self.assertIn("suppress** it", asca)
@@ -222,7 +247,7 @@ class TestGeminiExtension(unittest.TestCase):
         self.assertIn("retry the original blocked", ctx)
 
     def test_asca_skill_requires_step4_rescan(self):
-        asca = _read(_GEMINI_PLUGIN_ROOT, "skills", "checkmarx-devassist-asca", "SKILL.md")
+        asca = _read(_GEMINI_PLUGIN_ROOT, "skills", "cx-devassist-asca", "SKILL.md")
         self.assertIn("Step 4 — Re-scan (mandatory)", asca)
         self.assertIn("Do not skip Step 4", asca)
         self.assertIn("file-write tool", asca)

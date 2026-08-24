@@ -1,6 +1,6 @@
 # The Checkmarx Remediation MCP (bundled)
 
-The `checkmarx-devassist-asca` skill remediates findings via the **Checkmarx Security MCP**
+The `cx-devassist-asca` skill remediates findings via the **Checkmarx Security MCP**
 (`mcp__Checkmarx__codeRemediation`). The plugin declares this server in `gemini-extension.json`, so Gemini
 starts it **automatically** whenever the plugin is enabled — there is **no registration step**. The
 server command is the native **`cx mcp bridge`** subcommand, which reads the credential from the cx

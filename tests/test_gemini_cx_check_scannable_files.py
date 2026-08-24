@@ -52,10 +52,12 @@ _SCANNABLE = [
     "App.csproj", "build.sbt", "pom.xml", "package.json",
     "Directory.Packages.props", "packages.config", "go.mod", "build.gradle", "settings.gradle",
     "build.gradle.kts", "app.gradle.kts", "libs.versions.toml", "setup.cfg", "setup.py",
-    "pyproject.toml", "requirements.txt", "requirements-dev.txt", "constraints.txt",
-    "constraints-prod.txt",
+    "pyproject.toml", "requirements.txt", "requirements-dev.txt", "packages.txt",
+    "constraints.txt", "constraints-prod.txt",
     # SCA — CocoaPods / Carthage / Swift PM / Ruby, added via ast-jetbrains-plugin PR #452
     "MyPod.podspec", "Podfile", "Cartfile", "Cartfile.private", "Package.swift", "Gemfile",
+    # Swift PM multi-toolchain variants — gated by the swiftprefix rule, NOT by the .swift extension.
+    "Package@swift-5.9.swift", "Package@swift-4.swift", "PACKAGE@SWIFT-6.0.SWIFT",
     # SCA — Bower / PHP Composer / Dart Pub / JSON-podspec, also from PR #452
     "bower.json", "composer.json", "pubspec.yaml", "MyPod.podspec.json",
     # case-insensitivity
@@ -69,11 +71,10 @@ _NOT_SCANNABLE = [
     "LICENSE", "Makefile", "data.csv", "logo.png",
     # ASCA in the VS Code extension does not scan TypeScript / .mjs / .cjs / .pyw
     "index.ts", "app.tsx", "mod.mjs", "mod.cjs", "script.pyw",
-    # SCA does not scan these lockfiles / manifests
-    "yarn.lock", "packages.txt",
-    # Package@swift-*.swift (a versioned Swift PM manifest, PR #452) has no exact representation
-    # in this file's vocabulary; plain .swift source is deliberately NOT gated as a side effect.
-    "App.swift", "Package@swift-5.9.swift",
+    # SCA does not scan this lockfile in ast-vscode-extension
+    "yarn.lock",
+    # plain Swift SOURCE stays ungated: only Package@swift-*.swift manifest variants match.
+    "App.swift", "ViewController.swift", "Package@other.swift",
     # plain .tfvars is deliberately NOT gated: KICS lists only the compound .auto.tfvars /
     # .terraform.tfvars suffixes, so it would not be scanned.
     "vars.tfvars",
@@ -92,7 +93,24 @@ class LoadScannableFiles(unittest.TestCase):
         self.assertIsNotNone(table, "the shipped config/cx-scannable-files must parse")
         for kind in cx_check._SCANNABLE_KINDS:
             self.assertIn(kind, table)
-        self.assertTrue(table["ext"] and table["suffix"] and table["base"] and table["txtprefix"])
+            self.assertTrue(table[kind], "%s: declared in code, unused in the config" % kind)
+
+    def test_every_kind_in_the_shipped_config_is_implemented(self):
+        with open(cx_check._scannable_files_path(), encoding="utf-8") as f:
+            raw = f.read()
+        used = set()
+        for line in raw.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and ":" in line:
+                used.add(line.partition(":")[0].strip().lower())
+        self.assertEqual(
+            set(), used - set(cx_check._SCANNABLE_KINDS),
+            "config/cx-scannable-files declares a kind cx_check.py does not implement")
+
+    def test_prefix_kinds_are_reachable_by_extension(self):
+        for ext, kind in cx_check._PREFIX_KINDS_BY_EXT.items():
+            self.assertIn(kind, cx_check._SCANNABLE_KINDS)
+            self.assertTrue(ext.startswith("."), ext)
 
     def test_values_are_lowercased(self):
         table = cx_check._load_scannable_files()
@@ -500,9 +518,14 @@ class EngineDriftGuards(unittest.TestCase):
             "setup.cfg", "setup.py", "pyproject.toml",
         })
         self.assertTrue(expected_bases <= table["base"])
-        self.assertEqual(frozenset({"requirement", "constraint"}), table["txtprefix"])
+        self.assertEqual(frozenset({"requirement", "packages", "constraint"}), table["txtprefix"])
         for dropped in ("yarn.lock", "build.gradle", "build.gradle.kts"):
             self.assertNotIn(dropped, table["base"], dropped)
+
+    def test_sca_swift_manifest_prefix(self):
+        """Mirrors oss-realtime.go:252-255 — Package@swift-*.swift multi-toolchain manifests."""
+        table = cx_check._load_scannable_files()
+        self.assertEqual(frozenset({"package@swift-"}), table["swiftprefix"])
 
     def test_sca_manifests_jetbrains_package_managers(self):
         """Mirrors DevAssistConstants.MANIFEST_FILE_PATTERNS —

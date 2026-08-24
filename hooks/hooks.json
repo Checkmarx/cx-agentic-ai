@@ -50,20 +50,6 @@
         ]
       }
     ],
-    "BeforeAgent": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "name": "cx-guard-prompt",
-            "type": "command",
-            "command": "sh -c \"CX_ASSISTANT=gemini-cli sh '${extensionPath}/hooks/cx_run.sh' hooks gemini-before-agent\"",
-            "timeout": 10000,
-            "description": "Scanning prompt for sensitive content..."
-          }
-        ]
-      }
-    ],
     "AfterAgent": [
       {
         "matcher": "*",
