@@ -239,7 +239,8 @@ and verify it *before* relying on the gate.
 
 Then the **`cx` CLI** itself, which the bundled **`cx-cli-setup`** skill installs (with download
 checksum verification), puts on PATH, and authenticates (API key or OAuth). The minimum version is a
-numeric floor in `scripts/cx-min-version`; the real capability decision is a runtime probe (the
+numeric floor in `scripts/cx-min-version`; install/upgrade downloads are pinned to
+`scripts/cx-release-tag` (currently `v2.3.63-gemini-cliprerelease`). The real capability decision is a runtime probe (the
 `cx mcp bridge` and `cx hooks gemini-before-*` subcommands must all respond to `--help`).
 
 ---

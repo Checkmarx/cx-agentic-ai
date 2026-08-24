@@ -19,7 +19,8 @@ path:
 bash "<plugin-root>/scripts/cx-bootstrap.sh" upgrade
 ```
 
-It overwrites the resolved `cx` in place (on Windows it renames the running `cx.exe` aside first,
+It downloads the pinned ast-cli release in `scripts/cx-release-tag` (not `releases/latest`) and
+overwrites the resolved `cx` in place (on Windows it renames the running `cx.exe` aside first,
 since the live `cx mcp bridge` holds a handle). When it finishes:
 
 - The **scan/auth hooks** re-resolve `cx` on their next run — the next gated tool call is live.

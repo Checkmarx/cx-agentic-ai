@@ -163,6 +163,31 @@ class TestMinVersionSync(unittest.TestCase):
         self._check_four_sites(_GEMINI_PLUGIN_ROOT)
 
 
+class TestGeminiReleaseTagSync(unittest.TestCase):
+    """Gemini bootstrap pins ast-cli downloads to scripts/cx-release-tag (search: CX_RELEASE_TAG)."""
+
+    def _canonical_tag(self):
+        for line in _read(_GEMINI_PLUGIN_ROOT, "scripts", "cx-release-tag").splitlines():
+            s = line.strip()
+            if s and not s.startswith("#"):
+                return s
+        self.fail("no tag line found in scripts/cx-release-tag")
+
+    def test_release_tag_two_sites_agree(self):
+        canon = self._canonical_tag()
+        self.assertTrue(canon, "cx-release-tag is empty")
+        sh = _read(_GEMINI_PLUGIN_ROOT, "scripts", "cx-bootstrap.sh")
+        m = re.search(r'MIN_CX_RELEASE_TAG_FALLBACK="([^"]+)"', sh)
+        self.assertIsNotNone(m, "cx-bootstrap.sh: MIN_CX_RELEASE_TAG_FALLBACK not found")
+        self.assertEqual(m.group(1), canon, "cx-bootstrap.sh fallback != cx-release-tag")
+
+    def test_bootstrap_uses_load_release_tag(self):
+        sh = _read(_GEMINI_PLUGIN_ROOT, "scripts", "cx-bootstrap.sh")
+        self.assertIn("load_release_tag", sh)
+        self.assertRegex(sh, r'tag="\$\(load_release_tag\)"')
+        self.assertNotIn("resolve_latest_tag", sh)
+
+
 class TestGeminiExtension(unittest.TestCase):
     """Gemini CLI extension manifest and skill-routing contract."""
 
@@ -314,6 +339,7 @@ class TestShippedBytes(unittest.TestCase):
 
     _GEMINI_ONLY_LF_FILES = [
         ("config", "cx-scannable-files"),
+        ("scripts", "cx-release-tag"),
     ]
 
     def _bytes(self, plugin_root, *parts):
@@ -338,6 +364,12 @@ class TestShippedBytes(unittest.TestCase):
                 self.fail("%s/scripts/cx-min-version is not pure ASCII "
                           "(would crash the gate under LANG=C): %s" % (
                               os.path.basename(plugin_root), e))
+
+    def test_gemini_cx_release_tag_is_pure_ascii(self):
+        try:
+            self._bytes(_GEMINI_PLUGIN_ROOT, "scripts", "cx-release-tag").decode("ascii")
+        except UnicodeDecodeError as e:
+            self.fail("cx-release-tag is not pure ASCII (would break bootstrap under LANG=C): %s" % e)
 
 
 class TestHookWiring(unittest.TestCase):

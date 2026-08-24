@@ -84,7 +84,8 @@ cx version
   `"$HOME/.checkmarx/bin/cx" version` (Unix) or `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" version` (Windows).
 
 **Version gate:** the minimum is `scripts/cx-min-version` — the oldest ast-cli release this plugin
-supports. A build **below** it is a hard block on every gated action — including
+supports. Install/upgrade downloads are pinned to `scripts/cx-release-tag` (currently
+`v2.3.63-gemini-cliprerelease`). A build **below** the minimum is a hard block on every gated action — including
 `cx auth login` — so upgrade via `references/upgrade.md`. A `cx version` reporting the literal `dev`
 sentinel bypasses the numeric check (auth still applies); don't treat `dev` as a failure.
 
@@ -199,6 +200,6 @@ developer originally used, then route: **API key →** generate a new key and re
 | `cx auth validate` | Verify authentication |
 | `cx utils env` | Show current configuration |
 
-Releases: https://github.com/Checkmarx/ast-cli/releases ·
+Releases: https://github.com/Checkmarx/ast-cli/releases/tag/v2.3.63-gemini-cliprerelease ·
 Quick-start: https://docs.checkmarx.com/en/34965-68621-checkmarx-one-cli-quick-start-guide.html ·
 Environment/region URLs + tenant lookup: https://docs.checkmarx.com/en/34965-68530-logging-in-to-checkmarx-one.html

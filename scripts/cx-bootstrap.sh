@@ -41,8 +41,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # to scripts/cx-min-version and the fallback in hooks/cx_check.py. (search marker: CX_MIN_VERSION)
 MIN_CX_VERSION_FALLBACK="2.3.59"
 
+# Pinned GitHub release tag for install/upgrade downloads. Keep IDENTICAL to scripts/cx-release-tag.
+# (search marker: CX_RELEASE_TAG)
+MIN_CX_RELEASE_TAG_FALLBACK="v2.3.63-gemini-cliprerelease"
+
 GITHUB_RELEASES="https://github.com/Checkmarx/ast-cli/releases"
-GITHUB_LATEST="$GITHUB_RELEASES/latest/download"
 
 # Temp base for download staging and the transient checksums file (NOT for persistent state).
 TMP_BASE="${TMPDIR:-${TEMP:-${TMP:-/tmp}}}"
@@ -96,16 +99,39 @@ load_min_version() {
 }
 
 # ---------------------------------------------------------------------------------------
+# Pinned release tag (single source of truth: scripts/cx-release-tag; first non-comment line).
+# ---------------------------------------------------------------------------------------
+load_release_tag() {
+    local f="$SCRIPT_DIR/cx-release-tag" line
+    if [[ -r "$f" ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line#"${line%%[![:space:]]*}"}"   # ltrim
+            [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+            printf '%s' "$line"
+            return 0
+        done < "$f"
+    fi
+    printf '%s' "$MIN_CX_RELEASE_TAG_FALLBACK"
+}
+
+# ---------------------------------------------------------------------------------------
 # OS / arch detection → GitHub release asset name.
 # ---------------------------------------------------------------------------------------
 OS=""; ASSET=""; EXT=""
 detect_os_arch() {
+    local uname_s uname_m release_tag
+    uname_s="$(uname -s)"
+    uname_m="$(uname -m)"
+    release_tag="$(load_release_tag)"
     # Single source of truth for the asset name: resolve_cx_asset (cx-asset-resolver.sh).
-    ASSET="$(resolve_cx_asset "$(uname -s)" "$(uname -m)" 2>/dev/null)" \
-        || die "Unsupported platform: $(uname -s) / $(uname -m). No published cx asset — see the releases page."
-    # Derive OS (placement branching) and EXT (zip vs tar.gz) from the resolved name
-    # ast-cli_<os>_<arch>.<ext>, so they always agree with the resolver.
-    OS="${ASSET#ast-cli_}"; OS="${OS%%_*}"
+    ASSET="$(resolve_cx_asset "$uname_s" "$uname_m" "$release_tag" 2>/dev/null)" \
+        || die "Unsupported platform: $uname_s / $uname_m. No published cx asset — see the releases page."
+    case "$uname_s" in
+        Darwin)                            OS="darwin" ;;
+        Linux)                             OS="linux" ;;
+        MINGW*|MSYS*|CYGWIN*|Windows_NT)   OS="windows" ;;
+        *) die "Unsupported platform: $uname_s" ;;
+    esac
     case "$ASSET" in
         *.tar.gz) EXT="tar.gz" ;;
         *.zip)    EXT="zip" ;;
@@ -116,17 +142,14 @@ detect_os_arch() {
 # Download + extract `cx` into a staging dir; echoes the staged binary path.
 # ---------------------------------------------------------------------------------------
 download_and_extract() {
-    # $1 = the release tag resolved ONCE by the caller. Downloading from the pinned tag URL (and
-    # verifying against THAT tag's checksums) closes a TOCTOU window where GitHub could flip
+    # $1 = the pinned release tag from scripts/cx-release-tag. Downloading from the pinned tag URL
+    # (and verifying against THAT tag's checksums) closes a TOCTOU window where GitHub could flip
     # `latest` between the download and the checksum fetch, making us verify one release's archive
-    # against another's checksums. An empty tag (no curl) falls back to the latest/download URL.
+    # against another's checksums.
     local tag="${1:-}"
     local url staging archive bin
-    if [[ -n "$tag" ]]; then
-        url="$GITHUB_RELEASES/download/$tag/$ASSET"
-    else
-        url="$GITHUB_LATEST/$ASSET"
-    fi
+    [[ -n "$tag" ]] || die "no release tag configured (scripts/cx-release-tag is missing or empty)"
+    url="$GITHUB_RELEASES/download/$tag/$ASSET"
     staging="$_CX_STAGING"   # created by main() BEFORE the EXIT trap, so cleanup actually reaches it
     archive="$staging/$ASSET"
 
@@ -214,26 +237,6 @@ binary that does not match the published checksum (possible corruption or tamper
     return 0
 }
 
-# Resolve the tag the `latest` release points at (e.g. 2.3.54), via the redirect of the
-# releases/latest URL. Uses curl OR wget (so a no-curl machine still resolves); returns 1 otherwise.
-resolve_latest_tag() {
-    local url="https://github.com/Checkmarx/ast-cli/releases/latest" eff
-    if command -v curl >/dev/null 2>&1; then
-        eff="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$url" 2>/dev/null)" || return 1
-    elif command -v wget >/dev/null 2>&1; then
-        # wget can't print the effective URL, so read the redirect Location header without following
-        # it. GitHub 302-redirects /releases/latest -> /releases/tag/<tag>; awk drops the trailing
-        # " [following]" wget appends.
-        eff="$(wget --max-redirect=0 -S -O /dev/null "$url" 2>&1 | tr -d '\r' \
-               | sed -n 's/^[[:space:]]*[Ll]ocation:[[:space:]]*//p' | tail -1 | awk '{print $1}')"
-    else
-        return 1
-    fi
-    eff="${eff%/}"
-    [[ -n "$eff" && "$eff" != *"/releases/latest" ]] || return 1
-    printf '%s' "${eff##*/}"
-}
-
 # cx becomes the trusted scanner binary, so checksum verification is REQUIRED by default: any
 # inability to verify (no tag / no curl / no checksums file / no entry / no hashing tool) is FATAL
 # (fail-closed). Set CX_REQUIRE_CHECKSUM=0 to explicitly downgrade to warn-and-proceed (e.g. an
@@ -248,13 +251,13 @@ _checksum_unavailable() {
     return 0
 }
 
-# Orchestrate verification of $archive against the latest release's published checksums.
+# Orchestrate verification of $archive against the pinned release's published checksums.
 # Strict on MISMATCH (always dies via verify_checksum_against); tolerant of UNAVAILABILITY
 # (resolve/fetch/tool/entry) unless CX_REQUIRE_CHECKSUM=1.
 verify_checksum() {
     # $2 = the tag the caller already resolved (so download + checksum use the SAME release).
     local archive="$1" tag="${2:-}" ver sums tag_url
-    [[ -n "$tag" ]] || { _checksum_unavailable "could not resolve the latest release tag"; return $?; }
+    [[ -n "$tag" ]] || { _checksum_unavailable "no release tag configured (scripts/cx-release-tag)"; return $?; }
     ver="${tag#v}"
     sums="$(mktemp "${TMP_BASE%/}/cx-sums.XXXXXX")" || { _checksum_unavailable "could not create a temp file"; return $?; }
     tag_url="https://github.com/Checkmarx/ast-cli/releases/download/${tag}/ast-cli_${ver}_checksums.txt"
@@ -484,17 +487,14 @@ main() {
     else
         mode="install"
     fi
-    log "Mode: $mode  |  asset: $ASSET  |  min version: $min"
+    log "Mode: $mode  |  asset: $ASSET  |  min version: $min  |  release: $(load_release_tag)"
 
     # Create the staging dir HERE (in main's scope, so the EXIT trap actually sees it — an assignment
     # inside the download_and_extract command-substitution subshell would not), then thread the
-    # resolved release tag through download + checksum (TOCTOU-safe).
+    # pinned release tag through download + checksum (TOCTOU-safe).
     _CX_STAGING="$(mktemp -d "${TMP_BASE%/}/cx-bootstrap.XXXXXX")" || die "could not create a staging directory"
-    local staged resolved="" tag
-    tag="$(resolve_latest_tag)" || tag=""
-    if [[ -n "$tag" ]]; then
-        ASSET="ast-cli_${tag}_${OS}_${ASSET#ast-cli_${OS}_}"
-    fi
+    local staged tag resolved=""
+    tag="$(load_release_tag)"
     staged="$(download_and_extract "$tag")"
 
     # Verify the STAGED binary (version + capability) BEFORE placing it or touching PATH, so a
