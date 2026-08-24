@@ -138,46 +138,30 @@ field naming.
 - If the tool is **not available**: **STOP. Do NOT remediate by any other means** — no manual manifest
   edit, no guessed version bump. Leave the dependency **unchanged**. Then recover the MCP:
 
-  1. The plugin ships a best-effort `.mcp.json`, but Codex CLI's supported registration path is a
-     manual `[mcp_servers.Checkmarx]` stanza in `~/.codex/config.toml` or `<repo>/.codex/config.toml`
-     (see `references/mcp.md` in the `codex-cli-setup` skill). If the tool is missing, first confirm
-     cx itself is configured/authenticated — verify with
-     `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) /
+  1. The plugin ships an `.mcp.json` (see `references/mcp.md` in the `codex-cli-setup` skill) —
+     Codex CLI's plugin system discovers it and syncs the `Checkmarx` server into
+     `~/.codex/config.toml` (or `<repo>/.codex/config.toml`) as `[mcp_servers.Checkmarx]`
+     automatically. Do **not** hand-write or edit that `config.toml` stanza yourself — it is
+     plugin-managed. If the tool is missing, first confirm cx itself is configured/authenticated —
+     verify with `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) /
      `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth validate` (Windows), or a bare `cx auth validate` when
      cx is on PATH; if it fails, run `$codex-cli-setup`.
-  2. Do NOT stop here and ask the user to edit `config.toml` themselves — write it yourself. Read
-     `~/.codex/config.toml` (or `<repo>/.codex/config.toml`, whichever this session uses); if
-     `[mcp_servers.Checkmarx]` is already present with the correct `cx_run.sh` path, skip to step 3.
-     Otherwise resolve the plugin's absolute path and use the Edit/Write tool to add or correct the
-     stanza exactly as specified in `references/mcp.md`:
+  2. **Retry before asking for a restart.** Whether Codex CLI's plugin-MCP sync takes effect without
+     a process restart is not consistently confirmed — it has been observed to connect live in some
+     sessions. So immediately re-attempt the `mcp__Checkmarx__packageRemediation` call once. If it now
+     succeeds, continue the remediation normally — do not mention a restart at all. Only if the retry
+     still shows the tool unavailable, tell the user:
 
-     ```toml
-     [mcp_servers.Checkmarx]
-     command = "sh"
-     args = ["<absolute-path-to-plugin>/hooks/cx_run.sh", "mcp", "bridge"]
-     ```
-
-     Substitute `<absolute-path-to-plugin>` with the real resolved path — never leave the
-     placeholder literal in the file.
-  3. **Retry before asking for a restart.** Whether Codex CLI picks up a freshly-written
-     `config.toml` MCP server without a process restart is not consistently confirmed — it has been
-     observed to connect live in some sessions. So immediately re-attempt the
-     `mcp__Checkmarx__packageRemediation` call once. If it now succeeds, continue the remediation
-     normally — do not mention a restart at all. Only if the retry still shows the tool unavailable,
-     tell the user:
-
-     > "The Checkmarx remediation MCP wasn't connected, so I've added/verified the
-     > `[mcp_servers.Checkmarx]` entry in your config.toml, but it's still not available in this
-     > session. Please quit this Codex CLI session (e.g. `/exit`) and start it again — optionally with
-     > `codex resume --last` to pick this conversation back up — so it re-reads the config and
-     > connects the server. Once you're back, ask me to remediate again. I won't apply a non-Checkmarx
-     > fix in the meantime."
+     > "The Checkmarx remediation MCP isn't connected in this session. Please quit this Codex CLI
+     > session (e.g. `/exit`) and start it again — optionally with `codex resume --last` to pick this
+     > conversation back up — so the plugin's MCP server registration takes effect. Once you're back,
+     > ask me to remediate again. I won't apply a non-Checkmarx fix in the meantime."
 
   Then end the remediation flow without modifying any dependency.
 
-  > Note: do **not** run any `cx_mcp_register.sh` script — this plugin registers its MCP via the
-  > `config.toml` snippet above, and quitting and relaunching Codex CLI is the correct recovery (there
-  > is no in-session `/restart`).
+  > Note: do **not** run any `cx_mcp_register.sh` script, and do not hand-edit `config.toml` — this
+  > plugin registers its MCP via `.mcp.json`, and quitting and relaunching Codex CLI is the correct
+  > recovery (there is no in-session `/restart`).
 
 - If the tool call **errors with "Transport closed"** (or any other connection/transport error) instead
   of returning a result: the MCP server was available but its connection has died mid-session — this is

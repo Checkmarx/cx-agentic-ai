@@ -134,40 +134,25 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
   generic fix, and do not apply the `remediationAdvise` text yourself. Leave the finding **unfixed**
   (do not write or edit any code). Then recover the MCP:
 
-  1. The plugin ships a best-effort `.mcp.json`, but Codex CLI's supported registration path is a
-     manual `[mcp_servers.Checkmarx]` stanza in `~/.codex/config.toml` or `<repo>/.codex/config.toml`
-     (see `references/mcp.md`). If the tool is missing, first confirm cx itself is configured/
-     authenticated — the bridge can't derive the URL or auth header without a valid key. Verify with
-     cx by its canonical absolute path — `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) or
+  1. The plugin ships an `.mcp.json` (see `references/mcp.md`) — Codex CLI's plugin system
+     discovers it and syncs the `Checkmarx` server into `~/.codex/config.toml` (or
+     `<repo>/.codex/config.toml`) as `[mcp_servers.Checkmarx]` automatically. Do **not** hand-write
+     or edit that `config.toml` stanza yourself — it is plugin-managed. If the tool is missing, first
+     confirm cx itself is configured/authenticated — the bridge can't derive the URL or auth header
+     without a valid key. Verify with cx by its canonical absolute path —
+     `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) or
      `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth validate` (Windows), or a bare `cx auth validate` when
      cx is on PATH; if it fails (or reports no API key), run `$codex-cli-setup`.
-  2. Do NOT stop here and ask the user to edit `config.toml` themselves — write it yourself. Read
-     `~/.codex/config.toml` (or `<repo>/.codex/config.toml`, whichever this session uses); if
-     `[mcp_servers.Checkmarx]` is already present with the correct `cx_run.sh` path, skip to step 3.
-     Otherwise resolve the plugin's absolute path and use the Edit/Write tool to add or correct the
-     stanza exactly as specified in `references/mcp.md`:
+  2. **Retry before asking for a restart.** Whether Codex CLI's plugin-MCP sync takes effect without
+     a process restart is not consistently confirmed — it has been observed to connect live in some
+     sessions. So immediately re-attempt the `mcp__Checkmarx__codeRemediation` call once. If it now
+     succeeds, continue the remediation normally — do not mention a restart at all. Only if the retry
+     still shows the tool unavailable, tell the user:
 
-     ```toml
-     [mcp_servers.Checkmarx]
-     command = "sh"
-     args = ["<absolute-path-to-plugin>/hooks/cx_run.sh", "mcp", "bridge"]
-     ```
-
-     Substitute `<absolute-path-to-plugin>` with the real resolved path — never leave the
-     placeholder literal in the file.
-  3. **Retry before asking for a restart.** Whether Codex CLI picks up a freshly-written
-     `config.toml` MCP server without a process restart is not consistently confirmed — it has been
-     observed to connect live in some sessions. So immediately re-attempt the
-     `mcp__Checkmarx__codeRemediation` call once. If it now succeeds, continue the remediation
-     normally — do not mention a restart at all. Only if the retry still shows the tool unavailable,
-     tell the user:
-
-     > "The Checkmarx remediation MCP wasn't connected, so I've added/verified the
-     > `[mcp_servers.Checkmarx]` entry in your config.toml, but it's still not available in this
-     > session. Please quit this Codex CLI session (e.g. `/exit`) and start it again — optionally with
-     > `codex resume --last` to pick this conversation back up — so it re-reads the config and
-     > connects the server. Once you're back, ask me to remediate again. I won't apply a non-Checkmarx
-     > fix in the meantime."
+     > "The Checkmarx remediation MCP isn't connected in this session. Please quit this Codex CLI
+     > session (e.g. `/exit`) and start it again — optionally with `codex resume --last` to pick this
+     > conversation back up — so the plugin's MCP server registration takes effect. Once you're back,
+     > ask me to remediate again. I won't apply a non-Checkmarx fix in the meantime."
 
   Then end the remediation flow without modifying any code.
 
