@@ -39,9 +39,6 @@ resolve_cx_asset() {
     esac
     if [ "$os" = "windows" ]; then ext="zip"; else ext="tar.gz"; fi
     if [[ -n "$release_tag" ]]; then
-        # GitHub release tags may be v-prefixed (e.g. v2.3.63-gemini-cliprerelease) but Goreleaser
-        # asset names embed the version WITHOUT the leading v (ast-cli_2.3.63-gemini-cliprerelease_...).
-        release_tag="${release_tag#v}"
         printf 'ast-cli_%s_%s_%s.%s\n' "$release_tag" "$os" "$arch" "$ext"
     else
         printf 'ast-cli_%s_%s.%s\n' "$os" "$arch" "$ext"

@@ -8,8 +8,7 @@ source "$DIR/../../scripts/cx-asset-resolver.sh"
 set +e
 
 pass=0; fail=0
-TAG="v2.3.63-gemini-cliprerelease"
-ASSET_VER="${TAG#v}"
+TAG="2.3.63-Gemini-CLI"
 
 want() {
     local got; got="$(resolve_cx_asset "$3" "$4" "$TAG" 2>/dev/null)"
@@ -17,9 +16,9 @@ want() {
     else fail=$((fail + 1)); printf 'FAIL - %s (got "%s" want "%s")\n' "$1" "$got" "$2"; fi
 }
 
-want "linux x64 versioned" "ast-cli_${ASSET_VER}_linux_x64.tar.gz" "Linux" "x86_64"
-want "darwin arm64 versioned" "ast-cli_${ASSET_VER}_darwin_x64.tar.gz" "Darwin" "arm64"
-want "windows versioned" "ast-cli_${ASSET_VER}_windows_x64.zip" "Windows_NT" "x86_64"
+want "linux x64 versioned" "ast-cli_${TAG}_linux_x64.tar.gz" "Linux" "x86_64"
+want "darwin arm64 versioned" "ast-cli_${TAG}_darwin_x64.tar.gz" "Darwin" "arm64"
+want "windows versioned" "ast-cli_${TAG}_windows_x64.zip" "Windows_NT" "x86_64"
 
 got="$(resolve_cx_asset "Linux" "x86_64" 2>/dev/null)"
 if [[ "$got" == "ast-cli_linux_x64.tar.gz" ]]; then pass=$((pass + 1)); printf 'ok - unversioned fallback\n'
