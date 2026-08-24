@@ -6,15 +6,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_check.sh\"",
-            "timeout": 45,
-            "statusMessage": "Checking cx CLI is available..."
-          },
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_run.sh\" hooks claude-pre-tool-use",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/cx_record_login.sh\"",
             "timeout": 10,
-            "statusMessage": "Checking command against security policy..."
+            "statusMessage": "Noting Checkmarx environment..."
           }
         ]
       },
