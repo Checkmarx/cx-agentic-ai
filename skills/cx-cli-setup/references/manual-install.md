@@ -89,7 +89,7 @@ https://github.com/Checkmarx/ast-cli/releases/tag/2.3.63-Gemini-CLI, extract `cx
 Install into the **canonical store** and you are done: the gate resolves cx by absolute path
 (`%LOCALAPPDATA%\Checkmarx\cx\cx.exe` on Windows, `~/.checkmarx/bin/cx` on Unix) on the **next
 tool call** — no PATH placement, symlink, or restart needed. Only the remediation MCP needs one
-`/restart` (see `references/mcp.md`).
+`/mcp reload` (see `references/mcp.md`).
 
 ## Install integrity (`CX_REQUIRE_CHECKSUM`)
 
