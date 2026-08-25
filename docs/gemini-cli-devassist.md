@@ -346,6 +346,7 @@ All optional — sensible defaults apply.
 | `CX_ASSISTANT` | Label the assistant in logs (set to `gemini-cli` by `hooks.json`). |
 | `CX_REQUIRE_CHECKSUM=0` | Downgrade `cx-bootstrap.sh` to warn-and-proceed when it can't checksum-verify a download (checksum verification is **required by default**; not recommended). |
 | `CX_GATE_ALL_FILES=1` | Gate **every** file write, not just [scannable types](#scannable-file-types) — restores the previous blocking behaviour for files. |
+| `CX_GATE_REPEAT_DENY_MESSAGES=1` | Show the user-facing gate `systemMessage` on **every** blocked WriteFile (default: once per session per deny reason). |
 | `CX_ALLOW_UNSCANNED=1` | Audited emergency bypass — runs the action **unscanned** and records it to the audit log. |
 
 ---
