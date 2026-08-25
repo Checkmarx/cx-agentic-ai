@@ -142,7 +142,7 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
      without a valid key. Verify with cx by its canonical absolute path —
      `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) or
      `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth validate` (Windows), or a bare `cx auth validate` when
-     cx is on PATH; if it fails (or reports no API key), run `$codex-cli-setup`.
+     cx is on PATH; if it fails (or reports no API key), run `$cx-cli-setup`.
   2. **Retry before asking for a restart.** Whether Codex CLI's plugin-MCP sync takes effect without
      a process restart is not consistently confirmed — it has been observed to connect live in some
      sessions. So immediately re-attempt the `mcp__Checkmarx__codeRemediation` call once. If it now

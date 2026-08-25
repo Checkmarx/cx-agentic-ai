@@ -207,18 +207,18 @@ if [ -n "$CX_RESOLVED" ]; then
             # session restart (Codex CLI has no confirmed hot-reload equivalent to /restart).
             case "$_CXRUN_MCP_REASON" in
                 below)
-                    printf 'cx v%s is below the required v%s. The security hook will prompt you to upgrade automatically on your next file edit, or run $codex-cli-setup now to upgrade immediately.\n' \
+                    printf 'cx v%s is below the required v%s. The security hook will prompt you to upgrade automatically on your next file edit, or run $cx-cli-setup now to upgrade immediately.\n' \
                         "$_CXRUN_MCP_HAVE" "$_CXRUN_MCP_MIN" >&2
                     ;;
                 incapable)
-                    printf 'cx v%s is missing the MCP capability. The security hook will prompt you to upgrade automatically on your next file edit, or run $codex-cli-setup now to upgrade immediately.\n' \
+                    printf 'cx v%s is missing the MCP capability. The security hook will prompt you to upgrade automatically on your next file edit, or run $cx-cli-setup now to upgrade immediately.\n' \
                         "$_CXRUN_MCP_HAVE" >&2
                     ;;
                 unrunnable)
-                    printf 'cx CLI could not be run. The security hook will prompt you to reinstall cx automatically on your next file edit, or run $codex-cli-setup now to reinstall immediately.\n' >&2
+                    printf 'cx CLI could not be run. The security hook will prompt you to reinstall cx automatically on your next file edit, or run $cx-cli-setup now to reinstall immediately.\n' >&2
                     ;;
                 *)
-                    printf 'MCP not connected (%s). The security hook will guide you automatically on your next file edit, or run $codex-cli-setup now.\n' \
+                    printf 'MCP not connected (%s). The security hook will guide you automatically on your next file edit, or run $cx-cli-setup now.\n' \
                         "$_CXRUN_MCP_REASON" >&2
                     ;;
             esac
@@ -268,7 +268,7 @@ case "${1:-} ${2:-}" in
                 # _deny/_allow_with_warning and cx_check.sh's no-Python branch for the same fix).
                 # Fold reason + context into permissionDecisionReason so Codex actually acts on it.
                 cat <<'JSON'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.\n\nRun $codex-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. All agent actions remain blocked until cx is available."}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.\n\nRun $cx-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. All agent actions remain blocked until cx is available."}}
 JSON
                 ;;
             *)
@@ -292,9 +292,9 @@ JSON
                 "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" mcp_connect \
                     "result=denied" "reason_code=cx_absent" >/dev/null 2>&1 && break
             done
-            printf 'cx CLI is not installed. The security hook will prompt you to install cx automatically on your next file edit, or run $codex-cli-setup now to install immediately.\n' >&2
+            printf 'cx CLI is not installed. The security hook will prompt you to install cx automatically on your next file edit, or run $cx-cli-setup now to install immediately.\n' >&2
         else
-            printf 'checkmarx-devassist: cx CLI not found (looked at CX_BINARY, the canonical store, and PATH). Run $codex-cli-setup to install it.\n' >&2
+            printf 'checkmarx-devassist: cx CLI not found (looked at CX_BINARY, the canonical store, and PATH). Run $cx-cli-setup to install it.\n' >&2
         fi
         exit 1
         ;;

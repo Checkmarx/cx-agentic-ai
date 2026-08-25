@@ -14,7 +14,7 @@ to PATH permanently:
 A *newly* added PATH directory is not visible to the running Codex CLI session — but the gate does
 **not** depend on PATH: it resolves the **canonical store**
 (`%LOCALAPPDATA%\Checkmarx\cx\cx.exe` on Windows, `~/.checkmarx/bin/cx` on Unix) by absolute path, so
-a `$codex-cli-setup` install unblocks it immediately, with no restart. To use a cx that lives
+a `$cx-cli-setup` install unblocks it immediately, with no restart. To use a cx that lives
 *elsewhere*, set the `CX_BINARY` override below. If the provided path does not return a version, the
 binary is not usable there — proceed with a fresh install (Phase 1).
 
@@ -37,7 +37,7 @@ connectivity before retrying.
 The gate resolves cx by absolute path — `CX_BINARY` → the canonical store
 (`%LOCALAPPDATA%\Checkmarx\cx\cx.exe` / `~/.checkmarx/bin/cx`) → PATH — and runs it in its own
 process, so "version works when I type it" does not by itself prove the gate is satisfied. After a
-fresh `$codex-cli-setup` install the gate is **live on your next tool call, with no restart** (it finds
+fresh `$cx-cli-setup` install the gate is **live on your next tool call, with no restart** (it finds
 the canonical store directly). If an action is *still* denied, the cause is almost never PATH — read
 the deny message: it is usually `below minimum version`, **incapable** (missing the agent-security
 subcommands — see below), or **not authenticated**. Do **not** try to "fix PATH" by hand-placing a cx

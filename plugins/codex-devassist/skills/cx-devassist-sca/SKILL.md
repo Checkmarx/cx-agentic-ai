@@ -138,14 +138,14 @@ field naming.
 - If the tool is **not available**: **STOP. Do NOT remediate by any other means** — no manual manifest
   edit, no guessed version bump. Leave the dependency **unchanged**. Then recover the MCP:
 
-  1. The plugin ships an `.mcp.json` (see `references/mcp.md` in the `codex-cli-setup` skill) —
+  1. The plugin ships an `.mcp.json` (see `references/mcp.md` in the `cx-cli-setup` skill) —
      Codex CLI's plugin system discovers it and syncs the `Checkmarx` server into
      `~/.codex/config.toml` (or `<repo>/.codex/config.toml`) as `[mcp_servers.Checkmarx]`
      automatically. Do **not** hand-write or edit that `config.toml` stanza yourself — it is
      plugin-managed. If the tool is missing, first confirm cx itself is configured/authenticated —
      verify with `"$HOME/.checkmarx/bin/cx" auth validate` (Unix) /
      `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth validate` (Windows), or a bare `cx auth validate` when
-     cx is on PATH; if it fails, run `$codex-cli-setup`.
+     cx is on PATH; if it fails, run `$cx-cli-setup`.
   2. **Retry before asking for a restart.** Whether Codex CLI's plugin-MCP sync takes effect without
      a process restart is not consistently confirmed — it has been observed to connect live in some
      sessions. So immediately re-attempt the `mcp__Checkmarx__packageRemediation` call once. If it now

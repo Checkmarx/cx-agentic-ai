@@ -1,6 +1,6 @@
 ---
-name: codex-cli-setup
-description: "Installs, configures, and authenticates the Checkmarx cx CLI (API key or browser OAuth sign-in). Use when the cx CLI is missing, outdated, or not authenticated. Invoke as: $codex-cli-setup"
+name: cx-cli-setup
+description: "Installs, configures, and authenticates the Checkmarx cx CLI (API key or browser OAuth sign-in). Use when the cx CLI is missing, outdated, or not authenticated. Invoke as: $cx-cli-setup"
 ---
 
 # CX CLI Setup
@@ -14,7 +14,7 @@ Resources); this router is the spine.
 
 - The `cx` CLI is not installed or not found in PATH
 - A hook blocked an operation because `cx` is missing or below the minimum version
-- The developer explicitly runs `$codex-cli-setup` to reconfigure or reauthenticate
+- The developer explicitly runs `$cx-cli-setup` to reconfigure or reauthenticate
 - The plugin detected expired credentials and needs a re-auth step
 
 ## Phase 0 — Assess Current State
@@ -165,7 +165,7 @@ version` works in the shell, see `references/troubleshooting.md`.
 
 - Surface the specific error — never a generic "something went wrong."
 - Identify which phase failed; let the developer correct and retry **that step only** — no restart.
-- If they cancel: "Setup is incomplete; the plugin stays blocked. Run `$codex-cli-setup` to resume."
+- If they cancel: "Setup is incomplete; the plugin stays blocked. Run `$cx-cli-setup` to resume."
 
 ## Re-Authentication Only (Expired Credentials)
 

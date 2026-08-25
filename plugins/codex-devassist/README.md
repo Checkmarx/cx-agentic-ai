@@ -59,7 +59,7 @@ When a finding needs fixing, remediation runs through the **Checkmarx MCP server
 ships a best-effort `.mcp.json` as a forward-compatibility bet in case a future Codex plugin
 loader auto-discovers it, but the **documented, supported** registration path today is manual:
 see [Configuration → Registering the MCP server](#registering-the-mcp-server-manual) below and
-[`skills/codex-cli-setup/references/mcp.md`](skills/codex-cli-setup/references/mcp.md). A single
+[`skills/cx-cli-setup/references/mcp.md`](skills/cx-cli-setup/references/mcp.md). A single
 `cx` sign-in covers both the CLI and the MCP.
 
 ---
@@ -80,7 +80,7 @@ through):
 
 If cx is missing, below the minimum version, missing the required subcommands (`incapable`), or
 unauthenticated, the gate denies with a clear, actionable message pointing at
-`$codex-cli-setup`.
+`$cx-cli-setup`.
 
 ---
 
@@ -120,7 +120,7 @@ plugins/codex-devassist/
 │   ├── cx-path-probe.sh         # first writable on-PATH directory
 │   └── cx-min-version           # minimum cx version (numeric floor)
 └── skills/
-    ├── codex-cli-setup/            # guided cx install + authentication (router + references/)
+    ├── cx-cli-setup/            # guided cx install + authentication (router + references/)
     ├── cx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
     └── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
 ```
@@ -153,7 +153,7 @@ must symlink or copy its contents into `.agents/skills` for Codex to find them �
 
 An administrator can pre-seed the Checkmarx One **URL** and **tenant** for browser (OAuth)
 sign-in by editing `config/cx-onboarding.properties`. When set (and valid), the values are
-embedded straight into the gate's `cx auth login` recovery command and the `codex-cli-setup`
+embedded straight into the gate's `cx auth login` recovery command and the `cx-cli-setup`
 skill skips the URL/tenant question. Edit the file in your **forked / internal copy** (the
 reviewed, versioned artifact) — not in an end-user's live install, which is overwritten on
 update. Values are strictly validated (https-only host for the URL; a shell-inert charset for
@@ -180,7 +180,7 @@ hook error (same failure mode documented for Claude Code), so the action would p
 **UNSCANNED**. Without Git for Windows, Codex CLI's own Bash tool does not work either, so
 **Git for Windows is a hard prerequisite** — install and verify it *before* relying on the gate.
 
-Then the **`cx` CLI** itself, which the bundled **`codex-cli-setup`** skill installs (with
+Then the **`cx` CLI** itself, which the bundled **`cx-cli-setup`** skill installs (with
 download checksum verification), puts on PATH, and authenticates (API key or OAuth). The minimum
 version is a numeric floor in `scripts/cx-min-version`; the real capability decision is a runtime
 probe (the `cx mcp bridge` and `cx hooks codex-*` subcommands must all respond to `--help`) — see
@@ -230,7 +230,7 @@ If the marketplace mechanism isn't available in your Codex CLI build, wire the p
 4. Register the MCP server — see below.
 
 On first use the gate will detect that `cx` is missing and walk you through installing and
-authenticating it via the **`codex-cli-setup`** skill (`$codex-cli-setup`).
+authenticating it via the **`cx-cli-setup`** skill (`$cx-cli-setup`).
 
 ### Registering the MCP server (manual)
 

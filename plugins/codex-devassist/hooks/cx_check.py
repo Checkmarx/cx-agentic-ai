@@ -753,7 +753,7 @@ def _setup_invocation() -> str:
     Codex CLI invokes skills with a `$name` prefix (no slash command, no colon-namespace);
     Claude Code / Copilot CLI use `/checkmarx-cli-setup`. _CODEX_MODE is set once per
     cx_check() call from the --codex argv flag — see cx_check()."""
-    return "$codex-cli-setup" if _CODEX_MODE else "/checkmarx-cli-setup"
+    return "$cx-cli-setup" if _CODEX_MODE else "/checkmarx-cli-setup"
 
 
 def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, version_state=None) -> None:
