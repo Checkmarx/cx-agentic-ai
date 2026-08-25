@@ -526,7 +526,7 @@ main() {
     log "  - The security GATE resolves this canonical cx by ABSOLUTE path, so your NEXT tool call is"
     log "    gated live — no restart needed, even though this session's PATH has not changed."
     log "  - The Checkmarx remediation MCP also resolves cx by absolute path (via cx_run.sh), so it"
-    log "    activates after ONE /restart — no full reinstall needed. (cx was also added to your PATH"
+    log "    activates after ONE /mcp reload — no full reinstall needed. (cx was also added to your PATH"
     log "    for convenience in new terminals.)"
 }
 

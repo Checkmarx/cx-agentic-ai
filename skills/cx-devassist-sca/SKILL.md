@@ -186,14 +186,14 @@ field naming.
      - If the tool responds → the MCP is live. Proceed with remediation immediately.
      - If the tool is still unavailable → tell the user:
 
-     > "Authentication is valid. Please run `/restart` to reconnect the Checkmarx MCP, then
+     > "Authentication is valid. Please run `/mcp reload` to reconnect the Checkmarx MCP, then
      > run `/mcp show Checkmarx` to confirm it shows Connected — then ask me to remediate again.
      > I won't apply a non-Checkmarx fix in the meantime."
 
   Then end the remediation flow without modifying any dependency.
 
   > Note: do **not** run any `cx_mcp_register.sh` script — this extension registers its MCP via
-  > `gemini-extension.json`, and `/restart` is the correct recovery.
+  > `gemini-extension.json`, and `/mcp reload` is the correct recovery.
 
 ### Step 3 — Apply the Fix
 
