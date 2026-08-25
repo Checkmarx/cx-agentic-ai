@@ -51,8 +51,16 @@ case "$_cxrl_cmd" in
     *[Cc][Xx]*) : ;;
     *) exit 0 ;;
 esac
+# Require cx/cx.exe immediately followed by auth|configure — mirroring _OBSERVABLE_LOGIN_RE in
+# cx_check.py. The old *auth*/*configure* tests matched anywhere in the JSON tail (e.g.
+# "authenticated": true after the command value), which spawned Python on every `cx scan` shell
+# call and tripped the 10s hook timeout.
 case "$_cxrl_cmd" in
-    *[Aa][Uu][Tt][Hh]* | *[Cc][Oo][Nn][Ff][Ii][Gg][Uu][Rr][Ee]*) : ;;
+    *cx.exe\"[[:space:]]auth*|*cx.exe\"[[:space:]]configure*|\
+    *cx.exe\'[[:space:]]auth*|*cx.exe\'[[:space:]]configure*|\
+    *cx\"[[:space:]]auth*|*cx\"[[:space:]]configure*|\
+    *cx\'[[:space:]]auth*|*cx\'[[:space:]]configure*|\
+    *cx[[:space:]]auth*|*cx[[:space:]]configure*) : ;;
     *) exit 0 ;;
 esac
 
@@ -73,20 +81,32 @@ if command -v cygpath >/dev/null 2>&1; then
 fi
 export PYTHONUTF8=1
 
-# No probe loop and no `timeout` wrapper: unlike the gate, a failure here costs a remembered
-# environment rather than a security decision, so the cheap path is the right one. `break` only
-# on a real success, so Windows' Microsoft-Store `python3` stub (on PATH, exits non-zero without
-# running anything) falls through to `python`.
-#
-# `py -3` covers a python.org install without "Add to PATH", where the `py` launcher is the ONLY
-# interpreter. It is last because it is Windows-only. `set -f` guards against a stray glob in the
-# two-word `py -3` value, which relies on word splitting (not quoted).
+# Bound each Python attempt so a wedged interpreter (e.g. the Microsoft Store python3 stub on
+# Windows) cannot burn the whole 10s hook budget — mirrors hooks/cx_check.sh probe_python().
+probe_python() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 3 "$@"
+        return
+    fi
+    "$@" &
+    _probe_pid=$!
+    ( sleep 3; kill "$_probe_pid" 2>/dev/null ) &
+    _probe_killer=$!
+    wait "$_probe_pid" 2>/dev/null
+    _probe_status=$?
+    kill "$_probe_killer" 2>/dev/null
+    wait "$_probe_killer" 2>/dev/null
+    return "$_probe_status"
+}
+
+# No unbounded probe loop: unlike the gate, a failure here costs a remembered environment rather
+# than a security decision, but a wedged interpreter must not trip the hook timeout either.
 set -f
 for _py in python3 python "py -3"; do
     # shellcheck disable=SC2086  # intentional split: "py -3" must expand to two words
     set -- $_py
     command -v "$1" >/dev/null 2>&1 || continue
-    printf '%s' "$INPUT" | $_py "$PY_SCRIPT" record-login >/dev/null 2>&1 && break
+    printf '%s' "$INPUT" | probe_python $_py "$PY_SCRIPT" record-login >/dev/null 2>&1 && break
 done
 set +f
 
