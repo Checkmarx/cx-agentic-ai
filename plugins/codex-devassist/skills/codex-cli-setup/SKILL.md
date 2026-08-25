@@ -56,9 +56,14 @@ absolute path — e.g. `sh "/…/plugins/codex-devassist/scripts/cx-bootstrap.sh
 verbatim. **Do not** substitute `${PLUGIN_ROOT}` — it is injected only into hook execution
 and is empty in the Bash shell, so a path built from it will not resolve.
 
-Ask the developer once: **"Install/upgrade Checkmarx CLI now? (Y/n)"** On **Y**, run the bootstrap
-command (`install`). On **n**, or if `bash`/Git Bash is unavailable, use the per-OS steps in
-`references/manual-install.md`. Then go to Phase 1a.
+**Run the bootstrap command yourself — do not just print it and wait.** When a hook's deny message
+contains the resolved bootstrap command, immediately execute it (via the Bash tool) as your very next
+action; do not stop after displaying it and do not ask the developer to copy/paste or run it manually.
+Tell the developer you are installing/upgrading now (a one-line heads-up, not a yes/no prompt): **"cx
+CLI is missing/outdated — installing it now via the bundled bootstrap."** Only fall back to asking the
+developer, or to the per-OS steps in `references/manual-install.md`, if `bash`/Git Bash is unavailable
+in this environment (the bootstrap genuinely cannot run) or the bootstrap command itself fails. Then go
+to Phase 1a.
 
 ## Phase 1a — Verify Installation
 
