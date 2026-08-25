@@ -102,6 +102,6 @@ Rules and guarantees:
 - **The stage-2 scanner and the remediation MCP honor it too** — both run through `hooks/cx_run.sh`,
   which uses the same precedence (CX_BINARY → canonical store → PATH), so scanning and remediation run
   the exact binary the gate validated. The MCP resolves cx by absolute path (no PATH placement, symlink,
-  or restart needed); it activates after one `/restart`. Do not hand-edit `.mcp.json`.
+  or restart needed); it activates after one `/mcp reload`. Do not hand-edit `gemini-extension.json`.
 - `CX_BINARY` must be set in the environment Gemini is launched with (the hooks inherit it);
   setting it only inside an agent Bash command will not reach the gate.

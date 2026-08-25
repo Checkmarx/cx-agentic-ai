@@ -186,7 +186,7 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
      - If the tool responds → the MCP is live. Proceed with remediation immediately.
      - If the tool is still unavailable → tell the user:
 
-     > "Authentication is valid. Please run `/restart` to reconnect the Checkmarx MCP, then
+     > "Authentication is valid. Please run `/mcp reload` to reconnect the Checkmarx MCP, then
      > run `/mcp show Checkmarx` to confirm it shows Connected — then ask me to remediate again.
      > I won't apply a non-Checkmarx fix in the meantime."
 

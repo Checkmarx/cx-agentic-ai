@@ -15,8 +15,8 @@ is exactly the workaround the gate is designed to make unnecessary.
 absolute path instead of waiting for a PATH refresh.
 
 **The remediation MCP** resolves cx by absolute path too (it launches via `hooks/cx_run.sh`, same
-precedence as the gate) and starts at session start, so it activates after **one `/restart`** —
-no full reinstall, and no need to hand-edit `.mcp.json` or put cx on PATH for it.
+precedence as the gate) and starts at session start, so it activates after **one `/mcp reload`** —
+no full reinstall, and no need to hand-edit `gemini-extension.json` or put cx on PATH for it.
 
 **Locked-down machine, or an internal capable build living elsewhere:** point the gate at an explicit
 binary with the **`CX_BINARY`** override — see `references/troubleshooting.md`. The stage-2 scanner
