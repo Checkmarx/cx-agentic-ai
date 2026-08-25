@@ -1162,6 +1162,114 @@ _CHECK_AUTH_EXIT_UNAUTHENTICATED = 2
 _SCANNER_CACHE_FILE = _state_path("cx_scanner_cache")
 _SCANNER_CACHE_TTL = 30 * 60  # 30 minutes
 
+# Gemini CLI: track which gate-deny reason_codes already surfaced a user-facing systemMessage in
+# this session so repeated WriteFile blocks do not spam the terminal. Agent-facing reason is
+# always emitted; only systemMessage is deduplicated. Cleared on a successful gate pass or when the
+# stored credential changes (re-auth). Opt out with CX_GATE_REPEAT_DENY_MESSAGES=1.
+_GEMINI_DENY_SHOWN_FILE = _state_path("cx_gemini_deny_shown.json")
+_GEMINI_DENY_SHOWN_MAX_SESSIONS = 20
+_HOOK_SESSION_ID = ""
+
+
+def _hook_session_id(hook_input):
+    if not isinstance(hook_input, dict):
+        return ""
+    sid = hook_input.get("sessionId") or hook_input.get("session_id")
+    return sid.strip() if isinstance(sid, str) and sid.strip() else ""
+
+
+def _gemini_deny_shown_load():
+    path = _GEMINI_DENY_SHOWN_FILE
+    if not path:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.loads(f.read())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _gemini_deny_shown_save(data):
+    path = _GEMINI_DENY_SHOWN_FILE
+    if not path:
+        return
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data))
+        _chmod_600(path)
+    except OSError:
+        pass
+
+
+def _gemini_deny_session_key():
+    return _HOOK_SESSION_ID or "_default"
+
+
+def _gemini_deny_cred_key():
+    mtime = _credential_mtime()
+    return mtime if mtime is not None else 0
+
+
+def _gemini_should_show_deny_message(reason_code):
+    if not _GEMINI_CLI_MODE or not reason_code:
+        return True
+    if os.environ.get("CX_GATE_REPEAT_DENY_MESSAGES") == "1":
+        return True
+    key = _gemini_deny_session_key()
+    cred = _gemini_deny_cred_key()
+    data = _gemini_deny_shown_load()
+    sessions = data.get("sessions")
+    if not isinstance(sessions, dict):
+        return True
+    entry = sessions.get(key)
+    if not isinstance(entry, dict) or entry.get("cred") != cred:
+        return True
+    shown = entry.get("reasons")
+    if not isinstance(shown, list):
+        return True
+    return reason_code not in shown
+
+
+def _gemini_mark_deny_shown(reason_code):
+    if not _GEMINI_CLI_MODE or not reason_code:
+        return
+    if os.environ.get("CX_GATE_REPEAT_DENY_MESSAGES") == "1":
+        return
+    key = _gemini_deny_session_key()
+    cred = _gemini_deny_cred_key()
+    data = _gemini_deny_shown_load()
+    sessions = data.get("sessions")
+    if not isinstance(sessions, dict):
+        sessions = {}
+    entry = sessions.get(key)
+    if not isinstance(entry, dict) or entry.get("cred") != cred:
+        entry = {"cred": cred, "reasons": []}
+    reasons = entry.get("reasons")
+    if not isinstance(reasons, list):
+        reasons = []
+    if reason_code not in reasons:
+        reasons.append(reason_code)
+    entry["reasons"] = reasons
+    sessions[key] = entry
+    if len(sessions) > _GEMINI_DENY_SHOWN_MAX_SESSIONS:
+        sessions = {k: v for k, v in sessions.items() if k == key}
+    data["sessions"] = sessions
+    _gemini_deny_shown_save(data)
+
+
+def _gemini_clear_deny_shown():
+    if not _GEMINI_CLI_MODE:
+        return
+    key = _gemini_deny_session_key()
+    data = _gemini_deny_shown_load()
+    sessions = data.get("sessions")
+    if not isinstance(sessions, dict) or key not in sessions:
+        return
+    del sessions[key]
+    data["sessions"] = sessions
+    _gemini_deny_shown_save(data)
+
 
 def _credential_mtime():
     """Best-effort mtime of the cx credential file (~/.checkmarx/checkmarxcli.yaml). Folded into the
@@ -1282,8 +1390,10 @@ def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, versio
         output = {
             "decision": "deny",
             "reason": reason + "\n\n" + context,
-            "systemMessage": reason,
         }
+        if _gemini_should_show_deny_message(reason_code):
+            output["systemMessage"] = reason
+            _gemini_mark_deny_shown(reason_code)
     else:
         output = {
             "hookSpecificOutput": {
@@ -1603,8 +1713,9 @@ def cx_check():
     # include a `toolCalls` key in every hook payload, causing _is_gemini_cli_input() to return
     # False and _deny() to fall back to exit 0 — which Gemini CLI ignores (it only blocks on
     # a non-zero exit). The argv flag makes Gemini CLI mode explicit and format-independent.
-    global _GEMINI_CLI_MODE
+    global _GEMINI_CLI_MODE, _HOOK_SESSION_ID
     _GEMINI_CLI_MODE = ("--gemini-cli" in sys.argv[1:]) or _is_gemini_cli_input(hook_input)
+    _HOOK_SESSION_ID = _hook_session_id(hook_input)
 
 
     # 2. Read-only Bash commands (ls, cat, grep, …) can't write code to disk or run another program,
@@ -1911,6 +2022,7 @@ def cx_check():
         )
 
     # cx is installed, recent enough, authenticated, and the scanner WILL actually scan.
+    _gemini_clear_deny_shown()
     _log("gate_decision", decision="pass", reason_code="ok", tool_name=tool, version_state=state)
 
 
