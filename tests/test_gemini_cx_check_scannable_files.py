@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 from _gemini_gatelib import (_HOOKS_DIR, _HistoryFileMixin, _bash, _pwsh, _run_shell,
@@ -483,6 +484,60 @@ class RecordLoginNeverBlocks(unittest.TestCase):
         )
         self.assertEqual(0, code)
         self.assertNotIn(b"permissionDecision", out)
+
+
+class RecordLoginShellScript(unittest.TestCase):
+    """Shell-level regression for hooks/cx_record_login.sh — the path Gemini actually runs."""
+
+    _SCRIPT = os.path.join(_HOOKS_DIR, "cx_record_login.sh")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.sh = shutil.which("sh")
+        if not cls.sh:
+            raise unittest.SkipTest("POSIX sh unavailable")
+
+    def _run(self, payload_dict, env=None):
+        e = dict(os.environ, CX_LOG_DISABLE="1")
+        if env:
+            e.update(env)
+        proc = subprocess.run(
+            [self.sh, self._SCRIPT],
+            input=json.dumps(payload_dict).encode("utf-8"),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=e, timeout=30,
+        )
+        return proc.returncode, proc.stderr
+
+    def test_cx_scan_with_authenticated_metadata_exits_fast(self):
+        """JSON tails containing 'authenticated' must not spawn Python (old *auth* prefilter)."""
+        payload = {
+            "tool_name": "run_shell_command",
+            "tool_input": {
+                "command": ('& "$env:LOCALAPPDATA\\Checkmarx\\cx\\cx.exe" scan oss-realtime '
+                            '-s "C:\\proj\\package.json"'),
+            },
+            "authenticated": True,
+        }
+        start = time.time()
+        code, _ = self._run(payload)
+        elapsed = time.time() - start
+        self.assertEqual(0, code)
+        self.assertLess(elapsed, 2.0, "scan commands must skip Python quickly")
+
+    def test_cx_auth_login_still_records_via_python(self):
+        tmp = tempfile.mkdtemp(prefix="cx-record-login-shell-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        payload = {
+            "tool_name": "run_shell_command",
+            "tool_input": {
+                "command": ("cx auth login --base-auth-uri https://eu.ast.checkmarx.net "
+                            "--tenant shell-test"),
+            },
+        }
+        code, _ = self._run(payload, env={"CX_LOG_DIR": tmp})
+        self.assertEqual(0, code)
+        history = os.path.join(tmp, "cx_login_history.json")
+        self.assertTrue(os.path.exists(history), "login observer should record real auth login")
 
 
 class EngineDriftGuards(unittest.TestCase):
