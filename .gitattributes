@@ -14,6 +14,7 @@ hooks/cx_record_login.sh text eol=lf
 *.md            text eol=lf
 plugins/cx-devassist/scripts/cx-min-version text eol=lf
 scripts/cx-min-version text eol=lf
+scripts/cx-release-tag text eol=lf
 config/cx-scannable-files text eol=lf
 *.properties    text eol=lf
 **/SKILL.md     text eol=lf
