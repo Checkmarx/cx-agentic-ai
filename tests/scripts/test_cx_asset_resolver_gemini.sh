@@ -8,7 +8,7 @@ source "$DIR/../../scripts/cx-asset-resolver.sh"
 set +e
 
 pass=0; fail=0
-TAG="2.3.63-Gemini-CLI-prerelease"
+TAG="2.3.63-Gemini-cli-prerelease"
 
 want() {
     local got; got="$(resolve_cx_asset "$3" "$4" "$TAG" 2>/dev/null)"
