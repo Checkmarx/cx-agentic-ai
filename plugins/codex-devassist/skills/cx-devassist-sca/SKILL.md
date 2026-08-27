@@ -213,6 +213,14 @@ Report the out-of-scope findings in the Step 5 summary as pre-existing and unfix
 
 ### Step 5 — Output Remediation Summary
 
+**This step is MANDATORY and is not satisfied by an ordinary prose completion message.** After Step 4
+finishes (regardless of outcome — fixed, partial, or failed), your response to the user MUST render the
+template below **verbatim in structure** — same section headers, same field order, inside a fenced code
+block exactly as shown — populated with this remediation's actual values. Do not summarize the result
+in your own words instead of, or in addition to, this block; do not drop the template because the fix
+was "simple" or the summary "seemed redundant." If a field is empty, emit its placeholder text (e.g.,
+"None" for no pre-existing findings), and omit only lines the template explicitly marks omittable.
+
 ```
 SCA Remediation Summary
 
@@ -232,6 +240,9 @@ Pre-existing findings (NOT fixed — outside the scope of this remediation):
 - ⚠️ Partially fixed: "SCA remediation partially completed — manual review required (e.g. no fixed
   version exists / breaking upgrade). TODOs noted."
 - ❌ Failed: "SCA remediation failed. Reason: [summary]. Unresolved packages listed above."
+
+Emit the **Final status** line immediately after the template block, in every case — including a
+failed or partial remediation, where the summary block above still records what was attempted.
 
 ### Suppression (only when explicitly requested and justified)
 

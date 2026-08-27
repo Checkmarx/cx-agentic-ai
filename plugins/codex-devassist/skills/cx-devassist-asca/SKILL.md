@@ -217,6 +217,14 @@ alone.
 
 ### Step 5 — Output Remediation Summary
 
+**This step is MANDATORY and is not satisfied by an ordinary prose completion message.** After Step 4
+finishes (regardless of outcome — fixed, partial, or failed), your response to the user MUST render the
+template below **verbatim in structure** — same section headers, same field order, inside a fenced code
+block exactly as shown — populated with this remediation's actual values. Do not summarize the result
+in your own words instead of, or in addition to, this block; do not drop the template because the fix
+was "simple" or the summary "seemed redundant." If a field is empty, emit its placeholder text (e.g.,
+"None" for no pre-existing findings), and omit only lines the template explicitly marks omittable.
+
 ```
 Remediation Summary
 
@@ -239,6 +247,9 @@ Pre-existing findings (NOT fixed — outside the scope of this remediation):
 - ✅ All fixed: "Remediation completed for security rule [rule_name]. Build status: PASS. Security tests: PASS."
 - ⚠️ Partially fixed: "Remediation partially completed — manual review required. TODOs inserted where applicable."
 - ❌ Failed: "Remediation failed for security rule [rule_name]. Reason: [summary]. Unresolved issues listed above."
+
+Emit the **Final status** line immediately after the template block, in every case — including a
+failed or partial remediation, where the summary block above still records what was attempted.
 
 ### Constraints
 
