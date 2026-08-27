@@ -13,7 +13,7 @@
           {
             "type": "command",
             "command": "sh \"${PLUGIN_ROOT}/hooks/cx_run.sh\" hooks codex-pre-tool-use",
-            "timeout": 10,
+            "timeout": 60,
             "statusMessage": "Checking command against security policy..."
           }
         ]
@@ -47,8 +47,20 @@
           {
             "type": "command",
             "command": "sh \"${PLUGIN_ROOT}/hooks/cx_run.sh\" hooks codex-pre-tool-use",
-            "timeout": 10,
+            "timeout": 45,
             "statusMessage": "Checking MCP tool call against security policy..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks/cx_run.sh\" hooks codex-stop",
+            "timeout": 45
           }
         ]
       }
