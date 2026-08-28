@@ -19,12 +19,28 @@ Resources); this router is the spine.
 
 ## Phase 0 — Assess Current State
 
-Run both checks to decide where to enter:
+**If a gate deny message sent you here, it already contains the answer — read it before running
+anything.** Every deny states whether cx resolved (with its absolute path), the installed vs required
+version, and whether auth succeeded. Do not spend commands rediscovering what it just told you.
+
+Otherwise run the two checks below — **one bare command each**. The gate admits only bare commands,
+so a chained probe like `which cx || where cx 2>nul` is REJECTED (the `||` is chaining and `nul` is an
+ordinary file, not a null device, under Git-Bash).
 
 ```bash
-which cx 2>/dev/null || where cx 2>nul   # Check 1 — is the CLI present?
-cx auth validate                          # Check 2 — only if present
+which cx            # Bash tool — is the CLI on PATH?
+cx auth validate    # only if present
 ```
+
+```powershell
+Get-Command cx      # PowerShell tool — is the CLI on PATH? (`where.exe cx` also works)
+cx auth validate    # only if present
+```
+
+A bare `cx` can be missing from PATH even when cx **is** installed (a first-install session captured
+the old PATH), so check the canonical store directly before concluding it is absent —
+`ls -l "$HOME/.checkmarx/bin/cx"` (Unix) or `Test-Path "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe"`
+(Windows). All of these pass the gate's read-only carve-out in either shell.
 
 | CLI present | Auth result | Action |
 |---|---|---|
@@ -36,6 +52,18 @@ cx auth validate                          # Check 2 — only if present
 Distinguish the two failures from the `cx auth validate` error text: credential failures contain
 "invalid"/"unauthorized"/"401"/"forbidden"; network failures contain "no such host"/"connection
 refused"/"timeout"/"dial tcp".
+
+> **Run these checks yourself — the gate admits them even while it is blocking everything else**,
+> through **either the Bash or the PowerShell tool**:
+> - `cx version` — the *diagnostic* carve-out. Exact shape, no extra arguments. Works in **every**
+>   broken state, including a below-minimum or capability-incomplete build.
+> - `cx auth validate` / `cx auth --help` / `cx auth login` / `cx configure …` — the *auth-recovery*
+>   carve-out. Arguments allowed. Blocked only on a below-minimum build, where the remedy is an
+>   upgrade rather than a login, so there is nothing to check until cx is upgraded.
+>
+> Read-only inspection (`ls`, `cat`, `grep`; `Get-ChildItem`, `Get-Content`, `Select-String`) is also
+> allowed in either shell. Do not hand any of these to the developer to run manually because an
+> earlier unrelated command was denied.
 
 ## Phase 1 — Install the CLI
 
@@ -84,11 +112,17 @@ cx version
     `references/troubleshooting.md`); do **not** hand-place a cx binary.
 
   To confirm the binary directly without relying on PATH, invoke it by its canonical absolute path:
-  `"$HOME/.checkmarx/bin/cx" version` (Unix) or `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" version` (Windows).
+  `"$HOME/.checkmarx/bin/cx" version` (Unix) or `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" version` (Windows;
+  PowerShell tool: `& "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" version` — a quoted path needs the `&`
+  call operator there). These exact shapes pass the gate's diagnostic carve-out even while everything
+  else is blocked — run them yourself.
 
 **Version gate:** the minimum is `scripts/cx-min-version` — the oldest ast-cli release this plugin
 supports. A build **below** it is a hard block on every gated action — including
-`cx auth login` — so upgrade via `references/upgrade.md`. A `cx version` reporting the literal `dev`
+`cx auth login` — so upgrade via `references/upgrade.md`. The deny message names **both** the
+installed and the required version (e.g. *"cx v2.4.0 is older than the required v2.5.0"*): report
+both numbers to the developer and offer the upgrade. Do **not** check authentication first — on an
+outdated build the remedy is the upgrade regardless of auth state. A `cx version` reporting the literal `dev`
 sentinel bypasses the numeric check (auth still applies); don't treat `dev` as a failure.
 
 ## Phase 2 — Authenticate the CLI
@@ -100,6 +134,12 @@ sign-in (OAuth)** (logs in via browser/MFA; saves a refresh token as `cx_apikey`
 > `config/cx-onboarding.properties` with a URL + tenant, those values are embedded directly into the
 > gate's `cx auth login` recovery command, and the OAuth flow **skips the URL/tenant question**. See
 > `references/oauth.md`. An API key needs neither, so this pre-fill does not affect Path A.
+>
+> **Remembered environments (OAuth only):** without an admin pre-fill, the gate's deny message may
+> instead list URL + tenant pairs this developer **previously logged in** with (remembered per
+> machine from earlier successful `cx auth login` runs). The OAuth flow then asks Question 2 as an
+> `AskUserQuestion` over those pairs instead of free text — see `references/oauth.md` (history
+> form). The developer always confirms the choice; nothing is auto-used.
 
 **Capability check — does this build support browser sign-in?** Exit codes vary, so check the
 subcommand list:
@@ -107,6 +147,10 @@ subcommand list:
 ```bash
 cx auth --help
 ```
+
+(This passes the gate's auth-recovery carve-out on both shell tools — run it yourself. The one
+exception: a **below-minimum** build blocks even `cx auth …`; only `cx version` runs there —
+upgrade first.)
 
 - `login` listed (with `logout`/`register`/`validate`) → both paths available; ask the choice below.
 - `login` NOT listed → this build predates browser sign-in; only **Path A (API key)** is available.
@@ -174,7 +218,8 @@ and start at Phase 2: "Your Checkmarx One credentials have expired. Let's re-aut
 reconfiguration needed." Re-show the Question 1 auth-method choice, pre-selecting the method the
 developer originally used, then route: **API key →** generate a new key and re-run the Phase 2 Path A
 `cx configure set` (keys expire after 30–365 days per tenant policy); **Browser sign-in →**
-`references/oauth.md` (re-auth section).
+`references/oauth.md` (re-auth section) — the gate's deny message usually lists the previously used
+environment(s), offered there as choices via the history form of Question 2.
 
 ## Additional Resources
 

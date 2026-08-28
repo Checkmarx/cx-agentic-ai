@@ -55,18 +55,61 @@ Ask the user which manifest/lockfile to scan if not already specified. Recognize
 `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `requirements.txt`, `Pipfile.lock`,
 `go.mod`, `go.sum`, `pom.xml`, `build.gradle`, `build.sbt`.
 
+**MANDATORY — do this every time, unconditionally, before Step 2. Do not skip it because the path
+"looks absolute enough" or because a previous scan in this session already worked:**
+
+1. Take whatever path you have for the manifest (relative, absolute, or bare filename).
+2. Resolve it to a **fully-qualified absolute path** — on Windows, drive letter through filename
+   (`C:\...\pom.xml`); on Unix, a leading `/`. If what you have is already fully-qualified, use it as
+   is. Otherwise join it with the current working directory yourself; do not pass a relative path to
+   `-s` under any circumstance.
+3. Carry this exact absolute path into Step 2's `-s` argument, verbatim, in quotes.
+
+Reason this is mandatory, not optional: the CLI's realtime engine has been observed to reject a relative
+path (e.g. `vulnado\pom.xml` run from an unrelated cwd) with the message
+`realtime engine error: Realtime engine is not available for this tenant` — a message that looks like a
+tenant/licensing failure but is actually caused by the relative path. Skipping this step reproduces that
+failure.
+
 ### Step 2 — Run the SCA (OSS realtime) Scan
 
-Invoke cx by its canonical absolute path so it resolves even when cx isn't on the agent shell's PATH
-(a first-install session); use a bare `cx` only when cx is already on PATH. `-s` accepts a single file
-or several files separated by commas.
+**MANDATORY — every `cx scan oss-realtime` invocation, with no exceptions, MUST be wrapped exactly as
+shown below.** Do not run the bare command without the proxy-clearing wrapper, even if you believe the
+proxy is not an issue in this session — you cannot verify that from inside the sandbox, and omitting the
+wrapper is the exact failure mode this section exists to prevent.
+
+Run this in **bash** (Git Bash on Windows, native bash/zsh-as-bash on macOS/Linux) — the same shell this
+plugin uses for every other command (see `cx-cli-setup`). Do not switch to PowerShell or cmd.exe for
+this command on Windows; the one bash form below is the single command to run on all three platforms —
+there is no per-OS branch to choose:
 
 ```bash
-# Unix (macOS/Linux):
-"$HOME/.checkmarx/bin/cx" scan oss-realtime -s "<manifest-path>"
-# Windows (Git Bash):
-"$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan oss-realtime -s "<manifest-path>"
+# Copy exactly, substituting only the manifest path. Same command on Windows (Git Bash), macOS, Linux:
+env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY "$HOME/.checkmarx/bin/cx" scan oss-realtime -s "<absolute-manifest-path>" 2>/dev/null || \
+env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY "$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan oss-realtime -s "<absolute-manifest-path>"
 ```
+
+This tries the Unix canonical path first and falls back to the Windows canonical path in the same
+command — `$LOCALAPPDATA` is simply unset/empty on macOS/Linux so the fallback branch never matches
+there, and `$HOME/.checkmarx/bin/cx` does not exist on Windows so the first branch's `cx` invocation
+fails over. If `cx` is already on PATH, use a bare `env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY cx scan
+oss-realtime -s "<absolute-manifest-path>"` instead of either canonical path.
+
+Why the proxy vars are always cleared, unconditionally: Codex's shell has been observed with
+`HTTP_PROXY` / `HTTPS_PROXY` (and sometimes `NO_PROXY`) forced to an unreachable loopback stub (e.g.
+`http://127.0.0.1:9`). `cx`/`cx.exe` inherits whatever is set in the calling shell and fails with a
+message that looks like a tenant/licensing failure (`Realtime engine is not available for this tenant`)
+when it is set to that stub. There is no reliable way to detect in advance whether this session's shell
+has that stub set — checking first only adds a step that can be skipped under time pressure. `env -u`
+is scoped to this single command only, not the shell globally, and is a no-op when the variables are
+already absent or valid — so applying it every time is strictly safe, while skipping it is what caused
+the original failure.
+
+**Failure classification — only after BOTH of the above were followed exactly:**
+If the scan still returns a tenant/engine error after the manifest path was absolute AND the proxy vars
+were cleared for that call, this is a genuine tenant/licensing issue — report it as such and stop. Do
+not report a tenant/licensing failure to the user without having confirmed both steps above were
+actually performed for that specific failing invocation.
 
 ### Step 3 — Process Results
 

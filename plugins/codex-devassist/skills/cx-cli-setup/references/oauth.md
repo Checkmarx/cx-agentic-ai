@@ -13,17 +13,35 @@ step.
 a guessed host like `https://iam.checkmarx.net`) — both are org-specific and a wrong guess just
 burns a failed login round-trip.
 
-**First check whether the values are already provided — if so, SKIP Question 2:**
-- If the gate's deny recovery command already shows a **real** `--base-auth-uri <URL> --tenant
-  <tenant>` (concrete values, not the literal `<url>` / `<tenant>` placeholders), your administrator
-  preconfigured them in the plugin's `config/cx-onboarding.properties`. Use those values as-is: go
-  straight to running that login command and do **not** ask Question 2.
+**First check what the gate's deny message already provides — it decides which form of Question 2
+(if any) to use.** Precedence: admin pre-fill > remembered history > free text:
+- If the deny recovery command already shows a **real** `--base-auth-uri <URL> --tenant <tenant>`
+  (concrete values, not the literal `<url>` / `<tenant>` placeholders) marked **PRECONFIGURED BY
+  YOUR ADMINISTRATOR**, use those values as-is: go straight to running that login command and do
+  **not** ask Question 2 at all.
+- If the deny message lists environments marked **PREVIOUSLY LOGGED IN** (URL + tenant pairs this
+  developer used before — the gate remembers each successful `cx auth login` in
+  `~/.checkmarx/agent-logs/codex/cx_login_history.json`), ask Question 2 in its **history form**
+  below. Never silently auto-pick a listed pair — the developer may want a different tenant this
+  time.
 - Only when the flags are still **bare placeholders** (`<url>` / `<tenant>`) do you ask Question 2
-  below.
+  in its **free-text form** below.
 
-**Question 2 — ask in a plain chat message (NOT `AskUserQuestion`)**: the tenant is org-specific
-free text with no preset options, and one `AskUserQuestion` cannot return two independent free-text
-values. Collect both in a single reply:
+**Question 2 (history form) — ask with the `AskUserQuestion` tool**: the deny message's listed
+pairs ARE preset options, so the tool fits here (unlike the free-text form). Use
+`multiSelect: false`, header `Environment` (headers are capped at 12 characters), one option per
+listed pair — label
+`<tenant> @ <host>`, most recent first, in the deny message's order — and rely on the tool's
+built-in "Other" for a different URL + tenant (don't add your own "new values" option).
+- **Pick** → run that pair's ready-to-run login command from the deny message **verbatim**.
+- **"Other"** → fall through to the free-text form below; that follow-up is the single permitted
+  extra turn (it consumes the free-text form's one re-show).
+A successful login with new values is remembered automatically by the gate — you never write any
+history file yourself.
+
+**Question 2 (free-text form) — ask in a plain chat message (NOT `AskUserQuestion`)**: the tenant is
+org-specific free text with no preset options, and one `AskUserQuestion` cannot return two
+independent free-text values. Collect both in a single reply:
 
 > "Browser sign-in it is. Reply with **two things, comma-separated**, in one message — your URL,
 > then your tenant:
@@ -43,7 +61,9 @@ Derive the two flags from the reply:
   `/auth` redirect to IAM during OIDC discovery (cloud and on-prem).
 - **Tenant** → `--tenant`, passed verbatim.
 
-Keep it to **two questions total** — never split into a third turn. If the reply has only one
+Keep it to **two questions total** — never split into a third turn. The history-form
+`AskUserQuestion` IS Question 2; an "Other" pick followed by the free-text prompt still counts as
+Question 2 (it consumes the one re-show below). If the reply has only one
 value or no URL token, re-show the same combined prompt once. If `cx auth login` later fails with
 *"realm not found — check --tenant and --base-auth-uri"* (a rare deployment that doesn't redirect
 `/auth` to IAM), fall back to Path A.
@@ -108,5 +128,8 @@ macOS/Linux) and exclude it from backups and version control.
 When credentials expired and the developer originally used browser sign-in, re-run the **same**
 `cx auth login --base-auth-uri <URL> --tenant <tenant>` command (both flags every time; stdout
 discarded; never capture the token). If a gate deny message triggered the re-auth, use the resolved
-cx invocation it embeds (absolute path while cx isn't on PATH) rather than a bare `cx`. No MCP action
-is needed — the bundled remediation MCP re-reads the credential from cx config on its next call.
+cx invocation it embeds (absolute path while cx isn't on PATH) rather than a bare `cx`. The deny
+message usually lists the developer's PREVIOUSLY LOGGED IN environment(s): offer them via the
+history form of Question 2 above — do **not** assume even the most recent one without the developer
+confirming. No MCP action is needed — the bundled remediation MCP re-reads the credential from cx
+config on its next call.

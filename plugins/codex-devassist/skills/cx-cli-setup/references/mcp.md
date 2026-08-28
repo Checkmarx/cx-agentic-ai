@@ -42,14 +42,16 @@ Codex CLI and relaunch it** so it re-reads `config.toml` and re-spawns the bridg
 `cx` and credential. There is **no in-session `/restart` or hot-reload command** — do not tell the
 developer to run `/restart`; it does not exist. Concretely: exit the running `codex` process (e.g.
 `/exit`, `Ctrl+D`, or closing the terminal), then run `codex` again — optionally `codex resume --last`
-if they want the conversation history restored, or a plain `codex` to start fresh. Everywhere else in
-this skill that says "reload the MCP" means quit-and-relaunch Codex CLI, not an in-session command.
+if this was their most recent session, or `codex resume <SESSION_ID>` (the session ID is shown by
+`/status`) if it wasn't — or a plain `codex` to start fresh. Everywhere else in this skill that says
+"reload the MCP" means quit-and-relaunch Codex CLI, not an in-session command.
 
 > "I've added/verified the Checkmarx MCP registration in config.toml. Please quit this Codex CLI
-> session (e.g. `/exit`) and start it again — optionally with `codex resume --last` to pick this
-> conversation back up — so it re-reads the config and re-spawns the bridge. Once you're back, confirm
-> the Checkmarx MCP server is connected and ask me to remediate. After that it connects automatically
-> on every launch — no re-registration and no re-auth needed unless the config changes."
+> session (e.g. `/exit`) and start it again to re-read the config and re-spawn the bridge — if you
+> want this conversation back, run `codex resume --last` (if this is your most recent session) or
+> `codex resume <SESSION_ID>` (get the session ID from `/status`) if it isn't. Once you're back,
+> confirm the Checkmarx MCP server is connected and ask me to remediate. After that it connects
+> automatically on every launch — no re-registration and no re-auth needed unless the config changes."
 
 ## Verify
 
