@@ -131,16 +131,25 @@ class TestShippedBytes(unittest.TestCase):
         ("hooks", "cx_log.py"),
     ]
 
+    # Shipped by cx-devassist only, so it cannot go in the list above — that one is checked against
+    # BOTH roots and therefore assumes the two trees ship identical file sets. cx_relay.py is the
+    # first file to break that assumption; keep the split rather than widening the shared list.
+    _CLAUDE_ONLY_LF_FILES = [
+        ("hooks", "cx_relay.py"),
+    ]
+
     def _bytes(self, plugin_root, *parts):
         with open(os.path.join(plugin_root, *parts), "rb") as f:
             return f.read()
 
     def test_no_carriage_returns(self):
-        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT):
-            for parts in self._LF_FILES:
-                self.assertNotIn(b"\r", self._bytes(plugin_root, *parts),
-                                 "%s/%s contains CR bytes — must be LF-only" % (
-                                     os.path.basename(plugin_root), parts[-1]))
+        checks = [(root, parts) for root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT)
+                  for parts in self._LF_FILES]
+        checks += [(_CLAUDE_PLUGIN_ROOT, parts) for parts in self._CLAUDE_ONLY_LF_FILES]
+        for plugin_root, parts in checks:
+            self.assertNotIn(b"\r", self._bytes(plugin_root, *parts),
+                             "%s/%s contains CR bytes — must be LF-only" % (
+                                 os.path.basename(plugin_root), parts[-1]))
 
     def test_cx_min_version_is_pure_ascii(self):
         for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT):

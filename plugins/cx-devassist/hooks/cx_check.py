@@ -1258,12 +1258,22 @@ def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, versio
     sys.exit(2)
 
 
-def _allow_with_warning(context: str, *, reason_code=None, tool_name=None) -> None:
+def _defer_with_warning(context: str, *, reason_code=None, tool_name=None) -> None:
+    """Surface a warning but DEFER the permission decision to the host.
+
+    Deliberately emits no permissionDecision. "allow" is not "don't block": Claude Code treats it as
+    "bypass the permission check entirely", skipping permission mode, the settings allow/deny rules
+    and the developer's own approval prompt. Granting that from a security gate is backwards
+    everywhere, and doubly so here — this is the path that exists to warn that the write is going out
+    UNSCANNED. Omitting the key leaves permissionBehavior unset, so evaluation falls through to the
+    host's normal flow, while additionalContext still carries the warning to the model.
+
+    The audit record stays decision="allow" — gate_decision's enum is {allow, deny, pass}
+    (cx_log.py) and "allow" still accurately means "this gate did not block"."""
     _log("gate_decision", decision="allow", reason_code=reason_code, tool_name=tool_name, exit_code=0)
     output = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
             "additionalContext": context,
         }
     }
@@ -1658,10 +1668,10 @@ def cx_check():
         # with CX_ALLOW_UNLICENSED=1 (each such run is surfaced as an unscanned-run warning).
         if os.environ.get("CX_ALLOW_UNLICENSED") == "1":
             _log("unlicensed_override", tool_name=tool)
-            _allow_with_warning(
+            _defer_with_warning(
                 context=(
                     "WARNING: cx is authenticated but has NO AI-scanning license, so its scanner runs "
-                    "in pass-through and this operation ran UNSCANNED. Allowed only because "
+                    "in pass-through and this operation ran UNSCANNED. Not blocked only because "
                     "CX_ALLOW_UNLICENSED=1. Acquire a Checkmarx AI-scanning license (Checkmarx One "
                     "Assist / AI Protection / Developer Assist) and unset CX_ALLOW_UNLICENSED to "
                     "restore scanning."
@@ -1814,7 +1824,7 @@ def main():
             pass
         sys.exit(0)
 
-    # _deny()/_allow_with_warning() raise SystemExit with the real allow(0)/deny(2) code — let it
+    # _deny()/_defer_with_warning() raise SystemExit with the real allow(0)/deny(2) code — let it
     # propagate. ANY other exception is an internal gate failure → fail CLOSED (deny, exit 2),
     # never an uncaught traceback (exit 1, which Claude Code treats as non-blocking = fail OPEN).
     try:

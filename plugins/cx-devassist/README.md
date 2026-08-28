@@ -24,7 +24,9 @@ Every gated tool call runs a **two-stage PreToolUse chain**:
    is scanned: cx is **present → recent enough → capable → authenticated**. If any step can't be
    proven, it **denies (exit 2)** and stage 2 never runs.
 2. **The scanner** — a native `cx hooks claude-*` subcommand that performs the actual analysis and
-   decides whether to allow or block the action.
+   decides whether to BLOCK the action. It never approves: a clean result is relayed with any
+   permission grant removed (hooks/cx_relay.py), so Claude Code's own permission flow — mode,
+   settings rules, your approval prompt — decides what happens to an unflagged write.
 
 `hooks/hooks.json` wires the following:
 

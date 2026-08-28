@@ -118,25 +118,61 @@ case "${1:-} ${2:-}" in
     *)            _CXRUN_MCP=0 ;;
 esac
 
-# Write ONE cx_log.py audit record using the first WORKING Python 3: python3 -> python -> py -3.
-# Keep this candidate list in step with cx_check.sh's — a Windows host reachable only through the `py`
-# launcher is a normal python.org install, and omitting it drops records silently. It reaches this
-# file's three log sites only; cx_record_login.sh still carries its own copy of the same list.
-# Best-effort by contract: every failure is swallowed and callers ignore the status.
+# The first WORKING Python 3 for this file: python3 -> python -> py -3. Probed at most ONCE per
+# process and cached, because on the scan path BOTH _cxrun_log and _cxrun_relay ask for it — the same
+# "resolve once for every site that needs it" rule _CXRUN_DIR follows above. Probing is lazy so the
+# advisory exec fast path, which needs no Python at all, still pays nothing.
+#
+# THE candidate list for this file. It was consolidated from three inline copies once already (see
+# CHANGELOG v1.0.1, "Audit records vanished on Windows hosts reachable only via the `py` launcher");
+# do not add a fourth. cx_check.sh and cx_record_login.sh carry their own for their own reasons.
+#
+# `command -v` alone is not enough: on Windows "python3" is usually the Microsoft Store App Execution
+# Alias stub, which is ON PATH and exits non-zero without running anything. Each candidate is
+# therefore actually EXECUTED once, and only a real success wins.
+#
+# Candidates may be two words (`py -3`): probe the command word only, then use the value UNQUOTED so
+# it word-splits. Safe from globbing — all three are literals.
+_CXRUN_PY=""
+_CXRUN_PY_PROBED=""
+_cxrun_python() {
+    if [ -z "$_CXRUN_PY_PROBED" ]; then
+        _CXRUN_PY_PROBED=1
+        for _cxrun_cand in python3 python "py -3"; do
+            command -v "${_cxrun_cand%% *}" >/dev/null 2>&1 || continue
+            # shellcheck disable=SC2086
+            $_cxrun_cand -c "" >/dev/null 2>&1 || continue
+            _CXRUN_PY="$_cxrun_cand"
+            break
+        done
+    fi
+    [ -n "$_CXRUN_PY" ]
+}
+
+# Write ONE cx_log.py audit record. Best-effort by contract: every failure is swallowed and callers
+# ignore the status.
 #   $@ = cx_log.py arguments, event name first
 _cxrun_log() {
-    for _cxrun_py in python3 python "py -3"; do
-        # Candidates may be two words (`py -3`): probe the command word only, then run the value
-        # UNQUOTED so it word-splits. Safe from globbing — all three are literals. `set --` can't do
-        # the split: it would clobber this function's own "$@", i.e. the cx_log.py arguments.
-        command -v "${_cxrun_py%% *}" >/dev/null 2>&1 || continue
-        # Require a REAL success before returning: on Windows "python3" can resolve to the Microsoft
-        # Store App Execution Alias stub, which is ON PATH but exits non-zero without running
-        # anything, so the loop must be free to continue to "python".
-        # shellcheck disable=SC2086
-        $_cxrun_py "$_CXRUN_DIR/cx_log.py" "$@" >/dev/null 2>&1 && return 0
-    done
+    _cxrun_python || return 0
+    # shellcheck disable=SC2086
+    $_CXRUN_PY "$_CXRUN_DIR/cx_log.py" "$@" >/dev/null 2>&1
     return 0
+}
+
+# Print the native scanner's hook response with any permission GRANT removed. The rule and the
+# reasoning live in cx_relay.py; this only decides who runs it.
+#   $1 = the scanner's captured stdout
+_cxrun_relay() {
+    if _cxrun_python; then
+        # shellcheck disable=SC2086
+        printf '%s' "$1" | $_CXRUN_PY "$_CXRUN_DIR/cx_relay.py"
+        return 0
+    fi
+    # No working Python 3. Relay VERBATIM rather than swallow: a dropped deny is a vulnerability on
+    # disk. This cannot open a hole stage 1 left closed — cx_check.sh's no-Python branch already
+    # denies every gated call (exit 2) on such a host, so nothing reaches this line unblocked.
+    printf '%s
+' "$1"
 }
 
 if [ -n "$CX_RESOLVED" ]; then
@@ -174,7 +210,11 @@ if [ -n "$CX_RESOLVED" ]; then
         _cxrun_log scan_decision \
             "decision=$_CXRUN_DECISION" "tool_name=$_CXRUN_TOOL" "reason_code=$_CXRUN_REASON"
 
-        printf '%s\n' "$_CXRUN_OUTPUT"
+        # Relay the scanner's response minus any permission GRANT: cx grants on a clean scan, and
+        # Claude Code treats a grant as "skip the permission check entirely", which deletes the
+        # developer's approval prompt. Rule, rationale and the shapes that must NOT be dropped:
+        # cx_relay.py. Narrative and the failed first attempt: CHANGELOG v1.0.2.
+        _cxrun_relay "$_CXRUN_OUTPUT"
         exit "$_CXRUN_STATUS"
     fi
     if [ "$_CXRUN_MCP" = 1 ]; then

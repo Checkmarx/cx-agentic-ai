@@ -4,6 +4,84 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 
 ---
 
+### Fixed in cx-devassist v1.0.2 (27-08-2026)
+
+#### The gate no longer approves file writes on the developer's behalf
+
+Installing the plugin **silently removed Claude Code's file-write approval prompt**. Writing a file
+prompted for approval before installing; after installing, the same write went straight to disk with
+no prompt at all. Permission mode was `default` both times and never changed.
+
+Stage 2 (`hooks/cx_run.sh`) runs the native `cx` scanner and relayed its stdout byte-for-byte. On a
+clean scan that stdout is `{"hookSpecificOutput":{"permissionDecision":"allow"}}`, and in Claude Code
+an `allow` decision does **not** mean "this hook has no objection" — it means *bypass the permission
+check entirely*, short-circuiting the evaluator where permission mode, the `settings.json`
+allow/deny rules and the interactive prompt all live. Relaying it converted a **user-consent** gate
+into a **scanner-verdict** gate for every `Write`, `Edit`, `MultiEdit`, `NotebookEdit` and
+`mcp__Checkmarx__*` call the scanner did not flag. A clean scan is not consent: the scanner cannot
+know the file was unwanted in the first place.
+
+Stage 1 was already correct and could not compensate. It stays silent for a file no engine can scan
+(`.sh`, `.md`, `.css`), and hook verdicts merge most-restrictive-wins — `deny` > `ask` > `allow` >
+silence. **Silence is not a veto**, so stage 2's grant won regardless.
+
+- **`hooks/cx_run.sh` never relays a grant.** A deny payload and *every* non-zero exit still relay
+  through `hooks/cx_relay.py`, a new filter that removes a grant and forwards everything else
+  untouched. The rule is **relay everything EXCEPT an explicit grant** — a denylist of one verdict,
+  not an allowlist of one verdict. A deny (with or without whitespace in the JSON), an `ask`, a
+  `continue:false`, advisory `additionalContext` and an inline `updatedInput` fix all still reach
+  the host byte-for-byte; only the grant key is dropped, and when that was the payload's sole
+  content the plugin says nothing at all. Unparseable stdout is relayed verbatim rather than
+  swallowed — a dropped deny is a vulnerability on disk, a forwarded oddity is a visible hook error.
+  This filter is permanent, not a stopgap: the wrapper must not depend on the binary never
+  regressing.
+- **`hooks/cx_check.py`: `_allow_with_warning` → `_defer_with_warning`.** The `CX_ALLOW_UNLICENSED=1`
+  escape hatch also emitted `allow`, granting permission for a write it had just warned was going
+  out UNSCANNED. It now emits `additionalContext` alone, with no `permissionDecision`. The warning
+  still reaches the model; the decision goes back to the developer. Renamed because a helper called
+  `_allow_*` that no longer allows invites the next author to "restore" the decision.
+- **The audit trail is unchanged.** `cx-devassist.jsonl` still records
+  `scan_decision decision=allow reason_code=no_issues_found` for a clean scan — it is now the only
+  record that the scan happened at all, and a test pins that.
+- **Not changed, and NOT clean — out of scope by decision:** `copilot-devassist` and
+  `cursor-devassist` both still grant. `copilot-devassist/hooks/cx_check.py:799-805` carries the
+  identical Claude-shaped payload on its `else:` branch (the in-file comment about
+  `permissionDecision` not being a standard Copilot CLI field covers only the `if _COPILOT_CLI_MODE`
+  branch above it, and that flag defaults to `False`). `cursor-devassist` grants in Cursor's own
+  vocabulary — `{"permission":"allow"}` in `cx_check.py:1528,1530` and throughout `cx_check.sh` —
+  and its `cx_run.sh` still relays the scanner's stdout unconditionally, which is the same
+  relay-class defect fixed here. Cursor users very likely lose their approval prompt the same way.
+  Tracked separately; do not read this release as clearing those trees.
+- **Upstream:** the `cx` binary still emits `allow` from its `agenthooks` handlers; that is tracked
+  separately so other hosts get the fix at source.
+
+**Expect a prompt again on every clean write.** That is the point — approving a write is the
+developer's call, and the host already offers the standard ways to opt out (`acceptEdits` mode, or a
+`permissions.allow` rule). Those are the developer's decisions to make, not the plugin's.
+
+#### Added
+
+- `tests/test_cx_devassist_never_grants.py` — 23 tests. The load-bearing layer drives `cx_run.sh`
+  with a fake `cx` pinned via `CX_BINARY` and asserts on stdout: the grant is dropped at every exit
+  code, while a compact deny, a **spaced** deny, an `ask`, a `continue:false`, advisory context, an
+  `updatedInput` fix and unparseable output all survive. `_defer_with_warning` is covered directly.
+  A source scan of the plugin catches a hard-coded grant — with its limit stated in the class
+  docstring: it could NOT have caught the original bug, which was a relay of a third-party binary's
+  stdout and never literal text in this repo. No `skipUnless` guards the shell layer; an absent
+  `bash` raises, because a silent skip there would let the suite report OK without testing the fix.
+  Wired into `tests/run-tests.sh` in its own process, like the sibling gate suites — both plugin
+  roots ship a module named `cx_check` and whichever imports first wins `sys.modules`.
+
+  Note this is not enforced by CI: no workflow in `.github/workflows/` invokes `run-tests.sh`, and
+  that runner already exits non-zero on two pre-existing copilot packaging failures. The suite is a
+  local guard, not a merge gate, until that is fixed.
+
+Verified by mutation, not just by passing: the suite fails against the pre-fix code (8 failures) and
+also against the first attempted fix (7 failures, 2 errors) — a deny-glob guard that looked correct
+and was green under the original, weaker tests.
+
+---
+
 ### Changed in cx-devassist v1.0.1 (21-08-2026)
 
 #### The readiness gate now blocks only what Checkmarx can actually scan

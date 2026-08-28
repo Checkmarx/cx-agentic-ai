@@ -95,6 +95,8 @@ run_py "$DIR/test_packaging.py"
 run_py_discover "test_cx_check_scannable_files.py"
 run_py_discover "test_cx_check_login_history.py"
 run_py_discover "test_cx_check_admin_config.py"
+# Also its own process: it imports cx-devassist cx_check via _gatelib, same shadowing hazard.
+run_py_discover "test_cx_devassist_never_grants.py"
 run_sh "$DIR/scripts/test_cx_asset_resolver.sh"
 run_sh "$DIR/scripts/test_cx_path_probe.sh"
 run_sh "$DIR/scripts/test_cx_bootstrap.sh"
