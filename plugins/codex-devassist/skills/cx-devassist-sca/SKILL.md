@@ -196,9 +196,11 @@ field naming.
      still shows the tool unavailable, tell the user:
 
      > "The Checkmarx remediation MCP isn't connected in this session. Please quit this Codex CLI
-     > session (e.g. `/exit`) and start it again — optionally with `codex resume --last` to pick this
-     > conversation back up — so the plugin's MCP server registration takes effect. Once you're back,
-     > ask me to remediate again. I won't apply a non-Checkmarx fix in the meantime."
+     > session (e.g. `/exit`) and start it again — so the plugin's MCP server registration takes
+     > effect. If you want this conversation back, run `codex resume --last` (if this is your most
+     > recent session) or `codex resume <SESSION_ID>` (get the session ID from `/status`) if it isn't.
+     > Once you're back, ask me to remediate again. I won't apply a non-Checkmarx fix in the
+     > meantime."
 
   Then end the remediation flow without modifying any dependency.
 
@@ -213,8 +215,9 @@ field naming.
 
   > "The Checkmarx remediation MCP's connection was lost mid-session (Transport closed). Codex CLI has
   > no in-session `/restart` or hot-reload for MCP servers, so please **quit this session (e.g.
-  > `/exit`) and run `codex resume --last`** to pick this conversation back up — Codex will reconnect
-  > the MCP server on the next launch. Once you're back, ask me to "remediate" to continue with remediation and I'll proceed with the
+  > `/exit`)** and run `codex resume --last` (if this is your most recent session) or
+  > `codex resume <SESSION_ID>` (get the session ID from `/status`) if it isn't, to pick this
+  > conversation back up — Codex will reconnect the MCP server on the next launch. Once you're back, ask me to "remediate" to continue with remediation and I'll proceed with the
   > remediation for the remaining/unfixed findings — you won't need to repeat the scan or re-describe
   > what's left."
 
