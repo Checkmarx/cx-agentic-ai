@@ -46,41 +46,27 @@ _cxrl_cmd=${INPUT#*'"command":'}
 
 # `cx` first because it is the most selective: the Python-side matcher requires an executable
 # token ending in cx/cx.exe, so a real login ALWAYS contains that substring — this cannot
-# under-match. Bracket classes make both tests case-insensitive.
+# under-match. Bracket classes make both tests case-insensitive (mirrors _OBSERVABLE_LOGIN_RE).
 case "$_cxrl_cmd" in
     *[Cc][Xx]*) : ;;
     *) exit 0 ;;
 esac
-# Require cx/cx.exe immediately followed by auth|configure — mirroring _OBSERVABLE_LOGIN_RE in
-# cx_check.py. The old *auth*/*configure* tests matched anywhere in the JSON tail (e.g.
-# "authenticated": true after the command value), which spawned Python on every `cx scan` shell
-# call and tripped the 10s hook timeout.
-#
-# The bare (unquoted) cx.exe arm matters on its own: a Windows absolute path with no spaces (e.g.
-# C:/Users/<you>/AppData/Local/Checkmarx/cx/cx.exe) is legally issued WITHOUT surrounding quotes, so
-# "cx.exe auth" can appear with no quote character between ".exe" and the space — a real login this
-# case block used to silently drop (exit 0, no Python, no log line, cx_login_history.json never
-# written) because only the quoted cx.exe forms and the bare (no ".exe") cx form were covered.
 case "$_cxrl_cmd" in
-    *cx.exe\"[[:space:]]auth*|*cx.exe\"[[:space:]]configure*|\
-    *cx.exe\'[[:space:]]auth*|*cx.exe\'[[:space:]]configure*|\
-    *cx.exe[[:space:]]auth*|*cx.exe[[:space:]]configure*|\
-    *cx\"[[:space:]]auth*|*cx\"[[:space:]]configure*|\
-    *cx\'[[:space:]]auth*|*cx\'[[:space:]]configure*|\
-    *cx[[:space:]]auth*|*cx[[:space:]]configure*) : ;;
+    *[Aa][Uu][Tt][Hh]* | *[Cc][Oo][Nn][Ff][Ii][Gg][Uu][Rr][Ee]*) : ;;
     *) exit 0 ;;
 esac
 
-# Only run_shell_command payloads are worth handing to Python; a file write can never be a login.
-# Match snake_case, camelCase, and toolCalls[].name so a payload-shape drift cannot skip Python
-# (that used to mean cx_login_history.json was never written).
-case "$INPUT" in
-    *'"tool_name":"run_shell_command"'*|*'"tool_name": "run_shell_command"'*|*'"toolName":"run_shell_command"'*|*'"toolName": "run_shell_command"'*|*'"name":"run_shell_command"'*|*'"name": "run_shell_command"'*) : ;;
-    *) exit 0 ;;
-esac
+# hooks.json already matches run_shell_command only — no tool_name prefilter here. A redundant
+# tool_name check used to silently drop real logins when Gemini's envelope/payload shape drifted
+# (exit 0, no Python, cx_login_history.json never written).
 
 # Past the prefilter: this really might be a login, so the remaining setup cost is justified.
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+# `${0%/*}` instead of `$(cd "$(dirname "$0")" && pwd)` — the latter is a subshell plus a
+# `dirname` exec (~100ms on Git-Bash) to produce a path hooks.json already passes absolutely.
+case "$0" in
+    */*) SCRIPT_DIR=${0%/*} ;;
+    *)   SCRIPT_DIR=. ;;
+esac
 PY_SCRIPT="$SCRIPT_DIR/cx_check.py"
 # On Windows/Git Bash, convert the POSIX path to a native Windows path for python.exe.
 if command -v cygpath >/dev/null 2>&1; then
@@ -88,32 +74,21 @@ if command -v cygpath >/dev/null 2>&1; then
 fi
 export PYTHONUTF8=1
 
-# Bound each Python attempt so a wedged interpreter (e.g. the Microsoft Store python3 stub on
-# Windows) cannot burn the whole 10s hook budget — mirrors hooks/cx_check.sh probe_python().
-probe_python() {
-    if command -v timeout >/dev/null 2>&1; then
-        timeout 3 "$@"
-        return
-    fi
-    "$@" &
-    _probe_pid=$!
-    ( sleep 3; kill "$_probe_pid" 2>/dev/null ) &
-    _probe_killer=$!
-    wait "$_probe_pid" 2>/dev/null
-    _probe_status=$?
-    kill "$_probe_killer" 2>/dev/null
-    wait "$_probe_killer" 2>/dev/null
-    return "$_probe_status"
-}
-
-# No unbounded probe loop: unlike the gate, a failure here costs a remembered environment rather
-# than a security decision, but a wedged interpreter must not trip the hook timeout either.
+# No probe loop and no `timeout` wrapper: unlike the gate, a failure here costs a remembered
+# environment rather than a security decision, so the cheap path is the right one. `break` only on a
+# real success, so Windows' Microsoft-Store `python3` stub (on PATH, exits non-zero without running
+# anything) falls through to `python`.
+#
+# `py -3` is included for the same reason cx_check.sh includes it: a python.org install without "Add
+# to PATH" leaves the `py` launcher as the ONLY interpreter, and on those hosts a python3/python-only
+# loop silently does nothing — killing the whole remembered-environments feature with no error
+# anywhere. It is last because it is Windows-only.
 set -f
 for _py in python3 python "py -3"; do
     # shellcheck disable=SC2086  # intentional split: "py -3" must expand to two words
     set -- $_py
     command -v "$1" >/dev/null 2>&1 || continue
-    printf '%s' "$INPUT" | probe_python $_py "$PY_SCRIPT" record-login >/dev/null 2>&1 && break
+    printf '%s' "$INPUT" | $_py "$PY_SCRIPT" record-login >/dev/null 2>&1 && break
 done
 set +f
 
