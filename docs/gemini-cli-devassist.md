@@ -201,7 +201,7 @@ One URL **and** tenant. `cx auth login` takes two paths in `ast-cli`:
 
 | Form | Prompt | Persisted to `checkmarxcli.yaml` |
 |---|---|---|
-| `cx auth login --base-uri … --tenant …` | skipped | refresh token **only** |
+| `cx auth login --base-auth-uri … --tenant …` | skipped | refresh token **only** |
 | `cx auth login` (bare, interactive) | interactive | token **+** URL / tenant |
 
 An agent cannot answer an interactive prompt, so an agent-issued login is always the **flag** form —

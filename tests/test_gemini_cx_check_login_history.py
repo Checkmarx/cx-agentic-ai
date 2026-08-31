@@ -29,6 +29,21 @@ class ParseLoginFlags(unittest.TestCase):
                 "cx auth login --base-auth-uri=%s --tenant=acme" % _URL_EU),
             (_URL_EU, "acme"))
 
+    def test_base_uri_alias_accepted(self):
+        """--base-uri is an alias of --base-auth-uri: an agent-issued login has been observed using
+        it, and it must not be silently dropped just because of the flag spelling."""
+        self.assertEqual(
+            cx_check._parse_login_flags(
+                "cx auth login --base-uri %s --tenant acme-corp" % _URL_EU),
+            (_URL_EU, "acme-corp"))
+
+    def test_base_uri_and_base_auth_uri_last_spelling_wins(self):
+        self.assertEqual(
+            cx_check._parse_login_flags(
+                "cx auth login --base-uri https://wrong.example --tenant acme "
+                "--base-auth-uri %s" % _URL_EU),
+            (_URL_EU, "acme"))
+
     def test_double_quoted_values(self):
         self.assertEqual(
             cx_check._parse_login_flags(
