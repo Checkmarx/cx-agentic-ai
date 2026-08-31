@@ -39,7 +39,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Numeric floor only (capability is decided by the gate's probe, not this number). Keep IDENTICAL
 # to scripts/cx-min-version and the fallback in hooks/cx_check.py. (search marker: CX_MIN_VERSION)
-MIN_CX_VERSION_FALLBACK="2.3.58"
+MIN_CX_VERSION_FALLBACK="2.3.63"
 
 GITHUB_RELEASES="https://github.com/Checkmarx/ast-cli/releases"
 GITHUB_LATEST="$GITHUB_RELEASES/latest/download"
@@ -52,10 +52,22 @@ TMP_BASE="${TMPDIR:-${TEMP:-${TMP:-/tmp}}}"
 # place lets the next hook fire re-probe the just-installed/upgraded cx immediately.
 # Bootstrap is client-agnostic — clear caches for BOTH claude and copilot-cli so whichever client
 # fired the bootstrap sees the fresh version on its next hook call.
-_LOG_BASE="${CX_LOG_DIR:-$HOME/.checkmarx/agent-logs}"
-AGENT_LOG_DIR="$_LOG_BASE/claude"
-VERSION_CACHE_FILE="$AGENT_LOG_DIR/cx_version_cache"
-_COPILOT_VERSION_CACHE="$_LOG_BASE/copilot-cli/cx_version_cache"
+#
+# CX_LOG_DIR is a FULL path, not a base: cx_check.py's _agent_log_dir() and cx_log.py's _log_dir()
+# both return the override verbatim without appending a client leaf. Appending one here anyway
+# (the previous "$CX_LOG_DIR/claude") made the bootstrap clear a directory the gate never writes,
+# so under an override the stale cx_version_cache survived the upgrade and the gate kept reporting
+# the pre-upgrade version until the 30-minute TTL expired.
+if [[ -n "${CX_LOG_DIR:-}" ]]; then
+    AGENT_LOG_DIR="$CX_LOG_DIR"
+    VERSION_CACHE_FILE="$AGENT_LOG_DIR/cx_version_cache"
+    _COPILOT_VERSION_CACHE="$VERSION_CACHE_FILE"
+else
+    _LOG_BASE="$HOME/.checkmarx/agent-logs"
+    AGENT_LOG_DIR="$_LOG_BASE/claude"
+    VERSION_CACHE_FILE="$AGENT_LOG_DIR/cx_version_cache"
+    _COPILOT_VERSION_CACHE="$_LOG_BASE/copilot-cli/cx_version_cache"
+fi
 
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
