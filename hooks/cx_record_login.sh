@@ -55,9 +55,16 @@ esac
 # cx_check.py. The old *auth*/*configure* tests matched anywhere in the JSON tail (e.g.
 # "authenticated": true after the command value), which spawned Python on every `cx scan` shell
 # call and tripped the 10s hook timeout.
+#
+# The bare (unquoted) cx.exe arm matters on its own: a Windows absolute path with no spaces (e.g.
+# C:/Users/<you>/AppData/Local/Checkmarx/cx/cx.exe) is legally issued WITHOUT surrounding quotes, so
+# "cx.exe auth" can appear with no quote character between ".exe" and the space — a real login this
+# case block used to silently drop (exit 0, no Python, no log line, cx_login_history.json never
+# written) because only the quoted cx.exe forms and the bare (no ".exe") cx form were covered.
 case "$_cxrl_cmd" in
     *cx.exe\"[[:space:]]auth*|*cx.exe\"[[:space:]]configure*|\
     *cx.exe\'[[:space:]]auth*|*cx.exe\'[[:space:]]configure*|\
+    *cx.exe[[:space:]]auth*|*cx.exe[[:space:]]configure*|\
     *cx\"[[:space:]]auth*|*cx\"[[:space:]]configure*|\
     *cx\'[[:space:]]auth*|*cx\'[[:space:]]configure*|\
     *cx[[:space:]]auth*|*cx[[:space:]]configure*) : ;;

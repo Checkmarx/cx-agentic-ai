@@ -539,6 +539,27 @@ class RecordLoginShellScript(unittest.TestCase):
         history = os.path.join(tmp, "cx_login_history.json")
         self.assertTrue(os.path.exists(history), "login observer should record real auth login")
 
+    def test_unquoted_cx_exe_absolute_path_still_records(self):
+        """A Windows absolute path with no spaces (e.g. under AppData\\Local) is legally issued
+        WITHOUT surrounding quotes, so 'cx.exe auth' can appear with no quote character between
+        '.exe' and the space. The prefilter's case block used to have no arm for this — only the
+        quoted cx.exe forms and the bare (no '.exe') cx form — so the command was silently dropped
+        before Python ever ran: exit 0, no log line, cx_login_history.json never written."""
+        tmp = tempfile.mkdtemp(prefix="cx-record-login-shell-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        payload = {
+            "tool_name": "run_shell_command",
+            "tool_input": {
+                "command": ("C:/Users/dev/AppData/Local/Checkmarx/cx/cx.exe auth login "
+                            "--base-auth-uri https://eu.ast.checkmarx.net --tenant shell-test"),
+            },
+        }
+        code, _ = self._run(payload, env={"CX_LOG_DIR": tmp})
+        self.assertEqual(0, code)
+        history = os.path.join(tmp, "cx_login_history.json")
+        self.assertTrue(os.path.exists(history),
+                         "login observer should record an unquoted absolute cx.exe path login")
+
 
 class EngineDriftGuards(unittest.TestCase):
     """If Checkmarx adds a language to an engine, ast-vscode-extension changes but this plugin's
