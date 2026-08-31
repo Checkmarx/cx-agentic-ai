@@ -1496,6 +1496,16 @@ def _tool_name(hook_input):
     return ""
 
 
+# Shell tools recognised by _bash_command / the login observer (case-insensitive).
+_SHELL_TOOL_NAMES = frozenset({
+    "bash", "command", "powershell", "shell", "run_shell_command",
+})
+
+
+def _is_shell_tool_name(name):
+    return (name or "").lower() in _SHELL_TOOL_NAMES
+
+
 def _tool_input(hook_input):
     """Extract tool input supporting Claude Code AND Gemini CLI's real snake_case shape, plus a
     legacy camelCase/toolCalls fallback inherited from the Copilot CLI variant of this gate:
@@ -1504,6 +1514,11 @@ def _tool_input(hook_input):
     - Legacy toolCalls fallback: JSON.parse(hook_input['toolCalls'][0]['args'])
     Returns {} when no recognised key is present or args can't be parsed."""
     v = hook_input.get("tool_input")
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except (ValueError, TypeError):
+            v = None
     if isinstance(v, dict):
         return v
     # Legacy camelCase fallback: toolArgs as a JSON string at top level.
@@ -1538,11 +1553,10 @@ def _bash_command(hook_input):
     """The command string of a shell tool call, or '' if this is not a shell tool.
     Recognises all known shell tool names across clients:
       Claude Code:    tool_name='Bash'
-      Gemini CLI:    toolCalls[0].name='powershell' (Windows) or 'bash' (Unix)
+      Gemini CLI:    tool_name='run_shell_command' (also toolCalls[0].name on some builds)
       Assumed/legacy: tool_name='command'
     All share the same carve-out guards: bootstrap, auth-recovery, read-only allowlist."""
-    _SHELL_TOOLS = ("Bash", "command", "powershell", "bash", "shell", "run_shell_command")
-    if _tool_name(hook_input) not in _SHELL_TOOLS:
+    if not _is_shell_tool_name(_tool_name(hook_input)):
         return ""
     command = _tool_input(hook_input).get("command", "")
     return command if isinstance(command, str) else ""
@@ -1694,8 +1708,7 @@ def _is_bootstrap_command(hook_input):
 def _is_readonly_command(hook_input, tool):
     """True for a BARE shell tool call whose first token is a known read-only program.
     Reuses the same shape-guard; opt out with CX_GATE_ALL_COMMANDS=1."""
-    _SHELL_TOOLS = ("Bash", "command", "powershell", "bash", "shell", "run_shell_command")
-    if tool not in _SHELL_TOOLS or os.environ.get("CX_GATE_ALL_COMMANDS") == "1":
+    if not _is_shell_tool_name(tool) or os.environ.get("CX_GATE_ALL_COMMANDS") == "1":
         return False
     command = _bare_bash_command(hook_input)
     if not command:
@@ -1886,6 +1899,7 @@ def cx_check():
     # 5. Allow credential-recovery commands (cx auth / cx configure) through even when
     #    unauthenticated, so the auth gate never blocks the command that fixes auth.
     if _is_auth_recovery_command(hook_input):
+        _maybe_record_login_command(hook_input)
         _log("gate_decision", decision="allow", reason_code="auth_recovery", tool_name=tool,
              version_state=state)
         return
@@ -2120,6 +2134,16 @@ def _is_observable_login_command(hook_input):
     return _OBSERVABLE_LOGIN_RE.match(s) is not None
 
 
+def _maybe_record_login_command(hook_input):
+    """Best-effort login-history write shared by the shell observer and the gate's auth-recovery
+    carve-out. Never raises."""
+    try:
+        if _is_observable_login_command(hook_input):
+            _record_login_attempt(_bash_command(hook_input))
+    except Exception:
+        pass
+
+
 def cx_record_login():
     """OBSERVER-ONLY mode, invoked as `cx_check.py record-login` by hooks/cx_record_login.sh on the
     run_shell_command hook. Notes the URL/tenant of a `cx auth login` so a later logged-out session
@@ -2141,8 +2165,7 @@ def cx_record_login():
     Shell-tool only (mirrors _bash_command's recognised tool names, e.g. Gemini CLI's
     `run_shell_command`)."""
     hook_input = _read_hook_input()
-    if _is_observable_login_command(hook_input):
-        _record_login_attempt(_bash_command(hook_input))
+    _maybe_record_login_command(hook_input)
 
 
 def main():

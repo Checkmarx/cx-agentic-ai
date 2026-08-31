@@ -315,7 +315,11 @@ class RecordLoginObserver(_HistoryFileMixin):
     def _observe(self, payload):
         """Drive cx_record_login() over a payload by faking stdin, the way the hook does."""
         orig = cx_check._read_hook_input
-        cx_check._read_hook_input = lambda: payload
+        def fake_read():
+            if isinstance(payload, dict) and "hookType" in payload and isinstance(payload.get("input"), dict):
+                return payload["input"]
+            return payload
+        cx_check._read_hook_input = fake_read
         try:
             cx_check.cx_record_login()
         finally:
@@ -381,6 +385,49 @@ class RecordLoginObserver(_HistoryFileMixin):
         entries = self._observe(_run_shell(cmd))
         self.assertEqual(1, len(entries))
         self.assertEqual("acme", entries[0]["tenant"])
+
+    def test_records_gemini_hook_envelope(self):
+        """Gemini CLI wraps hook stdin in {hookType, input:{tool_name,...}} — _read_hook_input
+        unwraps it; the observer must still record."""
+        payload = {
+            "hookInvocationId": "inv-1",
+            "hookType": "BeforeTool",
+            "input": {
+                "session_id": "sess-1",
+                "tool_name": "run_shell_command",
+                "tool_input": {
+                    "command": ("cx auth login --base-auth-uri https://eu.ast.checkmarx.net "
+                                "--tenant envelope-test"),
+                },
+            },
+        }
+        entries = self._observe(payload)
+        self.assertEqual(1, len(entries))
+        self.assertEqual("envelope-test", entries[0]["tenant"])
+
+    def test_records_string_tool_input(self):
+        payload = {
+            "tool_name": "run_shell_command",
+            "tool_input": json.dumps({
+                "command": ("cx auth login --base-auth-uri https://eu.ast.checkmarx.net "
+                            "--tenant string-input"),
+            }),
+        }
+        entries = self._observe(payload)
+        self.assertEqual(1, len(entries))
+        self.assertEqual("string-input", entries[0]["tenant"])
+
+    def test_records_case_insensitive_tool_name(self):
+        payload = {
+            "tool_name": "Run_Shell_Command",
+            "tool_input": {
+                "command": ("cx auth login --base-auth-uri https://eu.ast.checkmarx.net "
+                            "--tenant case-test"),
+            },
+        }
+        entries = self._observe(payload)
+        self.assertEqual(1, len(entries))
+        self.assertEqual("case-test", entries[0]["tenant"])
 
     def test_does_not_match_lookalike_programs(self):
         """The looser matcher must still not treat an unrelated program as cx."""
@@ -559,6 +606,28 @@ class RecordLoginShellScript(unittest.TestCase):
         history = os.path.join(tmp, "cx_login_history.json")
         self.assertTrue(os.path.exists(history),
                          "login observer should record an unquoted absolute cx.exe path login")
+
+    def test_gemini_envelope_without_top_level_tool_name_still_records(self):
+        """hooks.json already matches run_shell_command — the shell observer must not require a
+        redundant tool_name string match that envelope payloads can omit from the outer JSON."""
+        tmp = tempfile.mkdtemp(prefix="cx-record-login-shell-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        payload = {
+            "hookInvocationId": "inv-1",
+            "hookType": "BeforeTool",
+            "input": {
+                "tool_name": "run_shell_command",
+                "tool_input": {
+                    "command": ("cx auth login --base-auth-uri https://eu.ast.checkmarx.net "
+                                "--tenant envelope-shell"),
+                },
+            },
+        }
+        code, _ = self._run(payload, env={"CX_LOG_DIR": tmp})
+        self.assertEqual(0, code)
+        history = os.path.join(tmp, "cx_login_history.json")
+        self.assertTrue(os.path.exists(history),
+                         "envelope login should record without top-level tool_name match")
 
 
 class EngineDriftGuards(unittest.TestCase):
