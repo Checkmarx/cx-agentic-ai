@@ -95,8 +95,9 @@ class TestRedaction(_Base):
     def test_assistant_env_is_sanitized(self):
         os.environ["CX_ASSISTANT"] = "evil/../; rm"
         cx_log.log_event("gate_decision", reason_code="ok")
-        # dirty CX_ASSISTANT fails the token gate → falls back to "claude"
-        self.assertEqual(self.records()[0]["assistant"], "claude")
+        # dirty CX_ASSISTANT fails the token gate → falls back to this plugin's own client,
+        # which is what keeps the jsonl in the same directory cx_check.py's state files use.
+        self.assertEqual(self.records()[0]["assistant"], "copilot-cli")
 
     def test_bad_int_exit_code_omitted(self):
         cx_log.log_event("gate_decision", reason_code="ok", exit_code="2; rm -rf /")
