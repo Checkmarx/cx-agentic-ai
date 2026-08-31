@@ -306,10 +306,16 @@ def _cx_bash_token():
 
 def _cx_recovery_command_str(args):
     """A ready-to-run `cx auth …` / `cx configure …` recovery command using the gate's resolved cx
-    (absolute path when cx isn't yet on PATH). In Copilot CLI mode on Windows the command uses the
-    PowerShell `&` call operator and `1>$null` null-sink — both are needed for the gate's
-    PowerShell auth-recovery carve-out to admit the command."""
-    if _COPILOT_CLI_MODE and os.name == "nt":
+    (absolute path when cx isn't yet on PATH), for the agent to EXECUTE ITSELF — never a command to
+    merely display or hand to the developer to type. In Copilot CLI OR Codex CLI mode on Windows the
+    command uses the PowerShell `&` call operator and `1>$null` null-sink — both are needed for the
+    gate's PowerShell auth-recovery carve-out (_is_powershell_auth_recovery_command) to admit the
+    command on the FIRST attempt. Codex CLI has one shell tool per OS session (no Bash/PowerShell
+    split), so on Windows its commands run through PowerShell even though the tool reports itself
+    as 'Bash'/'shell' — the bare Bash-style command this function used to fall back to for Codex is
+    NOT valid PowerShell syntax when the path needs quoting, which is why the agent used to have to
+    guess between forms before landing on one the gate allowed."""
+    if (_COPILOT_CLI_MODE or _CODEX_MODE) and os.name == "nt":
         exe = _cx_exe()
         if os.path.isabs(exe):
             # PowerShell form: `& "abs/path/cx.exe" auth … 1>$null`
@@ -672,7 +678,10 @@ def _load_admin_config(path=None):
 # The shared opening of every _oauth_recovery_bullet branch — one copy, so a wording change cannot
 # silently miss a branch (there are three of them now).
 _OAUTH_BULLET_LEAD = (
-    "- Browser sign-in (OAuth) — only if the developer picks this: you may run it yourself "
+    "- Browser sign-in (OAuth) — only if the developer picks this: YOU (the agent) must execute "
+    "the command below yourself, exactly as given — do not just print/display it and ask the "
+    "developer to run it, and do not retype or reshape it into a different command form; the exact "
+    "form shown is required for the security gate to allow it through on the first attempt "
     "(it opens the developer's browser with MFA; no secret passes through you; it resolves cx "
     "by absolute path so it works before cx is on PATH). "
 )
@@ -1319,14 +1328,19 @@ def _tool_input(hook_input):
     return {}
 
 
+# All known shell tool names across clients: Claude Code ('Bash'), Copilot CLI ('powershell' on
+# Windows / 'bash' on Unix), Codex CLI ('Bash' even on Windows — Codex has ONE shell tool per OS
+# session, not a Bash/PowerShell split, so its Windows commands arrive as PowerShell syntax under
+# a non-'powershell' tool name), and assumed/legacy ('command'). Shared by _bash_command AND
+# _is_powershell_auth_recovery_command so the latter is never gated on a literal 'powershell' name
+# that Codex CLI can never report (see that function's docstring).
+_SHELL_TOOLS = ("Bash", "command", "powershell", "bash", "shell")
+
+
 def _bash_command(hook_input):
     """The command string of a shell tool call, or '' if this is not a shell tool.
-    Recognises all known shell tool names across clients:
-      Claude Code:    tool_name='Bash'
-      Copilot CLI:    toolCalls[0].name='powershell' (Windows) or 'bash' (Unix)
-      Assumed/legacy: tool_name='command'
+    Recognises all known shell tool names across clients — see _SHELL_TOOLS above.
     All share the same carve-out guards: bootstrap, auth-recovery, read-only allowlist."""
-    _SHELL_TOOLS = ("Bash", "command", "powershell", "bash", "shell")
     if _tool_name(hook_input) not in _SHELL_TOOLS:
         return ""
     command = _tool_input(hook_input).get("command", "")
@@ -1384,8 +1398,14 @@ def _is_powershell_auth_recovery_command(hook_input):
     Bash tool), so we handle the PowerShell form here instead.
     Security: pinned to the gate's OWN resolved cx (_cx_exe) — never an attacker-chosen path; no
     other chaining tokens (`;`, `|`, backtick, `$(`, newline) are allowed after the call operator
-    and null-redirect are stripped."""
-    if _tool_name(hook_input).lower() != "powershell":
+    and null-redirect are stripped.
+    Tool-name check: gates on _SHELL_TOOLS (any known shell tool), NOT the literal 'powershell' —
+    Codex CLI reports its Windows shell tool as 'Bash'/'shell', never 'powershell' (it has one
+    shell tool per OS session, unlike Copilot CLI's Bash/PowerShell split), so a literal-name check
+    would silently reject every Codex `& "path" auth login …` attempt. The COMMAND SHAPE below
+    (must start with `& `, PowerShell's call operator) is what actually distinguishes this form —
+    the tool name only needs to confirm "this is a shell call", not "this is PowerShell"."""
+    if _tool_name(hook_input) not in _SHELL_TOOLS:
         return False
     command = _bash_command(hook_input)
     if not command:
