@@ -81,6 +81,18 @@ _EVENTS = {
         "mode": _enum({"install", "upgrade", "unknown"}),
         "allowed": _as_bool,
     },
+    "login_history": {
+        # Lifecycle of the remembered base-URL/tenant login pairs (cx_login_history.json):
+        # recorded (a `cx auth login` attempt was captured as pending), promoted (auth succeeded →
+        # the pair becomes offerable), offered (pairs were embedded into an auth-recovery deny),
+        # invalid (a tampered/garbled entry was dropped on read), pruned (a stale or superseded
+        # pending attempt was discarded), skipped (an `auth login` went past that could NOT be
+        # parsed into a valid URL/tenant pair, so nothing was remembered — the one event that makes
+        # a silent drop diagnosable). NEVER carries the URL or tenant value itself — only the
+        # action and, for offers, how many pairs were shown.
+        "action": _enum({"recorded", "promoted", "offered", "invalid", "pruned", "skipped"}),
+        "count": _as_int,
+    },
     "admin_config": {
         # Outcome of loading the bundled admin onboarding config
         # (config/cx-onboarding.properties). NEVER carries the offending VALUE (which an admin -- or a
@@ -162,9 +174,13 @@ def _assistant():
     """Identify which agent client is running. Reads CX_ASSISTANT env var set by the hooks
     config (hooks.json sets CX_ASSISTANT=claude, hooks-copilot-cli.json sets
     CX_ASSISTANT=copilot-cli) so each client writes to its own log subdirectory and every
-    log entry carries the correct assistant label. Falls back to 'claude' when unset so
-    existing Claude Code deployments that don't yet pass CX_ASSISTANT keep working."""
-    return _token(os.environ.get("CX_ASSISTANT", "")) or "claude"
+    log entry carries the correct assistant label. Falls back to 'copilot-cli' when unset —
+    this plugin only ever ships to Copilot CLI, so an unset CX_ASSISTANT (a hook config that
+    predates the env block, or a manual invocation) must still land in the SAME directory
+    cx_check.py's _agent_log_dir() uses; defaulting to 'claude' split the jsonl away from the
+    state files and polluted the Claude plugin's directory. Sibling plugins default to their
+    own client the same way ('claude', 'cursor')."""
+    return _token(os.environ.get("CX_ASSISTANT", "")) or "copilot-cli"
 
 
 def _log_dir():

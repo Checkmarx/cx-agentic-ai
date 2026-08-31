@@ -8,14 +8,17 @@ matching `plugin.json`.
 Run: python tests/test_packaging.py
 """
 
+import importlib.util
 import json
 import os
 import re
+import subprocess
 import unittest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _CLAUDE_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "cx-devassist"))
 _COPILOT_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "copilot-devassist"))
+_CURSOR_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "cursor-devassist"))
 _REPO_ROOT = os.path.normpath(os.path.join(_HERE, ".."))
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
@@ -58,8 +61,8 @@ class TestMarketplace(unittest.TestCase):
 
     def test_copilot_marketplace_references_plugin_with_real_source(self):
         mp = json.loads(_read(_REPO_ROOT, ".github", "plugin", "marketplace.json"))
-        entry = next((p for p in mp.get("plugins", []) if p.get("name") == "checkmarx-devassist"), None)
-        self.assertIsNotNone(entry, ".github/plugin/marketplace.json has no checkmarx-devassist entry")
+        entry = next((p for p in mp.get("plugins", []) if p.get("name") == "cx-devassist"), None)
+        self.assertIsNotNone(entry, ".github/plugin/marketplace.json has no cx-devassist entry")
         src = os.path.normpath(os.path.join(_REPO_ROOT, entry["source"]))
         self.assertTrue(os.path.isdir(src), "copilot marketplace source path missing: %s" % src)
 
@@ -128,6 +131,7 @@ class TestShippedBytes(unittest.TestCase):
         ("hooks", "cx_check.sh"),
         ("hooks", "cx_check.py"),
         ("hooks", "cx_run.sh"),
+        ("hooks", "cx_record_login.sh"),
         ("hooks", "cx_log.py"),
     ]
 
@@ -172,6 +176,34 @@ class TestHookWiring(unittest.TestCase):
                 os.path.isfile(os.path.join(plugin_root, "hooks", "cx_run.sh")),
                 "cx_run.sh missing in %s" % os.path.basename(plugin_root))
 
+    def test_hook_referenced_scripts_are_shipped(self):
+        # Every script a hook config invokes must exist in its plugin root AND be tracked by git.
+        # Regression guard: cx_record_login.sh and config/cx-scannable-files were both present in
+        # the working tree but UNTRACKED in copilot-devassist, so neither reached the released
+        # plugin. The missing hook made Copilot's fail-closed preToolUse abort with "No such file
+        # or directory" on every shell call; the missing config made _load_scannable_files() return
+        # None, which gates (and therefore denies) every file write, not just scannable ones.
+        tracked = set(subprocess.run(
+            ["git", "ls-files"], cwd=_REPO_ROOT, capture_output=True, text=True, check=True,
+        ).stdout.splitlines())
+        hook_configs = [
+            (_CLAUDE_PLUGIN_ROOT, "hooks.json"),
+            (_COPILOT_PLUGIN_ROOT, "hooks-copilot-cli.json"),
+        ]
+        for plugin_root, cfg in hook_configs:
+            name = os.path.basename(plugin_root)
+            required = set(re.findall(r"[\w./-]*?(?:hooks|scripts)/([\w.-]+\.(?:sh|py))",
+                                      _read(plugin_root, "hooks", cfg)))
+            self.assertTrue(required, "%s/%s references no hook scripts" % (name, cfg))
+            required.add("config/cx-scannable-files")
+            for rel in sorted(required):
+                rel = rel if "/" in rel else "hooks/" + rel
+                self.assertTrue(os.path.isfile(os.path.join(plugin_root, rel)),
+                                "%s references %s but the file is missing" % (cfg, rel))
+                repo_rel = "plugins/%s/%s" % (name, rel)
+                self.assertTrue(repo_rel in tracked,
+                                "%s exists but is UNTRACKED by git — it will not ship" % repo_rel)
+
     def test_no_bare_cx_in_hook_commands(self):
         # Every cx invocation in the hook configs must route through cx_run.sh (absolute-path
         # resolution). A bare `cx …` fails on a locked-down / first-install machine and (for the
@@ -215,6 +247,82 @@ class TestHookWiring(unittest.TestCase):
                             "MCP must invoke cx_run.sh in %s, got args: %s" % (
                                 os.path.basename(plugin_root), srv["args"]))
             self.assertIn("bridge", srv["args"])
+
+
+class TestAgentLogDirIsolation(unittest.TestCase):
+    """Each plugin must keep its caches, login history and jsonl in its OWN
+    ~/.checkmarx/agent-logs/<client>/ subdirectory.
+
+    copilot-devassist shipped without the leaf, so _agent_log_dir() resolved to the SHARED
+    agent-logs root: cx_auth_cache / cx_version_cache / cx_scanner_cache / cx_login_history.json
+    from Copilot collided with the identically named files the Claude and Cursor plugins write,
+    and sat outside the directory cx-bootstrap.sh clears after an install, so a stale version
+    cache survived every upgrade. cx_log.py additionally defaulted CX_ASSISTANT to "claude",
+    which split the jsonl away from the state files whenever the env var was not set.
+    """
+
+    _CLIENTS = [
+        (_CLAUDE_PLUGIN_ROOT, "claude"),
+        (_COPILOT_PLUGIN_ROOT, "copilot-cli"),
+        (_CURSOR_PLUGIN_ROOT, "cursor"),
+    ]
+
+    @staticmethod
+    def _load(path, name):
+        spec = importlib.util.spec_from_file_location(name, path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_state_and_jsonl_share_the_client_subdir(self):
+        expected_home = os.path.join(os.path.expanduser("~"), ".checkmarx", "agent-logs")
+        for i, (plugin_root, client) in enumerate(self._CLIENTS):
+            name = os.path.basename(plugin_root)
+            gate = self._load(os.path.join(plugin_root, "hooks", "cx_check.py"), "chk%d" % i)
+            logger = self._load(os.path.join(plugin_root, "hooks", "cx_log.py"), "log%d" % i)
+            want = os.path.join(expected_home, client)
+
+            # The gate's state dir. Skip only if it fell back to a private temp dir (the
+            # documented degraded path when the per-user dir cannot be created).
+            if gate._AGENT_LOG_DIR and gate._AGENT_LOG_DIR.startswith(expected_home):
+                self.assertEqual(os.path.normcase(gate._AGENT_LOG_DIR), os.path.normcase(want),
+                                 "%s: cx_check.py state dir is not the %s subdir" % (name, client))
+
+            # The jsonl dir with CX_ASSISTANT UNSET must land in the same place, so a hook
+            # config that omits the env block cannot split the two apart.
+            prev = os.environ.pop("CX_ASSISTANT", None)
+            try:
+                self.assertEqual(os.path.normcase(logger._log_dir()), os.path.normcase(want),
+                                 "%s: cx_log.py default dir is not the %s subdir" % (name, client))
+            finally:
+                if prev is not None:
+                    os.environ["CX_ASSISTANT"] = prev
+
+    def test_bootstrap_clears_the_cache_the_gate_writes(self):
+        # cx-bootstrap.sh deletes cx_version_cache after an install/upgrade so the next hook fire
+        # re-probes. It must name the SAME directory _agent_log_dir() builds.
+        for plugin_root, client in self._CLIENTS:
+            name = os.path.basename(plugin_root)
+            boot = _read(plugin_root, "scripts", "cx-bootstrap.sh")
+            # The leaf may be joined onto the agent-logs literal ("agent-logs/claude") or onto an
+            # intermediate base variable ("$_LOG_BASE/copilot-cli/cx_version_cache"). Accept either
+            # spelling; both prove the client leaf is part of the cleared path. Neither appearing is
+            # the original bug — the bootstrap then clears a directory the gate never writes to.
+            self.assertTrue(
+                ("agent-logs/%s" % client) in boot or ("%s/cx_version_cache" % client) in boot,
+                "%s/scripts/cx-bootstrap.sh never joins the %r leaf onto its cx_version_cache "
+                "path, so it cannot clear the cache the gate writes" % (name, client))
+
+    def test_cx_log_default_assistant_matches_the_plugin(self):
+        for plugin_root, client in self._CLIENTS:
+            name = os.path.basename(plugin_root)
+            src = _read(plugin_root, "hooks", "cx_log.py")
+            m = re.search(r'os\.environ\.get\("CX_ASSISTANT", ""\)\)? or "([\w-]+)"', src)
+            self.assertIsNotNone(m, "%s: cx_log.py _assistant() fallback not found" % name)
+            self.assertEqual(m.group(1), client,
+                             "%s: cx_log.py falls back to %r but this plugin ships to %r"
+                             % (name, m.group(1), client))
+
 
 
 if __name__ == "__main__":
