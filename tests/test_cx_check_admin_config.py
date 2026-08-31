@@ -107,7 +107,7 @@ class OAuthRecoveryBullet(unittest.TestCase):
         self.assertNotIn("<tenant>", b)
 
     def test_placeholder_branch(self):
-        b = cx_check._oauth_recovery_bullet({})
+        b = cx_check._oauth_recovery_bullet({}, history=[])
         self.assertIn("<url>", b)
         self.assertIn("<tenant>", b)
         self.assertIn("34965-68530", b)  # env-URLs doc link present (logging-in-to-checkmarx-one)
@@ -115,7 +115,7 @@ class OAuthRecoveryBullet(unittest.TestCase):
 
     def test_partial_config_falls_back_to_placeholder(self):
         # Only one of the two values → must NOT embed a half-command; use placeholders.
-        b = cx_check._oauth_recovery_bullet({"cx_tenant": "acme"})
+        b = cx_check._oauth_recovery_bullet({"cx_tenant": "acme"}, history=[])
         self.assertIn("<url>", b)
 
 

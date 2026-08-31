@@ -20,8 +20,9 @@
 #
 # When cx CANNOT be resolved at all, the fail mode depends on the sub-command so a missing cx is
 # never a silent fail-OPEN on the scan path:
-#   - Blocking PreToolUse scanners (…pre-tool-use / …pre-file-write) -> emit a deny JSON + exit 2
-#     (fail CLOSED, mirroring cx_check.sh's no-Python deny) so the tool call is BLOCKED, unscanned.
+#   - Blocking PreToolUse scanners (…pre-file-write) -> DEFER to stage 1 (exit 0). Stage 1 has
+#     already applied the scannable-file rule; denying again here would block unscannable writes
+#     that stage 1 just allowed. MCP/pre-tool-use still emits a deny JSON.
 #   - Advisory lifecycle hooks (…stop / …idle / …prompt-submit) -> exit 0 (non-blocking by design;
 #     a fail-closed prompt-submit would deadlock the user before they could even install cx).
 #   - Anything else (mcp bridge, scan, auth, configure, version, …) -> stderr error + exit 1.
@@ -250,6 +251,13 @@ case "${1:-} ${2:-}" in
             . "$_CXRUN_DIR/_cx_bootstrap_match.sh"
             cx_is_bootstrap_command "$_CXRUN_INPUT" "$_CXRUN_DIR" && exit 0
         fi
+        # A FILE WRITE defers to stage 1 here. Stage 1 (cx_check) has already applied the
+        # scannable-file rule to this exact call (deny a scannable file, allow an unscannable one).
+        # Denying again here cannot make a scannable write safer and DOES block the unscannable
+        # writes stage 1 just allowed.
+        case "${1:-} ${2:-}" in
+            *pre-file-write*) exit 0 ;;
+        esac
         # Detect Copilot CLI context from the subcommand name (contains "copilot-cli").
         # Copilot CLI reads a flat JSON with permissionDecision at the top level; Claude Code
         # reads the nested hookSpecificOutput wrapper. Emit the correct shape per client.
