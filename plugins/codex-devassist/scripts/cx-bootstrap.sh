@@ -493,16 +493,16 @@ main() {
     local staged resolved="" tag
     # ============================================================================================
     # >>> TEMP TESTING PIN — MUST BE REVERTED BEFORE SHIPPING / BEFORE THE 2.3.64 GA RELEASE <<<
-    # Pinned to the Codex-cli prerelease tag (2.3.63-codex) instead of resolving `latest`, so
-    # testing exercises the exact build cut for Codex CLI. This is NOT self-expiring — it will keep
-    # downloading 2.3.63-codex forever, even after 2.3.64 (or any later GA) ships, until someone
-    # deletes this block. To revert, replace the two lines below (tag=... and the ASSET rename)
-    # with:
+    # Pinned to the Codex-cli prerelease tag (2.3.63-codex-gemini-gokeyring, superseding the earlier
+    # 2.3.63-codex pin) instead of resolving `latest`, so testing exercises the exact build cut for
+    # Codex CLI. This is NOT self-expiring — it will keep downloading this exact prerelease forever,
+    # even after 2.3.64 (or any later GA) ships, until someone deletes this block. To revert, replace
+    # the two lines below (tag=... and the ASSET rename) with:
     #   tag="$(resolve_latest_tag)" || tag=""
     # and delete the ASSET="ast-cli_${tag}_${OS}_..." rename line entirely — the ORIGINAL code
     # placed that rename AFTER a first (now-removed) download_and_extract call; do not restore that
     # dead double-download, just drop the pin.
-    tag="2.3.63-codex"
+    tag="2.3.63-codex-gemini-gokeyring"
     # This prerelease only publishes the VERSIONED asset name (ast-cli_<tag>_<os>_<arch>.<ext>) —
     # unlike GA releases it has no versionless alias — so rename ASSET to that form BEFORE
     # downloading instead of after; a versionless first attempt would 404 and die() here.
