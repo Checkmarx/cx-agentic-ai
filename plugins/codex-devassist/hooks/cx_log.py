@@ -171,12 +171,13 @@ def _disabled():
 
 
 def _assistant():
-    """Identify which agent client is running. Reads CX_ASSISTANT env var set by the hooks
-    config (hooks.json sets CX_ASSISTANT=claude, hooks-copilot-cli.json sets
-    CX_ASSISTANT=copilot-cli) so each client writes to its own log subdirectory and every
-    log entry carries the correct assistant label. Falls back to 'claude' when unset so
-    existing Claude Code deployments that don't yet pass CX_ASSISTANT keep working."""
-    return _token(os.environ.get("CX_ASSISTANT", "")) or "claude"
+    """This cx_log.py copy is bundled ONLY with codex-devassist (each client plugin — cx-devassist,
+    copilot-devassist, cursor-devassist, codex-devassist — ships its own independent copy), so the
+    client is fixed, not detected. Hardcoded to 'codex' so logs always land under
+    ~/.checkmarx/agent-logs/codex/, matching this plugin's own _agent_log_dir() default and its
+    README. CX_ASSISTANT can still override for a non-standard log-splitting need, but nothing in
+    this plugin's own hooks.json needs to (or does) set it."""
+    return "codex"
 
 
 def _log_dir():
