@@ -175,8 +175,7 @@ def _assistant():
     copilot-devassist, cursor-devassist, codex-devassist — ships its own independent copy), so the
     client is fixed, not detected. Hardcoded to 'codex' so logs always land under
     ~/.checkmarx/agent-logs/codex/, matching this plugin's own _agent_log_dir() default and its
-    README. CX_ASSISTANT can still override for a non-standard log-splitting need, but nothing in
-    this plugin's own hooks.json needs to (or does) set it."""
+    README."""
     return "codex"
 
 
