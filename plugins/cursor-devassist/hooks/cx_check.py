@@ -840,11 +840,8 @@ _LOGIN_HISTORY_MAX_BYTES = 16384
 _LOGIN_PENDING_TTL = 3600
 
 _AUTH_LOGIN_RE = re.compile(r"\bauth\s+login\b")
-# `base-uri` is accepted as an alias of the canonical `base-auth-uri`: an agent-issued login has been
-# observed using it (following stale doc guidance), and a real login worth remembering must not be
-# silently dropped just because the agent spelled the flag differently.
 _LOGIN_FLAG_RE = re.compile(
-    r'--(base-auth-uri|base-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
+    r'--(base-auth-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
 _CX_CONFIGURE_SET_RE = re.compile(r"\bconfigure\s+set\b")
 
 
@@ -853,8 +850,7 @@ def _parse_login_flags(command):
         return None
     found = {}
     for m in _LOGIN_FLAG_RE.finditer(command):
-        key = "base-auth-uri" if m.group(1) in ("base-auth-uri", "base-uri") else m.group(1)
-        found[key] = next(g for g in m.groups()[1:] if g is not None)
+        found[m.group(1)] = next(g for g in m.groups()[1:] if g is not None)
     base = found.get("base-auth-uri")
     tenant = found.get("tenant")
     if base is None or tenant is None:

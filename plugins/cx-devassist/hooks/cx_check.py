@@ -708,26 +708,20 @@ _AUTH_LOGIN_RE = re.compile(r"\bauth\s+login\b")
 # Lenient by design: the command already passed the bare-command guard (no chaining/substitution/
 # unsafe redirect), and extracted values must still pass the STRICT _valid_base_uri/_valid_tenant
 # funnels — validation, not extraction, is the security boundary.
-# `base-uri` is accepted as an alias of the canonical `base-auth-uri`: an agent-issued login has been
-# observed using it (following stale doc guidance), and a real login worth remembering must not be
-# silently dropped just because the agent spelled the flag differently.
 _LOGIN_FLAG_RE = re.compile(
-    r'--(base-auth-uri|base-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
+    r'--(base-auth-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
 
 
 def _parse_login_flags(command):
     """(base_auth_uri, tenant) from a `cx auth login …` command, or None. Both flags must be present
     AND pass the strict admin-config validators — a half-parsed or invalid pair is never recorded.
     A repeated flag takes the LAST occurrence, mirroring the CLI's own (cobra) last-flag-wins
-    semantics — recording the first would remember a pair the login never actually used. `base-uri`
-    and `base-auth-uri` are treated as the SAME flag for last-flag-wins purposes (whichever spelling
-    appears later in the command wins), since ast-cli itself only recognizes one of them."""
+    semantics — recording the first would remember a pair the login never actually used."""
     if not command or not _AUTH_LOGIN_RE.search(command):
         return None
     found = {}
     for m in _LOGIN_FLAG_RE.finditer(command):
-        key = "base-auth-uri" if m.group(1) in ("base-auth-uri", "base-uri") else m.group(1)
-        found[key] = next(g for g in m.groups()[1:] if g is not None)  # later wins
+        found[m.group(1)] = next(g for g in m.groups()[1:] if g is not None)  # later wins
     base = _valid_base_uri(found.get("base-auth-uri"))
     tenant = _valid_tenant(found.get("tenant"))
     if base is None or tenant is None:

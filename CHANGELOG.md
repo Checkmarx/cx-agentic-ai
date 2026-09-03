@@ -4,6 +4,32 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 
 ---
 
+### Added in gemini-cli-devassist v1.0.0 (03-09-2026)
+
+#### Gemini CLI extension
+- Initial release of `cx-devassist` for [Gemini CLI](https://github.com/google-gemini/gemini-cli), a fail-closed extension backed by [Checkmarx CxOne](https://checkmarx.com/)
+- Distributed from the repository root (`gemini-extension.json`, `GEMINI.md`, `hooks/`, `scripts/`, `config/`, `skills/`) via `gemini extensions install`
+
+#### Fail-closed BeforeTool gate
+- Two-stage `BeforeTool` chain (`cx_check.sh --gemini-cli` → `cx_check.py`, then a native `cx hooks gemini-*` scanner) gating scannable file writes (`WriteFile` / `write_file` / `replace`) and Checkmarx MCP calls
+- Shell commands (`run_shell_command`) are not gated; a non-blocking `cx_record_login` observer records OAuth URL + tenant for later re-auth
+- Advisory `AfterAgent` hook (`cx hooks gemini-after-agent`) — Gemini's peer of Claude Code's `Stop` → `claude-stop`
+- Deny shape is Gemini-specific: exit 0 with `decision: deny` and `systemMessage` (a non-zero exit is a hook *error*, not a block)
+
+#### Skills
+- `cx-cli-setup` — guided install and authentication (API key or browser OAuth) for the `cx` CLI; MCP reconnect uses `/mcp reload`
+- `cx-devassist-asca` — on-demand SAST (ASCA) scan of a source file with inline remediation via the Checkmarx MCP server
+- `cx-devassist-sca` — on-demand SCA scan of dependency manifests/lockfiles with inline remediation via the Checkmarx MCP server
+- Hook-deny triage: present findings, ask **remediate** vs **suppress**, never auto-call MCP
+
+#### Admin onboarding, scannable files, login history
+- Optional `config/cx-onboarding.properties` lets an administrator pre-fill the Checkmarx One URL and tenant for OAuth sign-in
+- `config/cx-scannable-files` gates only file types ASCA / KICS / SCA can scan
+- Remembered login environments via `hooks/cx_record_login.sh` → `cx_login_history.json`
+
+#### Remediation MCP
+- Bundled in `gemini-extension.json` `mcpServers` (`cx mcp bridge`) — no manual MCP registration; re-spawn with `/mcp reload`
+
 ### Changed in cx-devassist v1.0.1 (21-08-2026)
 
 #### The readiness gate now blocks only what Checkmarx can actually scan
@@ -237,5 +263,5 @@ Measured across 68 filenames: 8 newly gated, **0 newly ungated**.
 
 #### IDE & Client Support
 - All MCP client which supports API key and OAuth2 with DCR authentication
-- Example: Windsurf, GitHub Copilot, Claude, Cursor etc.
+- Example: Windsurf, GitHub Copilot, Claude, Cursor, Gemini CLI etc.
 
