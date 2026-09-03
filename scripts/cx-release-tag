@@ -1,0 +1,5 @@
+# Pinned GitHub release tag for cx-bootstrap install/upgrade downloads.
+# Synced fail-closed fallback: scripts/cx-bootstrap.sh (search marker: CX_RELEASE_TAG).
+# Format: a single release tag line (the first non-comment, non-empty line wins).
+# Install/upgrade URL: https://github.com/Checkmarx/ast-cli/releases/tag/<tag>
+2.3.63-codex-gemini-gokeyring
