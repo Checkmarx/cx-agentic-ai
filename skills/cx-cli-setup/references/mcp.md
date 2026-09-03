@@ -29,10 +29,9 @@ Everywhere else in this skill that says "reload the MCP" means run `/mcp reload`
 - **Not connected?** The bridge needs a valid credential to derive the URL and authenticate. Confirm
   `cx auth validate` passes (Phases 2–3) and `cx mcp bridge --help` works, then run `/mcp reload`. If
   still not connected, for dev/on-prem hosts whose `iam`→`ast` mapping doesn't hold, pass the full URL
-  via the `--mcp-url` flag in `.mcp.json` args. The bridge's stderr is captured in the Gemini MCP log
-  under the Gemini cache directory for the OS:
-  - **Windows:** `%LOCALAPPDATA%\GitHub Gemini\<project>\mcp-logs-checkmarx-devassist-Checkmarx\*.jsonl`
-  - **macOS/Linux:** `~/.gemini/<project>/mcp-logs-checkmarx-devassist-Checkmarx/*.jsonl`
+  via the `--mcp-url` flag in `gemini-extension.json` `mcpServers.Checkmarx.args`. The bridge's stderr
+  is captured in Gemini CLI logs under `~/.gemini/` (Windows: `%USERPROFILE%\.gemini\`). Use
+  `--debug` or the F12 debug console if `/mcp show Checkmarx` stays disconnected.
 
 > The bridge reads the credential from the cx config and sends it **only** in the `Authorization`
 > header — never printed to chat or logs. The server accepts the raw credential (it exchanges it

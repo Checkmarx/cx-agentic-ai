@@ -103,11 +103,11 @@ manifests only — the wider package-manager coverage added in `ast-jetbrains-pl
 |---|---|
 | **ASCA** (SAST) | `.java` `.cs` `.go` `.py` `.js` `.jsx` |
 | **KICS** (IaC) | `.tf` `.yaml` `.yml` `.json` `.proto` `.dockerfile` `.auto.tfvars` `.terraform.tfvars`, and `Dockerfile` |
-| **SCA** (manifests) | `.csproj` `.sbt` `.gradle` `.gradle.kts` `.podspec` `.podspec.json`; `pom.xml` `package.json` `Directory.Packages.props` `packages.config` `go.mod` `libs.versions.toml` `setup.cfg` `setup.py` `pyproject.toml` `Podfile` `Cartfile` `Cartfile.private` `Package.swift` `Gemfile` `bower.json` `composer.json` `pubspec.yaml`; and `*.txt` starting `requirement`/`constraint` |
+| **SCA** (manifests) | `.csproj` `.sbt` `.gradle` `.gradle.kts` `.podspec` `.podspec.json`; `pom.xml` `package.json` `Directory.Packages.props` `packages.config` `go.mod` `libs.versions.toml` `setup.cfg` `setup.py` `pyproject.toml` `Podfile` `Cartfile` `Cartfile.private` `Package.swift` `Gemfile` `bower.json` `composer.json` `pubspec.yaml`; `*.txt` starting `requirement`/`packages`/`constraint`; and Swift PM multi-toolchain manifests `Package@swift-*.swift` (`swiftprefix:`) |
 
-`Package@swift-*.swift` (a versioned Swift Package Manager manifest) has no exact representation in
-this file's `ext`/`suffix`/`base`/`txtprefix` vocabulary and is knowingly not covered — adding it would
-mean gating every `.swift` file.
+A plain `.swift` source file is **not** gated. Only basenames that start with `package@swift-` count
+as SCA manifests (`Package@swift-5.9.swift`, …) — gating on the `.swift` extension alone would pull in
+every Swift source file.
 
 Everything else — `.md`, `.txt`, `.html`, `.css`, `.sql`, `.sh`, `.rb`, `.php`, `.c`, `.rs` — is not
 gated, because no engine would scan it; the write would have gone through unscanned even on a healthy
@@ -159,7 +159,8 @@ cx-agentic-ai/                   # repo root — also the extension root
 │   ├── cx-asset-resolver.sh     # OS/arch → release asset name
 │   ├── cx-mcp-guard.sh          # shared version/capability decision for `cx mcp bridge`
 │   ├── cx-path-probe.sh         # first writable on-PATH directory
-│   └── cx-min-version           # minimum cx version (numeric floor)
+│   ├── cx-min-version           # minimum cx version (numeric floor)
+│   └── cx-release-tag           # optional pinned ast-cli release tag for bootstrap downloads
 └── skills/
     ├── cx-cli-setup/            # guided cx install + authentication (router + references/)
     ├── cx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files

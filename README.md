@@ -3,8 +3,8 @@
 
 > Checkmarx application security, built for AI coding agents. This repository holds two ways to bring
 > [Checkmarx One](https://checkmarx.com/product/application-security-platform/) into an AI-assisted
-> workflow: an **MCP server** your assistant can call, and a **Claude Code plugin** that scans code as it
-> is written.
+> workflow: an **MCP server** your assistant can call, and **fail-closed plugins** (Claude Code, Cursor,
+> Copilot CLI, Gemini CLI) that scan code as it is written.
 
 Use them together or separately — they solve different halves of the problem.
 
@@ -100,11 +100,12 @@ gemini extensions install "C:\path\to\cx-agentic-ai"
 - [docs/usage.md](docs/usage.md) — the MCP tool catalog and example workflows
 - [docs/authentication.md](docs/authentication.md) — API key and OAuth2 setup
 - [docs/troubleshooting.md](docs/troubleshooting.md) — connection, auth, and scan issues
+- [docs/gemini-cli-devassist.md](docs/gemini-cli-devassist.md) — Gemini CLI extension install, hooks, and skills
 
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE) for details. It governs everything in this repository, including the
-`cx-devassist` plugin.
+Claude Code, Cursor, Copilot CLI, and Gemini CLI plugins.
 
 ## Contributing
 
