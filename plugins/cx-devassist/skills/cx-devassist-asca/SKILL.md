@@ -1,6 +1,6 @@
 ---
 name: cx-devassist-asca
-description: "Runs a Checkmarx ASCA (AI Security Code Assistant) SAST scan on SOURCE CODE files and remediates SAST findings via MCP. Activate when the user explicitly asks to scan or audit a source file, OR when a hook deny blocked a source-file write with SAST findings (triage first — ask remediate vs suppress before MCP). Do NOT activate for normal code creation or edits. For dependency manifests use cx-devassist-sca. Invoke as: cx-devassist:cx-devassist-asca"
+description: "Runs a Checkmarx ASCA (AI Security Code Assistant) SAST scan on a SOURCE CODE file to detect code vulnerabilities, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan or fix a source code file (.py/.js/.java/.go/.ts/…) for security vulnerabilities. For dependency manifests/lockfiles (package.json, requirements.txt, go.mod, …) use cx-devassist-sca instead. Invoke as: cx-devassist:cx-devassist-asca"
 ---
 
 # CX Security ASCA
@@ -11,21 +11,12 @@ Detects and remediates SAST vulnerabilities in source files using Checkmarx ASCA
 
 This skill has two entry points:
 
-1. **On-demand scan** — User **explicitly** asks to scan a **source code file** for security
-   vulnerabilities (e.g., "scan app.py for security issues", "audit this file for SAST findings"). If
-   the target is a **dependency manifest/lockfile** (package.json, requirements.txt, go.mod, …), use
-   `cx-devassist-sca` instead.
-2. **Hook triage** — A hook deny blocked a source-file write with SAST findings (activate to present
-   findings and ask remediate vs suppress; **do not** auto-call MCP).
+1. **On-demand scan** — User asks to scan a **source code file** for vulnerabilities (e.g., "scan this
+   file", "check app.py for security issues"). If the target is a **dependency manifest/lockfile**
+   (package.json, requirements.txt, go.mod, …), use `cx-devassist-sca` instead.
+2. **Remediation** — User asks to fix ASCA findings, or Claude needs to fix SAST vulnerabilities detected by ASCA
 
-**Do NOT activate** when the user is writing or editing source code as part of normal development —
-those writes are already scanned by the automatic `PreToolUse` hook.
-
-> **If ASCA findings are already present from an on-demand scan (Flow 1)** — after reporting
-> findings, ask whether to remediate before Flow 2.
->
-> **If ASCA findings are present from a hook deny** — run **Flow 1b: Hook triage** below. **Never**
-> skip directly to Flow 2 or call MCP until the developer chooses **remediate**.
+> **If ASCA findings are already present in context** (e.g., provided by a hook block or a prior scan result), **skip Flow 1 entirely** and proceed directly to Flow 2 using those findings. Do not re-run the scan.
 
 ### Routing — which Checkmarx capability to use
 
@@ -108,37 +99,15 @@ The scan returns a JSON response:
   - `remediationAdvise` — how to fix it
 
   Then ask the user: **"Would you like me to remediate these findings?"**
-  If yes, proceed to Flow 2.
-
----
-
-## Flow 1b: Hook Triage (mandatory after a hook deny)
-
-When a **hook deny** blocked a write and SAST findings are already in context:
-
-1. **Do NOT** re-run the scan, **do NOT** call `mcp__Checkmarx__codeRemediation`, and **do NOT** retry
-   the write yet.
-2. Present each finding (rule, severity, file, line, description) from the hook deny message.
-3. Ask exactly:
-
-   > A security vulnerability was detected. Would you like to **remediate** it (apply an MCP-driven
-   > code fix) or **suppress** it (mark as a confirmed false positive and unblock the write)?
-
-4. **Wait** for the developer's answer.
-5. **If remediate** → proceed to Flow 2.
-6. **If suppress** (confirmed false positive only) → run the `cx ignore-vulnerability` command from
-   the hook deny message **verbatim** (use the per-shell line for your environment), then retry the
-   original write **once**. Do not improvise JSON or paths.
-7. If the answer is unclear, ask again — do not default to remediate.
+  If yes, proceed to the Remediation flow below.
 
 ---
 
 ## Flow 2: Remediation
 
-Triggered **only** after the developer explicitly chooses **remediate** in Flow 1 or Flow 1b, or
-explicitly asks you to fix ASCA findings.
+Triggered either after the user confirms in Flow 1, or when SAST vulnerabilities detected by ASCA need to be fixed.
 
-Once Flow 2 starts, perform all steps **completely and autonomously** — no further user prompts.
+Perform all steps **completely and autonomously** — no user interaction.
 
 ### Step 1 — Detect Language
 
@@ -254,7 +223,7 @@ Pre-existing findings (NOT fixed — outside the scope of this remediation):
 
 - **All remediation MUST come from `mcp__Checkmarx__codeRemediation`. Never apply a manual, generic, or
   non-MCP fix — if the MCP is unavailable, stop and recover it (Step 2), do not improvise.**
-- Do not prompt the user **during** Flow 2 (triage in Flow 1/1b already happened)
+- Do not prompt the user
 - Do not skip or reorder fix steps
 - Only modify code corresponding to the identified problematic line
 - Insert clear `TODO` comments for unresolved issues
