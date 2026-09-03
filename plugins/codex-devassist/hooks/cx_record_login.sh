@@ -1,6 +1,6 @@
 #!/bin/sh
-# cx_record_login.sh — an ADDITIONAL hook on the Bash matcher (alongside the full readiness gate
-# codex-devassist already runs there), and it is an OBSERVER, not a gate. It notes the
+# cx_record_login.sh — the ONLY hook on the Bash matcher (shell commands are never blocked, matching
+# cx-devassist's Claude Code design), and it is an OBSERVER, not a gate. It notes the
 # --base-auth-uri / --tenant of a `cx auth login` so a later logged-out session can offer that
 # environment back instead of re-asking the developer from scratch.
 #
@@ -28,8 +28,8 @@
 #   Only a hook's exit 0 with a deny JSON (or the client's equivalent) blocks a tool call. This script
 #   emits NO JSON and exits 0 on EVERY path — including a missing Python, an unreadable state dir, and
 #   any crash inside the recorder (cx_check.py's record-login mode swallows exceptions and forces
-#   exit 0). It runs ALONGSIDE the existing gate entries on the Bash matcher, not instead of them, so
-#   it cannot loosen or replace the security decision those already make.
+#   exit 0). It is the ONLY hook on the Bash matcher — there is no scan gate to loosen or replace,
+#   matching the "shell commands are never blocked" design shared with cx-devassist (Claude Code).
 #
 # COST
 #   The pure-shell prefilter below means an ordinary command (`git status`, `npm test`) costs one `sh`

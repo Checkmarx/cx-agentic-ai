@@ -229,20 +229,6 @@ _SHELL_CHAINING = (";", "|", "&", "`", "$(", "\n")
 # arguments or a `-c` payload can ride along.
 _BOOTSTRAP_RE = re.compile(r'^\s*(?:bash|sh)\s+"?(?P<path>[^"]+?)"?\s+(?:install|upgrade)\s*$')
 
-# Read-only Bash programs that cannot write code to disk or execute another program — safe to run
-# WITHOUT the cx readiness/auth gate, so a plain `ls`/`cat` works during setup instead of being blocked
-# with "cx not installed". Matched ONLY as a BARE command (via _bare_bash_command: no chaining /
-# substitution / unsafe redirect) whose FIRST token equals one of these. Programs with a write or exec
-# form are deliberately EXCLUDED — find (-exec/-delete), sed (-i), awk (system), sort (-o), tee, env /
-# command / type / xargs (run others), git (push/commit/config …) — so this can never smuggle a write
-# or a command. Bash-tool only (PowerShell stays fully gated). Disable with CX_GATE_ALL_COMMANDS=1.
-_READONLY_COMMANDS = frozenset({
-    "ls", "pwd", "cat", "head", "tail", "echo", "whoami", "id", "date", "hostname", "uname",
-    "wc", "which", "stat", "file", "basename", "dirname", "realpath", "readlink", "tree",
-    "df", "du", "ps", "grep", "rg", "cut", "uniq", "cmp", "cksum", "md5sum", "sha256sum",
-})
-
-
 def _normalize_path(p):
     """Normalize for cross-format comparison: absolute, real-cased on Windows, forward
     slashes. Lets a path the agent typed (possibly with the Windows `\\` cx_check.py's
@@ -1626,19 +1612,6 @@ def _is_bootstrap_command(hook_input):
     return candidate is not None and candidate == expected
 
 
-def _is_readonly_command(hook_input, tool):
-    """True for a BARE shell tool call whose first token is a known read-only program.
-    Reuses the same shape-guard; opt out with CX_GATE_ALL_COMMANDS=1."""
-    _SHELL_TOOLS = ("Bash", "command", "powershell", "bash", "shell")
-    if tool not in _SHELL_TOOLS or os.environ.get("CX_GATE_ALL_COMMANDS") == "1":
-        return False
-    command = _bare_bash_command(hook_input)
-    if not command:
-        return False
-    parts = command.split()
-    return bool(parts) and parts[0] in _READONLY_COMMANDS
-
-
 def cx_check():
     hook_input = _read_hook_input()
     tool = _tool_name(hook_input)
@@ -1659,15 +1632,7 @@ def cx_check():
     _CODEX_MODE = "--codex" in sys.argv[1:]
 
 
-    # 2. Read-only Bash commands (ls, cat, grep, …) can't write code to disk or run another program,
-    #     so there is nothing to scan — allow them WITHOUT requiring cx to be installed/authed. Removes
-    #     the friction of gating a plain `ls` during setup. Allowlisted + shape-guarded so it can't be
-    #     used to smuggle a write/exec (`ls; rm …`, `cat $(…)`, `> file` are all rejected).
-    if _is_readonly_command(hook_input, tool):
-        _log("gate_decision", decision="allow", reason_code="read_only", tool_name=tool)
-        return
-
-    # 2b. Files no Checkmarx engine can scan are not worth gating: ASCA, KICS and SCA each self-skip
+    # 2. Files no Checkmarx engine can scan are not worth gating: ASCA, KICS and SCA each self-skip
     #     an unsupported path, so a README.md / .css / .sql write would have gone through UNSCANNED
     #     even on a healthy cx — blocking it on "cx isn't authenticated" is pure friction. Placed
     #     BEFORE the CX_BINARY check below so such a write is not blocked by a bad CX_BINARY either.

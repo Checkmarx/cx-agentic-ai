@@ -1,13 +1,14 @@
 # Codex CLI Plugin
 
-Developer Assist for OpenAI's Codex CLI intercepts shell commands and file writes (`apply_patch`)
-performed by Codex, runs security scans on the targeted content, and returns findings directly to the
-agent — enabling it to automatically remediate issues and retry the operation before the action is
+Developer Assist for OpenAI's Codex CLI intercepts file writes (`apply_patch`) and Checkmarx MCP tool
+calls performed by Codex, runs security scans on the targeted content, and returns findings directly to
+the agent — enabling it to automatically remediate issues and retry the operation before the action is
 allowed to proceed. Remediation occurs automatically upon risk detection, with no need for user action
 to initiate it. The plugin is installed from a repo-scoped marketplace shipped in this repository. The
 Checkmarx CLI is installed automatically as part of the process — the only requirement is
-authenticating with Checkmarx One. Once in place, the plugin runs automatically on every shell command,
-file write, and Checkmarx MCP tool call Codex CLI performs.
+authenticating with Checkmarx One. Once in place, the plugin runs automatically on every file write and
+Checkmarx MCP tool call Codex CLI performs. Shell commands are **not** gated — see
+[Realtime Scanners](#realtime-scanners) below.
 
 > **Status: depends on an unshipped `cx` CLI capability.** This plugin's native scanner calls
 > `cx hooks codex-pre-tool-use` / `codex-pre-file-write` / `codex-stop` — subcommands that do not yet
@@ -25,10 +26,11 @@ This plugin currently runs the following scanners:
 
 - **ASCA** (source code) — on `apply_patch`, Codex's file-write/edit tool, for [scannable file
   types](#scannable-file-types)
-- **OSS Realtime / SCA policy** — on `Bash`, for dependency installs and manifest edits
+- **Policy check** — on Checkmarx MCP tool calls (`mcp__Checkmarx__*`), before the call is allowed
 
 Both run through the native `cx hooks codex-*` subcommands, gated by a readiness check that proves cx
-is present, current, capable, and authenticated before any content is scanned.
+is present, current, capable, and authenticated before any content is scanned. **Shell commands
+(`Bash`) are not gated** — see [How it works](#how-it-works) below.
 
 ## Prerequisites
 
@@ -165,7 +167,6 @@ configured, sensible defaults are applied.
 |---|---|
 | `CX_BINARY` | Absolute path to `cx` when it is not available on `PATH`. The specified file must be a valid, recent, capable, and authenticated `cx` executable. |
 | `CX_GATE_ALL_FILES=1` | Gate every file write, not just [types the Checkmarx engines can scan](#scannable-file-types) — restores pre-scoping behavior. |
-| `CX_GATE_ALL_COMMANDS=1` | Disable the read-only-command carve-out, so every Bash command is evaluated by the gate's own logic (shell commands themselves are still never *blocked* by cx-devassist's Claude Code counterpart, but codex-devassist does gate Bash — see [How it works](#how-it-works)). |
 | `CX_LOG_DIR` | Overrides the log directory. Default: `~/.checkmarx/agent-logs/codex/`. |
 | `CX_ALLOW_UNLICENSED=1` | Allow writes to proceed (with a logged warning) when cx is authenticated but has no AI-scanning license, instead of denying — accepts that those writes are unscanned. |
 | `CX_LOG_DISABLE=1` | Disables structured logging entirely. |
@@ -175,10 +176,11 @@ configured, sensible defaults are applied.
 
 ## Triggering Scans
 
-Checkmarx Realtime scanners run automatically on every `apply_patch` and `Bash` call Codex CLI
-performs. In addition, you can manually run the scanners by asking Codex to scan a file or check your
-dependencies. When you ask to scan a source code file, the ASCA scanner runs. When you ask to scan a
-manifest file, the OSS-Realtime scanner runs.
+Checkmarx Realtime scanners run automatically on every `apply_patch` call and Checkmarx MCP tool call
+Codex CLI performs (shell commands are not gated — see [How it works](#how-it-works)). In addition, you
+can manually run the scanners by asking Codex to scan a file or check your dependencies. When you ask
+to scan a source code file, the ASCA scanner runs. When you ask to scan a manifest file, the
+OSS-Realtime scanner runs.
 
 You can run the ASCA and OSS scanners explicitly by calling the dedicated skills `$cx-devassist-asca`
 and `$cx-devassist-sca` respectively (Codex CLI invokes skills with a **`$name`** prefix, not a
@@ -206,8 +208,7 @@ Every gated tool call runs a **two-stage PreToolUse chain**:
 |---|---|---|---|
 | `apply_patch` — scannable file | `cx_check` | `cx hooks codex-pre-file-write` | Static analysis (ASCA / SAST) of the proposed file content |
 | `apply_patch` — any other file type | — | — | Nothing: no engine can scan it, so the write proceeds (see [Scannable file types](#scannable-file-types)) |
-| `Bash` | `cx_check` | `cx hooks codex-pre-tool-use` | Command & dependency policy — open-source / SCA checks on installs and manifest edits |
-| `Bash` | — | `cx_record_login.sh` (non-blocking observer) | Notes the URL + tenant of a `cx auth login` — see [Remembered login environments](#remembered-login-environments-automatic) |
+| `Bash` | — | — | **Not gated.** One non-blocking observer runs (`cx_record_login.sh`) — see below |
 | MCP calls (`mcp__Checkmarx__*`) | `cx_check` | `cx hooks codex-pre-tool-use` | Policy check before the MCP call is allowed |
 | Session stop | — | `cx hooks codex-stop` | Session-end hook |
 
@@ -229,11 +230,11 @@ it. Restore the previous behavior (gate every `apply_patch` regardless of file t
 ### Remembered login environments (automatic)
 
 `cx auth login` normally requires the developer to supply a Checkmarx One URL and tenant on every
-fresh OAuth sign-in. The `Bash` matcher carries an additional, non-blocking hook —
-[`hooks/cx_record_login.sh`](hooks/cx_record_login.sh) — alongside the readiness gate, which records
-the URL/tenant pair from an agent-issued `cx auth login` so a later logged-out session can offer it
-back instead of re-asking from scratch. Stored in `cx_login_history.json` in the gate's private
-`0700` state dir (honours `CX_LOG_DIR`). OAuth only — an API-key setup carries no URL/tenant to record.
+fresh OAuth sign-in. The `Bash` matcher carries one non-blocking observer hook —
+[`hooks/cx_record_login.sh`](hooks/cx_record_login.sh) — which records the URL/tenant pair from an
+agent-issued `cx auth login` so a later logged-out session can offer it back instead of re-asking from
+scratch. Stored in `cx_login_history.json` in the gate's private `0700` state dir (honours
+`CX_LOG_DIR`). OAuth only — an API-key setup carries no URL/tenant to record.
 
 ### External dependency: cx CLI capability
 

@@ -20,9 +20,9 @@ import platform
 import re
 import time
 
-_LOG_FILE_NAME = "checkmarx-devassist.jsonl"
+_LOG_FILE_NAME = "cx-devassist.jsonl"
 _MAX_BYTES = 1_000_000  # rotate at ~1 MB
-_ROTATE_KEEP = 3        # keep checkmarx-devassist.jsonl.1 .. .3
+_ROTATE_KEEP = 3        # keep cx-devassist.jsonl.1 .. .3
 _SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_.:\-]{1,64}$")
 
 # Named permission / limit constants — used everywhere below so ASCA does not
