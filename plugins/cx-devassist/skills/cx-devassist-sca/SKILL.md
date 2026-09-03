@@ -1,6 +1,6 @@
 ---
 name: cx-devassist-sca
-description: "Runs a Checkmarx SCA (OSS) scan on dependency manifests/lockfiles and remediates SCA findings via MCP. Activate when the user explicitly asks to scan or audit dependencies, OR when a hook deny blocked a manifest write with SCA findings (triage first — ask remediate vs suppress before MCP). Do NOT activate for normal manifest create/edit. Invoke as: cx-devassist:cx-devassist-sca"
+description: "Runs a Checkmarx SCA (Software Composition Analysis / OSS) scan on dependency manifests and lockfiles to detect vulnerable and malicious open-source packages, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan dependencies, check packages, audit a manifest/lockfile (package.json, requirements.txt, go.mod, pom.xml, build.gradle, …), or fix SCA/OSS findings. Invoke as: cx-devassist:cx-devassist-sca"
 ---
 
 # CX DevAssist SCA
@@ -13,21 +13,12 @@ code for SAST vulnerabilities).
 
 This skill has two entry points:
 
-1. **On-demand scan** — User **explicitly** asks to scan or audit dependencies for security issues
-   (e.g., "scan my dependencies", "audit package.json for vulnerabilities", "are my npm/pip packages
-   safe?", "audit go.mod").
-2. **Hook triage** — A hook deny blocked a manifest write with SCA findings (activate to present
-   findings and ask remediate vs suppress; **do not** auto-call MCP).
+1. **On-demand scan** — User asks to scan or audit dependencies (e.g., "scan my dependencies", "check
+   package.json", "are my npm/pip packages safe?", "audit go.mod").
+2. **Remediation** — User asks to fix SCA/OSS findings, or SCA findings from a hook block need fixing.
 
-**Do NOT activate** when the user is creating, editing, scaffolding, or adding dependencies to a
-manifest — e.g. "create package.json", "add validator 13.12.0", "bump lodash". Those writes are
-already scanned by the automatic `PreToolUse` hook; activating this skill is redundant and wrong.
-
-> **If SCA findings are already present from an on-demand scan (Flow 1)** — after reporting
-> findings, ask whether to remediate before Flow 2.
->
-> **If SCA findings are present from a hook deny** — run **Flow 1b: Hook triage** below. **Never**
-> skip directly to Flow 2 or call MCP until the developer chooses **remediate**.
+> **If SCA findings are already present in context** (e.g., provided by a hook block or a prior scan),
+> **skip Flow 1** and go directly to Flow 2 using those findings. Do not re-run the scan.
 
 ### Routing — which Checkmarx capability to use
 
@@ -114,33 +105,10 @@ Interpret each package by its `Status`:
 
 ---
 
-## Flow 1b: Hook Triage (mandatory after a hook deny)
-
-When a **hook deny** blocked a manifest write and SCA findings are already in context:
-
-1. **Do NOT** re-run the scan, **do NOT** call `mcp__Checkmarx__packageRemediation`, and **do NOT**
-   retry the write yet.
-2. Present each finding (package, version, CVE, severity, file) from the hook deny message.
-3. Ask exactly:
-
-   > A security vulnerability was detected. Would you like to **remediate** it (apply an MCP-driven
-   > fix) or **suppress** it (mark as a confirmed false positive and unblock the write)?
-
-4. **Wait** for the developer's answer.
-5. **If remediate** → proceed to Flow 2.
-6. **If suppress** (confirmed false positive only) → run the `cx ignore-vulnerability` command from
-   the hook deny message **verbatim** (use the per-shell line for your environment), then retry the
-   original write **once**. Do not improvise JSON or paths.
-7. If the answer is unclear, ask again — do not default to remediate.
-
----
-
 ## Flow 2: Remediation
 
-Triggered **only** after the developer explicitly chooses **remediate** in Flow 1 or Flow 1b, or
-explicitly asks you to fix SCA findings.
-
-Once Flow 2 starts, perform all steps **completely and autonomously** — no further user prompts.
+Triggered after the user confirms in Flow 1, or when SCA findings need fixing. Perform all steps
+**completely and autonomously** — no user interaction.
 
 ### Step 1 — Gather Finding Details
 
@@ -243,10 +211,10 @@ Pre-existing findings (NOT fixed — outside the scope of this remediation):
   version exists / breaking upgrade). TODOs noted."
 - ❌ Failed: "SCA remediation failed. Reason: [summary]. Unresolved packages listed above."
 
-### Suppression (only when the developer chooses suppress in Flow 1b)
+### Suppression (only when explicitly requested and justified)
 
-When the developer confirms a finding is a **false positive**, use cx's suppression — not a manual edit.
-Run the `cx ignore-vulnerability` command from the hook deny message verbatim. Example shape:
+If the user decides to accept/ignore a specific finding rather than fix it, use cx's suppression rather
+than a manual edit:
 
 ```bash
 "$HOME/.checkmarx/bin/cx" ignore-vulnerability --scan-type sca --data '<json>'
@@ -256,7 +224,7 @@ Run the `cx ignore-vulnerability` command from the hook deny message verbatim. E
 
 - **All remediation MUST come from `mcp__Checkmarx__packageRemediation`. Never apply a manual, generic,
   or non-MCP fix — if the MCP is unavailable, stop and recover it (Step 2), do not improvise.**
-- Do not prompt the user **during** Flow 2 (triage in Flow 1/1b already happened)
+- Do not prompt the user during Flow 2.
 - Only modify the dependency entries corresponding to the identified findings.
 - Insert clear `TODO` comments where a finding cannot be safely auto-remediated.
 - Remediation must be deterministic, auditable, and fully automated.
