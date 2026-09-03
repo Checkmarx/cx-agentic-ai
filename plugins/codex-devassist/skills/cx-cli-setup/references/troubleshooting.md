@@ -66,7 +66,7 @@ Install pointers:
 
 ## `cx` is installed but INCAPABLE (missing the agent-security subcommands)
 
-If the deny says cx is installed but **missing `cx mcp bridge` / `cx hooks claude-*`**, the installed
+If the deny says cx is installed but **missing `cx mcp bridge` / `cx hooks codex-*`**, the installed
 build predates the agent-security hooks. This is a **terminal** state: re-running install/upgrade just
 re-fetches the same incapable build, so it will not help. A capability-complete cx build is required,
 which **may not be publicly available yet**.

@@ -106,7 +106,7 @@ _EVENTS = {
         "version_state": _VERSION_STATES,
     },
     "scan_decision": {
-        # The stage-2 native `cx hooks claude-pre-*` scanner's own allow/deny — distinct from
+        # The stage-2 native `cx hooks codex-pre-*` scanner's own allow/deny — distinct from
         # "gate_decision" (the stage-1 readiness gate). Never carries the finding/reason text
         # itself, only the outcome, so a real vulnerability's details never reach this log.
         # `reason_code` (not a raw exit code) says WHY: "vulnerability_detected" for a genuine,

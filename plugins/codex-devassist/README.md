@@ -203,8 +203,16 @@ consistently even though each has its own packaged folder.
    ```bash
    codex plugin marketplace add "/path/to/cx-agentic-ai"
    ```
-3. Enable the plugin (`codex plugin marketplace list` to confirm the marketplace registered, then
-   enable `cx-devassist` from the Codex plugin picker or `config.toml`).
+   This registers it as `cx-devassist-marketplace` (the `name` declared in
+   [`.agents/plugins/marketplace.json`](../../.agents/plugins/marketplace.json)). Confirm with:
+   ```bash
+   codex plugin marketplace list
+   ```
+3. Install the plugin from that marketplace:
+   ```bash
+   codex plugin add cx-devassist@cx-devassist-marketplace
+   ```
+   Confirm it installed with `codex plugin list --marketplace cx-devassist-marketplace`.
 4. Restart the Codex CLI session so it re-reads `config.toml` and loads the plugin's hooks and
    skills. Trust the hooks when prompted — plugin-bundled hooks are non-managed and Codex skips
    them until reviewed.
@@ -246,6 +254,69 @@ Use the **resolved absolute path** to your `plugins/codex-devassist` directory, 
 `${PLUGIN_ROOT}` — that variable is only meaningful at hook-invocation time, not inside a
 user-edited config file. Restart the Codex CLI session afterward so it re-reads `config.toml`
 and spawns the server.
+
+---
+
+## Uninstall
+
+**If installed via the local marketplace:**
+
+```bash
+codex plugin remove cx-devassist@cx-devassist-marketplace
+```
+
+This removes the plugin from local config and cache but leaves the marketplace registered (so it can
+be reinstalled later). To also unregister the marketplace itself:
+
+```bash
+codex plugin marketplace remove cx-devassist-marketplace
+```
+
+**If installed manually** (see [Manual installation](#manual-installation-fallback)):
+
+1. Remove the `[mcp_servers.Checkmarx]` block from `config.toml`.
+2. Remove or restore the entries you added to `~/.codex/hooks.json` / `<repo>/.codex/hooks.json`.
+3. Remove the copied/symlinked skills from `.agents/skills` (or `~/.agents/skills`).
+4. Restart the Codex CLI session so it re-reads `config.toml` / `hooks.json`.
+
+Either way, removing the plugin does **not** remove the `cx` CLI binary or its credentials/logs. To
+remove those as well:
+
+```bash
+rm -rf ~/.checkmarx        # Unix / macOS / WSL
+rmdir %LOCALAPPDATA%\Checkmarx  # Windows PowerShell
+```
+
+Cached logs and state are stored in `~/.checkmarx/agent-logs/`; remove them separately if desired.
+
+---
+
+## Upgrade
+
+**If installed via the local marketplace:** there is no single "update the plugin" command — refresh
+the marketplace snapshot, then reinstall the plugin from it:
+
+```bash
+codex plugin marketplace upgrade cx-devassist-marketplace
+codex plugin add cx-devassist@cx-devassist-marketplace
+```
+
+**If installed manually:** pull the latest changes in your cloned repo, then re-copy/symlink the
+updated `skills/` contents into `.agents/skills` and re-copy `hooks/hooks.json` to `~/.codex/hooks.json`
+or `<repo>/.codex/hooks.json` (re-substituting `${PLUGIN_ROOT}` with the absolute path, as in
+[Manual installation](#manual-installation-fallback)).
+
+Either way, restart the Codex CLI session afterward so it re-reads `config.toml` / `hooks.json` and
+picks up the updated hooks and skills.
+
+The `cx` CLI itself updates independently. Run `$cx-cli-setup` if prompted, or manually upgrade via:
+
+```bash
+sh scripts/cx-bootstrap.sh upgrade
+```
+
+from within the plugin directory. The bootstrap script will download and install the latest compatible
+version of the `cx` CLI, verify its checksum, and update your PATH if needed.
 
 ---
 

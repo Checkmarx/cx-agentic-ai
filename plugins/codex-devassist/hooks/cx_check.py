@@ -200,7 +200,7 @@ def _state_path(name):
     return os.path.join(_AGENT_LOG_DIR, name) if _AGENT_LOG_DIR else None
 
 
-# Per-user state lives under _AGENT_LOG_DIR (default ~/.checkmarx/agent-logs/claude, 0700),
+# Per-user state lives under _AGENT_LOG_DIR (default ~/.checkmarx/agent-logs/codex, 0700),
 # NOT the world-writable OS temp dir, so these predictable filenames can't be pre-planted.
 # Each may be None if no private state dir could be created (then caching/auditing is skipped).
 _AUTH_CACHE_FILE = _state_path("cx_auth_cache")
@@ -417,7 +417,7 @@ def _version_state_uncached():
     Parse a real semver first; a build that reports a bare `dev` sentinel (internal builds)
     bypasses the numeric gate; anything else (cx won't run / no parseable version) is
     'unrunnable'. A build that clears the numeric/dev pre-filter but is MISSING the required
-    subcommands (`cx mcp bridge` / `cx hooks claude-*`) is 'incapable' — the real gate, since
+    subcommands (`cx mcp bridge` / `cx hooks codex-*`) is 'incapable' — the real gate, since
     a numeric version match alone does not guarantee the scanner/MCP exist."""
     output = _cx_version()
     if output is None:
@@ -536,7 +536,7 @@ def _is_authenticated(identity=None):
 # --- Scanner readiness: detect the native scanner's SILENT pass-through (the OAuth fail-open) -------
 # The gate's auth check (`cx auth validate`, _is_authenticated) and the native scanner's auth are
 # DIFFERENT notions. `cx auth validate` accepts an OAuth refresh token (from `cx auth login`); but
-# `cx hooks claude-*` authenticates ONLY by extracting a Checkmarx API key, and when it cannot it
+# `cx hooks codex-*` authenticates ONLY by extracting a Checkmarx API key, and when it cannot it
 # runs in SILENT PASS-THROUGH — returning permissionDecision:allow for every file write / command
 # WITHOUT scanning (a textbook command-injection file slips straight through). So a
 # "validate-OK but scanner-pass-through" state is a silent fail-OPEN, and it is exactly what an OAuth
@@ -1079,7 +1079,7 @@ def _probe_scanner_passthrough():
 
 
 def _legacy_probe_scanner_passthrough():
-    """Fallback for a cx that predates `cx hooks check-auth`: run `cx hooks claude-pre-file-write
+    """Fallback for a cx that predates `cx hooks check-auth`: run `cx hooks codex-pre-file-write
     --debug` on a BENIGN in-memory payload and inspect stderr.
     A PreToolUse hook only INSPECTS the proposed content — it never writes the file — and benign
     content yields no finding even when the scanner does run, so the probe has no side effect and
@@ -1090,12 +1090,12 @@ def _legacy_probe_scanner_passthrough():
         tempfile.gettempdir(), "cx_scanner_probe.txt")
     payload = json.dumps({
         "hook_event_name": "PreToolUse",
-        "tool_name": "Write",
+        "tool_name": "apply_patch",
         "tool_input": {"file_path": probe_path, "content": "x"},
     }).encode("utf-8")
     try:
         result = subprocess.run(
-            [_cx_exe(), "hooks", "claude-pre-file-write", "--debug"],
+            [_cx_exe(), "hooks", "codex-pre-file-write", "--debug"],
             input=payload,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -1645,12 +1645,12 @@ def cx_check():
         _deny(
             reason=(
                 "The Checkmarx CLI (cx) is installed but MISSING the security-scanner subcommands "
-                "(cx mcp bridge / cx hooks claude-*). This build cannot run the gate, and re-running "
+                "(cx mcp bridge / cx hooks codex-*). This build cannot run the gate, and re-running "
                 "install/upgrade will only re-fetch the same incapable build — so this operation is "
                 "BLOCKED and cannot be unblocked from here."
             ),
             context=(
-                "cx ran `cx version` but the `cx mcp bridge` / `cx hooks claude-*` capability probes "
+                "cx ran `cx version` but the `cx mcp bridge` / `cx hooks codex-*` capability probes "
                 "failed — this build predates the agent-security hooks (capability_missing), and a "
                 "numeric version match is NOT sufficient. This is a TERMINAL state: it needs a "
                 "capability-complete cx build, which may not be publicly available yet. Do NOT try to "
@@ -1756,7 +1756,7 @@ def cx_check():
     _promote_pending_login()
 
     # 6b. Scanner readiness. `cx auth validate` (step 6) and the native scanner authenticate
-    #     DIFFERENTLY: validate accepts an OAuth refresh token, but `cx hooks claude-*` only
+    #     DIFFERENTLY: validate accepts an OAuth refresh token, but `cx hooks codex-*` only
     #     extracts an API key and otherwise runs in SILENT PASS-THROUGH (allow everything, NO scan).
     #     A validate-OK-but-scanner-pass-through state is therefore a silent fail-OPEN — exactly the
     #     gap an OAuth `cx auth login` opens. Treat it as NOT authenticated for scanning and fail

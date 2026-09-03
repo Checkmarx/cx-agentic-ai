@@ -50,12 +50,9 @@ TMP_BASE="${TMPDIR:-${TEMP:-${TMP:-/tmp}}}"
 # Mirror hooks/cx_check.py _agent_log_dir(): the version cache lives under
 # ~/.checkmarx/agent-logs/<assistant> (or $CX_LOG_DIR), NOT the OS temp dir. Clearing it after a
 # place lets the next hook fire re-probe the just-installed/upgraded cx immediately.
-# Bootstrap is client-agnostic — clear caches for BOTH claude and copilot-cli so whichever client
-# fired the bootstrap sees the fresh version on its next hook call.
 _LOG_BASE="${CX_LOG_DIR:-$HOME/.checkmarx/agent-logs}"
-AGENT_LOG_DIR="$_LOG_BASE/claude"
+AGENT_LOG_DIR="$_LOG_BASE/codex"
 VERSION_CACHE_FILE="$AGENT_LOG_DIR/cx_version_cache"
-_COPILOT_VERSION_CACHE="$_LOG_BASE/copilot-cli/cx_version_cache"
 
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -404,7 +401,6 @@ Write-Output \$dest
 
 invalidate_version_cache() {
     rm -f "$VERSION_CACHE_FILE" 2>/dev/null || true
-    rm -f "$_COPILOT_VERSION_CACHE" 2>/dev/null || true
 }
 
 verify() {
@@ -439,8 +435,8 @@ A capability-complete cx release is required (the public release may predate it;
             die "could not verify cx version after placement (state: $state)."
             ;;
     esac
-    "$cx_bin" hooks claude-pre-tool-use --help >/dev/null 2>&1 \
-        || die "placed cx is missing 'cx hooks claude-pre-tool-use' — this build cannot run the \
+    "$cx_bin" hooks codex-pre-tool-use --help >/dev/null 2>&1 \
+        || die "placed cx is missing 'cx hooks codex-pre-tool-use' — this build cannot run the \
 security scanner. A capability-complete cx release is required."
     log "Verified cx version + capability after placement."
     return 0
