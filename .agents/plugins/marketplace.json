@@ -1,0 +1,22 @@
+{
+  "name": "cx-devassist-marketplace",
+  "interface": {
+    "displayName": "Checkmarx CxOne security scanning plugins for Codex CLI"
+  },
+  "plugins": [
+    {
+      "name": "cx-devassist",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/Checkmarx/cx-agentic-ai.git",
+        "path": "plugins/codex-devassist",
+        "ref": "feature/codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "security"
+    }
+  ]
+}
