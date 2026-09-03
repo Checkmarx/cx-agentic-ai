@@ -675,6 +675,137 @@ def _load_admin_config(path=None):
         return {}
 
 
+# --- Scannable-file gating: skip the readiness chain for files no Checkmarx engine can scan --------
+# Codex has ONE unified file-mutation tool (apply_patch), unlike Claude Code's separate
+# Write/Edit/MultiEdit/NotebookEdit — so this is the only tool name that needs to be in scope here.
+_FILE_WRITE_TOOLS = frozenset({"apply_patch"})
+_FILE_TOOL_PATH_KEYS = ("file_path", "notebook_path")
+_SCANNABLE_FILES_MAX_BYTES = 65536
+_PREFIX_KINDS_BY_EXT = {".txt": "txtprefix", ".swift": "swiftprefix"}
+_SCANNABLE_KINDS = ("ext", "suffix", "base") + tuple(_PREFIX_KINDS_BY_EXT.values())
+
+
+def _scannable_files_path():
+    """Absolute path to the bundled scannable-file list, relative to THIS file (…/hooks) — mirrors
+    _admin_config_path(); never uses ${PLUGIN_ROOT}, which is empty in the agent's shell."""
+    return os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config",
+                     "cx-scannable-files")
+    )
+
+
+def _load_scannable_files(path=None):
+    """config/cx-scannable-files parsed to {kind: frozenset(lowercased values)}, or None when it is
+    missing, oversized, undecodable, or parses to nothing. Unknown line kinds are silently dropped
+    and this NEVER raises — an escaped exception would trip _fail_closed_on_crash and brick every
+    tool call.
+
+    Unlike _load_admin_config, a load failure is NOT benign: returning None makes _is_scannable_file
+    gate EVERY file (fail CLOSED). An empty parse is treated as a failure for the same reason — a
+    truncated or garbled file must not read as "nothing is scannable", which would silently disable
+    the gate everywhere. `path` is a test hook."""
+    try:
+        if path is None:
+            path = _scannable_files_path()
+        raw = _read_capped(path, _SCANNABLE_FILES_MAX_BYTES)
+        if raw is None:
+            return None
+        parsed = {kind: set() for kind in _SCANNABLE_KINDS}
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or ":" not in line:
+                continue
+            kind, _sep, value = line.partition(":")
+            kind = kind.strip().lower()
+            value = value.strip().lower()
+            if value and kind in parsed:
+                parsed[kind].add(value)
+        if not any(parsed.values()):
+            return None
+        return {kind: frozenset(values) for kind, values in parsed.items()}
+    except Exception:
+        return None
+
+
+def _effective_basename(base):
+    """The basename that will ACTUALLY be created, or `""` when it cannot be determined.
+
+    Windows silently discards trailing spaces and dots from a filename, and `name::$DATA` addresses
+    the default data stream of `name` — so `payload.py `, `payload.py.` and `payload.py::$DATA` all
+    create `payload.py`. Classifying the raw string would let a scannable file be laundered through
+    the unscannable carve-out: the gate sees extension `.py ` (no match → allow), and cx's own ASCA
+    filter sees the same, so real Python source reaches disk unscanned with an `allow` audit record.
+
+    Applied on EVERY OS, not just Windows: the payload can name a path on a Windows share or be
+    replayed cross-platform, and stripping a trailing space/dot can only ever make the gate MORE
+    conservative. A stream suffix yields `""` — everything after `::` is not part of the filename, so
+    the target is genuinely unknown and the caller must gate. `""` rather than a distinct sentinel
+    because "stripped to nothing" and "cannot tell" lead to the same verdict at the only call site."""
+    if "::" in base:
+        return ""
+    return base.rstrip(" .")
+
+
+def _is_scannable_file(hook_input):
+    """True when this call targets a file one of the Checkmarx engines can analyse — i.e. when the
+    readiness chain is worth enforcing. Reads config/cx-scannable-files via _load_scannable_files.
+
+    FAIL CLOSED on every uncertainty, so this can only ever narrow the gate for files that are
+    PROVABLY unscannable:
+      - a tool that is not the FILE-WRITE tool (apply_patch) — MCP calls, Bash, and any assistant
+        whose tool names this gate does not know — → True
+      - a missing / empty / non-string path → True
+      - an unloadable or empty config → True
+    Only a positively identified non-scannable path on the apply_patch tool returns False.
+    Force-gate everything with CX_GATE_ALL_FILES=1.
+
+    The tool-name check is not redundant with the path lookup: an `mcp__Checkmarx__*` remediation call
+    can legitimately carry a `file_path` argument, and keying only off the PRESENCE of that key let
+    such a call skip the entire readiness chain — cx is required for the MCP to work at all, so it
+    must always be gated. A payload carrying both a `command` and a `file_path` would otherwise have
+    slipped through the same way.
+
+    Comparison is case-insensitive. ASCA and KICS lowercase before matching; SCA's basename lookup is
+    case-SENSITIVE in Go, so `Package.json` is gated here but would not be scanned there — over-gating
+    by a hair, which is the fail-closed direction."""
+    if os.environ.get("CX_GATE_ALL_FILES") == "1":
+        return True
+    if hook_input.get("tool_name") not in _FILE_WRITE_TOOLS:
+        return True
+    tool_input = hook_input.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return True
+    path = None
+    for key in _FILE_TOOL_PATH_KEYS:
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            path = value
+            break
+    if path is None:
+        return True
+    table = _load_scannable_files()
+    if table is None:
+        return True
+    # Normalize separators before taking the basename: the gate may run under Git-Bash (POSIX
+    # semantics) while the agent types a native Windows path, where os.path.basename would not split
+    # on backslashes. `""` from _effective_basename means "cannot determine the real target" (an NTFS
+    # stream suffix, or a name that strips to nothing) — both gate.
+    base = _effective_basename(os.path.basename(path.replace("\\", "/").rstrip("/")).lower())
+    if not base:
+        return True
+    if base in table["base"]:
+        return True
+    _root, ext = os.path.splitext(base)
+    if ext and ext in table["ext"]:
+        return True
+    if any(base.endswith(suffix) for suffix in table["suffix"]):
+        return True
+    prefix_kind = _PREFIX_KINDS_BY_EXT.get(ext)
+    if prefix_kind and any(base.startswith(prefix) for prefix in table[prefix_kind]):
+        return True
+    return False
+
+
 # The shared opening of every _oauth_recovery_bullet branch — one copy, so a wording change cannot
 # silently miss a branch (there are three of them now).
 _OAUTH_BULLET_LEAD = (
@@ -1536,6 +1667,17 @@ def cx_check():
         _log("gate_decision", decision="allow", reason_code="read_only", tool_name=tool)
         return
 
+    # 2b. Files no Checkmarx engine can scan are not worth gating: ASCA, KICS and SCA each self-skip
+    #     an unsupported path, so a README.md / .css / .sql write would have gone through UNSCANNED
+    #     even on a healthy cx — blocking it on "cx isn't authenticated" is pure friction. Placed
+    #     BEFORE the CX_BINARY check below so such a write is not blocked by a bad CX_BINARY either.
+    #     Fails CLOSED on any uncertainty (unknown tool, missing path, unreadable config), so MCP
+    #     calls and unrecognised assistants stay gated exactly as before. Restore the previous
+    #     behaviour with CX_GATE_ALL_FILES=1.
+    if not _is_scannable_file(hook_input):
+        _log("gate_decision", decision="allow", reason_code="unscannable_file", tool_name=tool)
+        return
+
     # 2.5 CX_BINARY override: validate before trusting it. A set-but-invalid value fails CLOSED
     #     (never silently use a different binary). When valid, every gate probe below uses it,
     #     and the version/capability/auth gates then prove it's a real, recent, capable, authed cx.
@@ -1834,6 +1976,70 @@ def cx_check():
     _log("gate_decision", decision="pass", reason_code="ok", tool_name=tool, version_state=state)
 
 
+# The OBSERVER's matcher: any cx-looking executable token followed by `auth`/`configure`.
+#
+# Deliberately NOT _is_auth_recovery_command. That is a PERMISSION guard: it pins the absolute form to
+# the gate's own resolved _cx_exe() so an attacker-chosen path can never be admitted, and its false
+# negatives used to be self-correcting — a command it failed to match simply got denied, and the
+# developer saw why. As an OBSERVATION filter that safety property inverts: a false negative is silent
+# data loss, and the remembered-environments feature just never fires with nothing logged to explain
+# it. That is exactly what happened to the `"$HOME/.checkmarx/bin/cx" auth login …` and
+# `"$LOCALAPPDATA/Checkmarx/cx/cx.exe" auth login …` spellings that the plugin's OWN
+# references/oauth.md hands the agent inside a code fence.
+#
+# Accepting any path that ends in cx / cx.exe is safe here because this drives recording only, never a
+# permission decision: the extracted values still pass _parse_login_flags + _valid_login_entry, and an
+# offered pair is always presented to the developer to choose, never used automatically. The
+# _bare_bash_command shape guard is still applied by the caller, so a chained command or one that
+# redirects its (token-bearing) stdout to a real file is not recorded.
+_OBSERVABLE_LOGIN_RE = re.compile(
+    r'^\s*&?\s*"?(?:[^"\s]*[/\\])?cx(?:\.exe)?"?\s+(?:auth|configure)\b', re.IGNORECASE
+)
+
+
+def _is_observable_login_command(hook_input):
+    """True for a bare shell-tool `<any cx path> auth|configure …` worth recording — see
+    _OBSERVABLE_LOGIN_RE for why this is looser than the auth-recovery permission guard."""
+    command = _bare_bash_command(hook_input)
+    if not command:
+        return False
+    return _OBSERVABLE_LOGIN_RE.match(command) is not None
+
+
+def cx_record_login():
+    """OBSERVER-ONLY mode, invoked as `cx_check.py record-login` by hooks/cx_record_login.sh on the
+    Bash hook (in ADDITION to the full gate codex-devassist already runs on Bash — this just widens
+    which `cx auth`/`configure` commands get RECORDED, independent of whether the gate's own, narrower
+    _is_auth_recovery_command carve-out happens to admit them). Notes the URL/tenant of a
+    `cx auth login` so a later logged-out session can offer it instead of re-asking the developer
+    from scratch.
+
+    It exists because for an AGENT-ISSUED login the command line is the only place those values ever
+    appear. ast-cli takes two paths (auth_login.go:57-86):
+      * connection flags PRESENT (--base-uri / --base-auth-uri / --tenant) → connectionFlagsProvided
+        is true → PromptAuthConnection is SKIPPED → only persistYamlLogin runs (auth_login.go:102,
+        params.AstAPIKey alone). cx_base_auth_uri / cx_tenant are NOT written to checkmarxcli.yaml.
+      * connection flags ABSENT → PromptAuthConnection (configuration.go:98-119) prompts and
+        setConfigPropertyQuiet's each non-blank answer, so all three ARE persisted.
+    An agent cannot answer an interactive prompt, so it necessarily issues the flag form — the one
+    that persists nothing. A non-interactive stdin also yields "" from readLine and sets nothing.
+    Hence observing the command as issued.
+
+    Consequence worth knowing: a developer who logged in (or ran `cx configure`) interactively in
+    their OWN terminal DOES have the values on disk, so reading them from checkmarxcli.yaml would be
+    a valid additional source for the offer. Not done here — it would change working behaviour.
+
+    This function CANNOT block: it never calls _deny, and main() forces exit 0 on every path.
+
+    Recording keeps the bare-command shape guard (no chaining, no redirect of the token-bearing stdout
+    to a real file) but uses the LOOSER _is_observable_login_command rather than the gate's pinned
+    permission guard — see _OBSERVABLE_LOGIN_RE. Bash-tool only, matching every other carve-out on this
+    branch (_bash_command is Bash-only)."""
+    hook_input = _read_hook_input()
+    if _is_observable_login_command(hook_input):
+        _record_login_attempt(_bash_command(hook_input))
+
+
 def _fail_closed_on_crash():
     """Last-resort deny printed if the gate itself crashes. A fail-CLOSED guard: an unexpected
     error inside cx_check() must still BLOCK via a decided deny (exit 0 + permissionDecision:
@@ -1875,6 +2081,16 @@ def _fail_closed_on_crash():
 
 
 def main():
+    # OBSERVER mode: record-login must NEVER block a tool call, whatever happens inside it. Any
+    # failure is swallowed and the hook still exits 0 — a missing history file, an unwritable state
+    # dir, or a malformed payload must not cost the developer their command.
+    if len(sys.argv) > 1 and sys.argv[1] == "record-login":
+        try:
+            cx_record_login()
+        except BaseException:
+            pass
+        sys.exit(0)
+
     # _deny()/_allow_with_warning() raise SystemExit with the decision JSON already printed.
     # ANY other exception is an internal gate failure → fail CLOSED (deny).
     # Claude Code: exit 2 (non-zero = deny; exit 1 = uncaught error = fail-open).

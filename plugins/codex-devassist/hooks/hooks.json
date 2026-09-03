@@ -15,6 +15,12 @@
             "command": "sh \"${PLUGIN_ROOT}/hooks/cx_run.sh\" hooks codex-pre-tool-use",
             "timeout": 60,
             "statusMessage": "Checking command against security policy..."
+          },
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks/cx_record_login.sh\"",
+            "timeout": 10,
+            "statusMessage": "Noting Checkmarx environment..."
           }
         ]
       },

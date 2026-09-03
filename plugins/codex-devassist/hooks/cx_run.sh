@@ -267,6 +267,13 @@ case "${1:-} ${2:-}" in
                 # back into the model's turn as actionable instruction (see cx_check.py's
                 # _deny/_allow_with_warning and cx_check.sh's no-Python branch for the same fix).
                 # Fold reason + context into permissionDecisionReason so Codex actually acts on it.
+                #
+                # Also print the same reason to stderr as a safety net (belt-and-suspenders):
+                # neither Claude's nor Copilot's equivalent branch does this — the stdout JSON
+                # below is the actual contract Codex's hook parser reads — but this line costs
+                # nothing and covers a client-side edge case where the JSON message doesn't
+                # render for the developer.
+                printf 'checkmarx-devassist: The Checkmarx security scanner could not run: cx CLI could not be resolved (not found via CX_BINARY, canonical store, or PATH). This operation is BLOCKED fail-closed. Run $cx-cli-setup to install and authenticate cx, then retry.\n' >&2
                 cat <<'JSON'
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.\n\nRun $cx-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. All agent actions remain blocked until cx is available."}}
 JSON
