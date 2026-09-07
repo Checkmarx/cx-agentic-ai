@@ -96,11 +96,15 @@ After step 3 (installing the plugin):
    skills. Trust the hooks when prompted — plugin-bundled hooks are non-managed and Codex skips them
    until reviewed.
 
-2. During this process, the plugin verifies that the minimum required version of the Checkmarx CLI is
-   installed. If it isn't already installed, it installs automatically (with download checksum
-   verification).
+2. Confirm the plugin itself is installed: run `/plugins` in the Codex CLI TUI and select
+   **Checkmarx DevAssist for Codex** — it should show as **Installed** under
+   `cx-devassist-marketplace`, with its skills and hooks listed.
 
-3. You will be prompted to authenticate with Checkmarx. The prompt asks you to choose an
+3. On the next gated file-write operation, the plugin verifies that the minimum required version of
+   the Checkmarx CLI is installed. If it isn't already installed, it installs automatically (with
+   download checksum verification).
+
+4. You will be prompted to authenticate with Checkmarx. The prompt asks you to choose an
    authentication method — **API Key** or **Browser sign-in (OAuth)**. If this doesn't run
    automatically, trigger it yourself with `$cx-cli-setup`.
 
@@ -111,11 +115,14 @@ After step 3 (installing the plugin):
      `config/cx-onboarding.properties` for your deployment, you won't be required to enter the base
      URL and tenant name — see [Admin onboarding pre-fill](#admin-onboarding-pre-fill-optional).
 
-4. Confirm the setup is complete: the acceptance signal is that **the gate clears** — the next gated
-   `apply_patch` or Checkmarx MCP tool call proceeds instead of being denied for an unauthenticated
-   `cx`. Checking whether an MCP server shows as connected is a separate, secondary concern (only
-   relevant to the remediation skills) and requires its own manual registration step — see
-   [`references/mcp.md`](skills/cx-cli-setup/references/mcp.md) in the `cx-cli-setup` skill.
+5. The Checkmarx remediation MCP is **not** immediately available right after authenticating — quit
+   the Codex CLI session (`/exit`) and relaunch it (`codex`, or `codex resume --last` to pick up this
+   conversation) so it re-reads `config.toml` and re-spawns the MCP bridge with the new credential.
+   There is no in-session hot-reload for this. **You do not need to register the MCP server
+   yourself** — the agent registers the `[mcp_servers.Checkmarx]` stanza in `config.toml` for you
+   (pointing at the native `cx mcp bridge` subcommand) the first time a remediation tool is needed. See
+   [`references/mcp.md`](skills/cx-cli-setup/references/mcp.md) in the `cx-cli-setup` skill for the
+   full connection/verification details.
 
 ## Optional Configuration
 
