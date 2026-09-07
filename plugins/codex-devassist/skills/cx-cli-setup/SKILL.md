@@ -17,6 +17,17 @@ Resources); this router is the spine.
 - The developer explicitly runs `$cx-cli-setup` to reconfigure or reauthenticate
 - The plugin detected expired credentials and needs a re-auth step
 
+## Run every `cx` command in the foreground
+
+Every `cx` invocation in this skill — `cx version`, `cx auth --help`, `cx auth login`,
+`cx auth validate`, `cx configure set …`, and the bootstrap install/upgrade command — is run with the
+shell tool's normal, **synchronous** (foreground) execution. Never background any of them (the tool's
+own async/background option). A backgrounded command hides its real exit status and hides a hang, so
+you cannot tell a genuine failure from a Windows-sandbox stall (see the `cx auth login` /
+`cx auth validate` notes below) or correctly report the outcome to the developer. Give a command
+enough timeout to finish (`cx auth login` needs 5–6 minutes for the browser/MFA round trip) instead of
+backgrounding it.
+
 ## Phase 0 — Assess Current State
 
 **If a gate deny message sent you here, it already contains the answer — read it before running
@@ -52,6 +63,14 @@ the old PATH), so check the canonical store directly before concluding it is abs
 Distinguish the two failures from the `cx auth validate` error text: credential failures contain
 "invalid"/"unauthorized"/"401"/"forbidden"; network failures contain "no such host"/"connection
 refused"/"timeout"/"dial tcp".
+
+> **Windows sandbox note.** `cx auth validate` makes a live network call, which can hang or time out
+> under Codex CLI's default `[windows] sandbox = "unelevated"` — a sandboxed hang is **not** proof
+> authentication actually failed. Run it in the foreground (never backgrounded) with a normal
+> timeout first; if it hangs or fails with a network/timeout-shaped error rather than a clear
+> credential error, retry the same command **once** with `sandbox_permissions: "require_escalated"`
+> before concluding auth is broken. Do not ask the developer to change their global `sandbox` setting
+> — escalate only this one retry.
 
 > **Run these checks yourself — the gate admits them even while it is blocking everything else**,
 > through **either the Bash or the PowerShell tool**:
@@ -189,6 +208,8 @@ cx auth validate
 - **Credential failure** → offer to re-enter (return to Phase 2). Do not proceed.
 - **Server unreachable** → likely self-hosted base URIs or a network/proxy issue: `references/troubleshooting.md`.
 - **Permission error** (authenticated, no project access) → advise contacting the Checkmarx admin.
+- **Hangs or times out on Windows** → see the Windows sandbox note in Phase 0: retry once with
+  `sandbox_permissions: "require_escalated"` before treating it as a credential failure.
 
 ## Phase 4 — Complete
 

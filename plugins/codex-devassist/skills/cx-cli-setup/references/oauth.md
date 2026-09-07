@@ -98,8 +98,17 @@ run it.
   the Checkmarx login and MFA there. You have about 5 minutes."*
 - Progress text ("Opening browser to…", "Waiting for authentication…") goes to **stderr**, so it
   stays visible; only the secret-bearing stdout is dropped.
-- The command **blocks until the developer finishes** (or times out after ~5 minutes). Run it in the
-  background or with a timeout of at least 5–6 minutes — do not kill it early.
+- The command **blocks until the developer finishes** (or times out after ~5 minutes). **Run it in
+  the foreground — never background it** (the tool's own async/background option), and give it a
+  timeout of at least 5–6 minutes so it isn't killed early. Backgrounding hides a hang from you: you
+  need the real exit status to tell a genuine timeout from the Windows-sandbox stall below.
+
+> **Windows sandbox note.** Codex CLI's default `[windows] sandbox = "unelevated"` can prevent this
+> command from surfacing the browser or completing the localhost callback. Run this specific
+> invocation with `sandbox_permissions: "require_escalated"` (justification: OAuth needs visible
+> browser/desktop access for the login + MFA redirect) rather than asking the developer to change
+> their global `sandbox` setting to `"elevated"` — keep that global setting as-is and escalate only
+> this one command.
 - Headless / SSH (no browser): add `--no-browser`; the CLI prints the authorize URL to stderr.
 - On the redirect to `http://localhost:<port>/checkmarx1/callback` the token is saved as
   `cx_apikey`. Confirm success with `cx auth validate` (Phase 3) — do not read the login output.
