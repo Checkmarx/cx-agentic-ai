@@ -22,13 +22,14 @@ live at [plugins/cx-devassist](../cx-devassist/README.md) and
 
 ## Realtime Scanners
 
-This plugin currently runs the following scanners:
+This plugin currently runs the following scanners on `apply_patch`, Codex's file-write/edit tool, for
+[scannable file types](#scannable-file-types):
 
-- **ASCA** (source code) — on `apply_patch`, Codex's file-write/edit tool, for [scannable file
-  types](#scannable-file-types)
-- **Policy check** — on Checkmarx MCP tool calls (`mcp__Checkmarx__*`), before the call is allowed
+- **ASCA** (SAST) — source code
+- **OSS** (SCA) — dependency manifests
+- **KICS** (IaC) — infrastructure-as-code files
 
-Both run through the native `cx hooks codex-*` subcommands, gated by a readiness check that proves cx
+They run through the native `cx hooks codex-*` subcommands, gated by a readiness check that proves cx
 is present, current, capable, and authenticated before any content is scanned. **Shell commands
 (`Bash`) are not gated** — see [How it works](#how-it-works) below.
 
@@ -76,13 +77,12 @@ Code and Copilot CLI marketplaces, so all three surfaces refer to "cx-devassist"
 though each has its own packaged folder.
 
 The commands below are the official lifecycle for installing and managing this plugin, run from your
-CLI terminal. `/path/to/cx-agentic-ai` is the local path to your clone (or internal fork) of this
-repository. The same lifecycle is also available from the Codex CLI TUI, if you prefer that over the
+CLI terminal. The same lifecycle is also available from the Codex CLI TUI, if you prefer that over the
 terminal.
 
 | # | Lifecycle step | Command |
 |---|---|---|
-| 1 | Add the marketplace | `codex plugin marketplace add "/path/to/cx-agentic-ai"` |
+| 1 | Add the marketplace | `codex plugin marketplace add https://github.com/Checkmarx/cx-agentic-ai` |
 | 2 | List marketplaces | `codex plugin marketplace list` |
 | 3 | Install the plugin | `codex plugin add cx-devassist@cx-devassist-marketplace` |
 | 4 | List installed/available plugins | `codex plugin list --marketplace cx-devassist-marketplace` |
@@ -111,8 +111,11 @@ After step 3 (installing the plugin):
      `config/cx-onboarding.properties` for your deployment, you won't be required to enter the base
      URL and tenant name — see [Admin onboarding pre-fill](#admin-onboarding-pre-fill-optional).
 
-4. Confirm the setup is complete by checking `/mcp` in the agent — you should see `Checkmarx` listed
-   as connected.
+4. Confirm the setup is complete: the acceptance signal is that **the gate clears** — the next gated
+   `apply_patch` or Checkmarx MCP tool call proceeds instead of being denied for an unauthenticated
+   `cx`. Checking whether an MCP server shows as connected is a separate, secondary concern (only
+   relevant to the remediation skills) and requires its own manual registration step — see
+   [`references/mcp.md`](skills/cx-cli-setup/references/mcp.md) in the `cx-cli-setup` skill.
 
 ## Optional Configuration
 
