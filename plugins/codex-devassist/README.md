@@ -119,7 +119,7 @@ After step 3 (installing the plugin):
    the Codex CLI session (`/exit`) and relaunch it (`codex`, or `codex resume --last` to pick up this
    conversation) so it re-reads `config.toml` and re-spawns the MCP bridge with the new credential.
    There is no in-session hot-reload for this. **You do not need to register the MCP server
-   yourself** — the agent registers the `[mcp_servers.Checkmarx]` stanza in `config.toml` for you
+   yourself** — the agent registers the `[mcp_servers.Checkmarx]` for you
    (pointing at the native `cx mcp bridge` subcommand) the first time a remediation tool is needed. See
    [`references/mcp.md`](skills/cx-cli-setup/references/mcp.md) in the `cx-cli-setup` skill for the
    full connection/verification details.
