@@ -43,7 +43,7 @@ MIN_CX_VERSION_FALLBACK="2.3.59"
 
 # Pinned GitHub release tag for install/upgrade downloads. Keep IDENTICAL to scripts/cx-release-tag.
 # (search marker: CX_RELEASE_TAG)
-MIN_CX_RELEASE_TAG_FALLBACK="2.3.63-codex-gemini-gokeyring"
+MIN_CX_RELEASE_TAG_FALLBACK="2.3.63-fix-keyring-linux"
 
 GITHUB_RELEASES="https://github.com/Checkmarx/ast-cli/releases"
 
