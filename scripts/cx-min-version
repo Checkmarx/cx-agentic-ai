@@ -1,0 +1,9 @@
+# Minimum cx version - a NUMERIC FLOOR, not the capability decision. The authoritative gate is
+# the capability probe in hooks/cx_check.py (`cx mcp bridge --help` + `cx hooks claude-pre-tool-use
+# --help` must exit 0); a build that passes this number but fails the probe is reported `incapable`.
+# Whether a given *public* release at or above this floor actually ships those subcommands is
+# external and unconfirmed - which is precisely why the probe, not this number, decides capability.
+# Synced fail-closed fallbacks: hooks/cx_check.py, scripts/cx-bootstrap.sh, and
+# scripts/cx-mcp-guard.sh (search: CX_MIN_VERSION).
+# Format: a single MAJOR.MINOR.PATCH line (the first non-comment, non-empty line wins).
+2.3.59

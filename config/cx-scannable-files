@@ -1,0 +1,142 @@
+# cx-devassist — files the Checkmarx engines can actually scan
+# =============================================================================
+# The gate (hooks/cx_check.py) requires cx to be installed, current, authenticated,
+# licensed and actually scanning BEFORE a file write is allowed. That readiness check
+# is only worth enforcing for files one of the three engines can scan — blocking a
+# README.md write because cx is unauthenticated helps nobody, since no engine would
+# have looked at it.
+#
+# EXACTLY ONE piece of code reads this file: hooks/cx_check.py's _load_scannable_files, used by
+# _is_scannable_file. That is deliberate and worth preserving.
+#
+# An earlier revision also reimplemented the rule in POSIX shell (hooks/_cx_scannable_match.sh) so the
+# two shell deny branches — cx_run.sh's cx-ABSENT branch and cx_check.sh's NO-PYTHON branch — could
+# apply it too. PreToolUse hooks run in parallel with no short-circuit and the most restrictive verdict
+# wins, so both implementations had to agree on every path form. They did not: three separate
+# fail-open divergences shipped (a leading-dot basename like `.foo.py`, an escaped quote anywhere in
+# the payload, and a `sed` extraction that truncated at the first quote), each letting real source code
+# reach disk unscanned, and each slipping past a parity test that had just been widened.
+#
+# So the shell matcher was deleted — and neither branch turned out to need one. cx_run.sh's cx-ABSENT
+# branch now DEFERS on a file write, because stage 1 has already applied this rule to that same call
+# and got it right (deny a scannable file, allow an unscannable one); denying again only blocked the
+# writes stage 1 had just allowed. Verified on a cx-less VM: a one-line list_files.sh was blocked
+# despite `allow / unscannable_file` in the log. Only "no working Python 3" now blocks every file
+# write, which is unavoidable — without Python this file cannot be read, let alone evaluated.
+#
+# If you are tempted to add a second reader in another language: don't. Have it ask cx_check.py.
+#
+# FAIL-CLOSED: an unreadable, empty or garbled file means "gate everything" (the safe
+# direction), never "gate nothing". Unknown line prefixes are silently ignored.
+#
+# HOW TO DISTRIBUTE: edit this file in your FORKED / internal copy of the plugin (the
+# versioned, reviewed marketplace artifact) — NOT in an end-user's live install
+# directory, which is overwritten on every plugin update. Same security boundary as
+# config/cx-onboarding.properties: the reviewed bundle is the boundary, so there is
+# deliberately no out-of-tree override.
+#
+# FORMAT: one `kind:value` per line. Lines starting with `#` and blank lines ignored.
+#   ext:<.x>        exact final extension      — mirrors Go filepath.Ext(...)
+#   suffix:<.x>     path ends with this        — mirrors Go strings.HasSuffix(...)
+#   base:<name>     exact file basename
+#   txtprefix:<p>     a *.txt file whose basename starts with <p>
+#   swiftprefix:<p>   a *.swift file whose basename starts with <p>
+#
+# Matching is CASE-INSENSITIVE here. ASCA and KICS/IaC lowercase before comparing; SCA's
+# minimatch lookup is case-SENSITIVE, so a `Package.json` is gated by us but would
+# not be scanned by SCA. That over-gates by a hair, which is the fail-closed direction.
+#
+# KEEPING THIS IN SYNC — each block below mirrors a specific list in ast-vscode-extension
+#   packages/core/src/utils/common/constants.ts
+# (ASCA / OSS / IaC realtime scanners), plus the SCA manifest block additionally mirrors
+#   ast-jetbrains-plugin/devassist-lib/.../utils/DevAssistConstants.java (MANIFEST_FILE_PATTERNS),
+# which as of PR #452 covers more package managers (CocoaPods, Carthage, Swift PM, Ruby, PHP
+# Composer, Dart/Flutter) than the VS Code extension currently does. The older KICS listener
+# (utils.ts isKicsFile) uses the same IaC suffixes. If Checkmarx adds a language to any engine,
+# this file must be updated or the plugin silently stops gating those writes.
+# tests/test_cx_check_scannable_files.py carries a drift guard for every block.
+# =============================================================================
+
+# --- ASCA (SAST) -------------------------------------------------------------
+# Mirrors ascaSupportedExtensions —
+#   ast-vscode-extension/packages/core/src/utils/common/constants.ts
+# Applied at ascaScannerService.ts shouldScanFile, which uses path.extname → `ext:`.
+# Languages: Java, C#, Go, Python, JavaScript/JSX. TypeScript is NOT scanned.
+ext:.java
+ext:.cs
+ext:.go
+ext:.py
+ext:.js
+ext:.jsx
+
+# --- KICS / IaC --------------------------------------------------------------
+# Mirrors iacSupportedExtensions + iacSupportedPatterns —
+#   ast-vscode-extension/packages/core/src/utils/common/constants.ts
+# Applied at iacScannerService.ts shouldScanFile (extname for the simple list,
+# minimatch for the globs). The older KICS listener (utils.ts isKicsFile) uses
+# the same endsWith / Dockerfile match, so `suffix:` / `base:` here.
+# `.auto.tfvars` / `.terraform.tfvars` are compound suffixes; a plain `.tfvars`
+# is NOT scanned.
+suffix:.tf
+suffix:.yaml
+suffix:.yml
+suffix:.json
+suffix:.proto
+suffix:.dockerfile
+suffix:.auto.tfvars
+suffix:.terraform.tfvars
+base:Dockerfile
+
+# --- SCA (OSS dependency manifests) ------------------------------------------
+# Mirrors supportedManifestFilePatterns —
+#   ast-vscode-extension/packages/core/src/utils/common/constants.ts
+# Applied at ossScannerService.ts matchesManifestPattern via minimatch.
+# `**/*.csproj` / `**/*.sbt` / `**/*.gradle` → `ext:`.
+# `**/*.gradle.kts` is a compound suffix (splitext yields `.kts`) → `suffix:`.
+ext:.csproj
+ext:.sbt
+ext:.gradle
+suffix:.gradle.kts
+
+# `**/*.podspec` (CocoaPods) — ast-jetbrains-plugin DevAssistConstants.MANIFEST_FILE_PATTERNS.
+ext:.podspec
+# `**/*.podspec.json` (CocoaPods, JSON-formatted podspec) — a compound suffix like .gradle.kts above.
+suffix:.podspec.json
+
+base:pom.xml
+base:package.json
+base:Directory.Packages.props
+base:packages.config
+base:go.mod
+base:libs.versions.toml
+base:setup.cfg
+base:setup.py
+base:pyproject.toml
+
+# Bower, PHP Composer, Dart/Flutter Pub — from the same ast-jetbrains-plugin PR #452 list. Spelled
+# out explicitly here (rather than relying on the pre-existing KICS suffix:.json / suffix:.yaml
+# rules above, which already happen to match them) so the SCA block documents every manifest this
+# gate treats as a dependency file, independent of what KICS/IaC separately covers.
+base:bower.json
+base:composer.json
+base:pubspec.yaml
+
+# Extension-less manifests added by ast-jetbrains-plugin's DevAssistConstants.MANIFEST_FILE_PATTERNS
+# (PR #452, "Enhance Package Manager Support"): CocoaPods, Carthage, Swift Package Manager, Ruby
+# Bundler.
+base:Podfile
+base:Cartfile
+base:Cartfile.private
+base:Package.swift
+base:Gemfile
+
+# requirement*.txt / packages.txt / constraints.txt / constraints-*.txt — a .txt file counts as
+# a manifest when its basename starts with one of these (requirements.txt,
+# requirements-dev.txt, packages.txt, constraints.txt, constraints-prod.txt, …).
+# `packages` mirrors oss-realtime.go:238-244 (Claude plugin parity).
+txtprefix:requirement
+txtprefix:packages
+txtprefix:constraint
+
+# Swift PM multi-toolchain variant (Package@swift-5.9.swift, …) — oss-realtime.go:252-255.
+swiftprefix:package@swift-

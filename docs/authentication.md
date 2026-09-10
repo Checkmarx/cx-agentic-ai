@@ -96,7 +96,7 @@ Replace `{cxone_base_url}` and `{tenant}` with your values.
 | **User interaction** | None after setup | Browser login on first connect |
 | **Key rotation** | Manual | Automatic token refresh |
 | **Best for** | Automated pipelines, CI/CD, scripts | Interactive IDE usage, human users |
-| **Supported clients** | All MCP clients | Clients with OAuth2/DCR support (Cursor, Claude, Windsurf, etc.) |
+| **Supported clients** | All MCP clients | Clients with OAuth2/DCR support (Cursor, Claude, Windsurf, Gemini CLI, etc.) |
 
 ---
 
