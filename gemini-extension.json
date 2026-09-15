@@ -1,0 +1,13 @@
+{
+  "name": "cx-devassist",
+  "version": "1.0.0",
+  "description": "Checkmarx-powered security scanning and fixing inside your coding loop. Checks the code you write and the code AI generates for vulnerabilities and risky dependencies, then returns precise, engine-backed fixes. Best invoked after writing or changing code, before commits, and around security-sensitive logic. Applies fixes inline so you can accept them without leaving your editor.",
+  "mcpServers": {
+    "Checkmarx": {
+      "command": "sh",
+      "args": ["${extensionPath}/hooks/cx_run.sh", "mcp", "bridge"]
+    }
+  },
+  "hooks": "./hooks/hooks.json",
+  "contextFileName": "GEMINI.md"
+}

@@ -27,7 +27,7 @@ Part of [Checkmarx Agentic AI](README.md).
 
 ## Overview
 
-The Checkmarx Security MCP server bridges your AI assistant (Claude, Cursor, Copilot, etc.) with Checkmarx One's enterprise application security platform. 
+The Checkmarx Security MCP server bridges your AI assistant (Claude, Cursor, Copilot, Gemini CLI, etc.) with Checkmarx One's enterprise application security platform. 
 It exposes security workflows as natural-language-accessible MCP tools, 
 allowing developers to scan code, investigate findings, and receive context-aware fixes without leaving their development environment.
 
@@ -65,7 +65,7 @@ Multi-protocol support to facilitate secure and efficient communication between 
 The server uses **API Key** and **OAuth2** authentication.
 
 ### OAuth2 Authentication (Recommended)
-Checkmarx MCP supports Dynamic Client Registration (DCR) flow allows an AI client (such as Cursor or Claude Desktop) to connect securely.
+Checkmarx MCP supports Dynamic Client Registration (DCR) flow allows an AI client (such as Cursor, Claude Desktop, or Gemini CLI) to connect securely.
 1. User only needs to configure the MCP client as mentioned in the [MCP Client Configuration](#mcp-client-configuration) section.
 2. When the client attempts to connect to the MCP server, it will be redirected to Checkmarx One login page for authentication.
 3. Once authentication is successful with valid Checkmarx credentials, the MCP client can use the tools provided by the MCP server.
@@ -88,7 +88,9 @@ Refer [Authentication](/docs/authentication.md) for detailed authentication inst
 - API Key (with required access if using API key authentication)
 
 ### JSON Configuration
-Below are examples to add the server to your MCP client configuration. See the [examples/](examples) folder for ready-to-use client config files.
+Below are examples to add the server to your MCP client configuration. See the [examples/](examples) folder for ready-to-use client config files (`claude-mcp.json`, `cursor-mcp.json`, `copilot-mcp.json`, `gemini-mcp.json`, `windsurf-mcp.json`, `kiro-mcp.json`).
+
+**Gemini CLI** lives in `~/.gemini/settings.json` and uses `httpUrl` for streamable HTTP (not `url`, which is SSE). See [examples/gemini-mcp.json](examples/gemini-mcp.json).
 
 
 **OAuth2 Authentication**
