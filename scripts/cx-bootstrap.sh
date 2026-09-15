@@ -39,11 +39,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Numeric floor only (capability is decided by the gate's probe, not this number). Keep IDENTICAL
 # to scripts/cx-min-version and the fallback in hooks/cx_check.py. (search marker: CX_MIN_VERSION)
-MIN_CX_VERSION_FALLBACK="2.3.59"
+MIN_CX_VERSION_FALLBACK="2.3.65"
 
 # Pinned GitHub release tag for install/upgrade downloads. Keep IDENTICAL to scripts/cx-release-tag.
 # (search marker: CX_RELEASE_TAG)
-MIN_CX_RELEASE_TAG_FALLBACK="2.3.63-fix-keyring-linux"
+MIN_CX_RELEASE_TAG_FALLBACK="2.3.65"
 
 GITHUB_RELEASES="https://github.com/Checkmarx/ast-cli/releases"
 
