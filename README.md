@@ -73,6 +73,15 @@ someone remembers to ask for.
 
 For more details **→ [plugins/copilot-devassist/README.md](plugins/copilot-devassist/README.md)**
 
+## codex-devassist
+
+**→ [plugins/codex-devassist/README.md](plugins/codex-devassist/README.md)**
+
+A fail-closed security gate for [OpenAI's Codex CLI](https://developers.openai.com/codex/cli). Before
+Codex runs a shell command, applies a patch, or calls a Checkmarx MCP tool, the Checkmarx `cx` CLI
+scans the proposed action. Real vulnerabilities are **blocked rather than silently allowed** — and so
+is the case where the scanner itself can't be trusted to run. Findings are remediated through the
+bundled Checkmarx MCP server.
 ## gemini-cli-devassist
 
 **→ [docs/gemini-cli-devassist.md](docs/gemini-cli-devassist.md)**
@@ -85,6 +94,7 @@ trusted to run. Findings are remediated through the bundled Checkmarx MCP server
 **Reach for this when** you want the check to be automatic and non-optional rather than something
 someone remembers to ask for.
 
+For more details **→ [plugins/codex-devassist/README.md](plugins/codex-devassist/README.md)**
 For more details **→ [docs/gemini-cli-devassist.md](docs/gemini-cli-devassist.md)**
 
 This extension lives at the repository root (`gemini-extension.json`, `GEMINI.md`, `hooks/`,
