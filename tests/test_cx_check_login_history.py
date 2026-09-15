@@ -107,7 +107,7 @@ class ParseLoginFlags(unittest.TestCase):
 
     def test_overlong_tenant_rejected(self):
         self.assertIsNone(cx_check._parse_login_flags(
-            "cx auth login --base-auth-uri %s --tenant %s" % (_URL_EU, "a" * 65)))
+            "cx auth login --base-auth-uri %s --tenant %s" % (_URL_EU, "ab" * 32 + "c")))
 
     def test_empty_command_returns_none(self):
         self.assertIsNone(cx_check._parse_login_flags(""))
