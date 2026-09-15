@@ -122,7 +122,7 @@ def bash(command):
 
 
 def write(content):
-    return {"tool_name": "Write", "tool_input": {"file_path": "/x", "content": content}}
+    return {"tool_name": "Write", "tool_input": {"file_path": "/x.py", "content": content}}
 
 
 # --- Copilot CLI tool-name helpers ---
@@ -176,7 +176,7 @@ class TestMissingCx(unittest.TestCase):
 
     def test_absent_still_allows_bootstrap(self):
         decision, code = run(bash('bash "%s" install' % BOOTSTRAP), which=None)
-        self.assertIsNone(decision)  # silent pass-through
+        self.assertEqual(decision, "allow")  # explicit allow JSON, not a silent pass-through
         self.assertEqual(code, 0)
 
 
@@ -341,7 +341,7 @@ class TestScannerPassthrough(unittest.TestCase):
     def test_bootstrap_bypasses_passthrough(self):
         decision, code = run(bash('bash "%s" install' % BOOTSTRAP), authed=True,
                              scanner_state=cx_check._SCANNER_PASSTHROUGH)
-        self.assertIsNone(decision)
+        self.assertEqual(decision, "allow")
         self.assertEqual(code, 0)
 
 
@@ -711,9 +711,12 @@ class TestAgentLogDir(unittest.TestCase):
             d = cx_check._agent_log_dir().replace("\\", "/")
             self.assertTrue(os.path.isdir(cx_check._agent_log_dir()))
             # Default location, unless HOME isn't writable here (then it degrades to temp).
+            # The "copilot-cli" leaf is required: without it this plugin's caches, login history
+            # and jsonl land in the SHARED agent-logs root and collide with the Claude and Cursor
+            # plugins' identically named files. Each plugin pins its own client leaf.
             self.assertTrue(
-                d.endswith(".checkmarx/agent-logs")
-                or d == tempfile.gettempdir().replace("\\", "/")
+                d.endswith(".checkmarx/agent-logs/copilot-cli")
+                or d.startswith(tempfile.gettempdir().replace("\\", "/"))
             )
         finally:
             if old is not None:
@@ -1580,6 +1583,7 @@ class TestCopilotCLIInputs(unittest.TestCase):
         # sets _COPILOT_CLI_MODE=True even for inputs that don't carry a Copilot CLI envelope.
         self._orig_argv = sys.argv
         sys.argv = ["cx_check.py", "--copilot-cli"]
+        os.environ.setdefault("CX_LOG_DISABLE", "1")
 
     def tearDown(self):
         sys.argv = self._orig_argv
@@ -1619,12 +1623,12 @@ class TestCopilotCLIInputs(unittest.TestCase):
         # Bootstrap carve-out fires for tool_name='command' (Copilot CLI), so
         # the agent can self-install cx even when cx is absent — no manual step needed.
         decision, code = run(copilot_command('bash "%s" install' % BOOTSTRAP), which=None)
-        self.assertIsNone(decision)
+        self.assertEqual(decision, "allow")
         self.assertEqual(code, 0)
 
     def test_command_allows_bootstrap_upgrade(self):
         decision, code = run(copilot_command('bash "%s" upgrade' % BOOTSTRAP), which=None)
-        self.assertIsNone(decision)
+        self.assertEqual(decision, "allow")
         self.assertEqual(code, 0)
 
     def test_command_bootstrap_requires_mode(self):
@@ -1742,7 +1746,7 @@ class TestCopilotCLIInputs(unittest.TestCase):
     def test_real_format_powershell_bootstrap_allow(self):
         # bootstrap carve-out must fire for powershell tool via the real format
         decision, code = run(copilot_real("powershell", {"command": 'bash "%s" install' % BOOTSTRAP}), which=None)
-        self.assertIsNone(decision)
+        self.assertEqual(decision, "allow")
         self.assertEqual(code, 0)
 
     def test_real_format_powershell_auth_recovery(self):
@@ -1818,6 +1822,10 @@ class TestCopilotCLIInputs(unittest.TestCase):
             any("copilot-cli-pre-file-write" in p for p in probes_flat),
             "copilot-cli-pre-file-write not in _CAPABILITY_PROBES: %r" % probes_flat,
         )
+        self.assertTrue(
+            any("copilot-cli-stop" in p for p in probes_flat),
+            "copilot-cli-stop not in _CAPABILITY_PROBES: %r" % probes_flat,
+        )
 
     # --- camelCase format (Copilot CLI may send toolName/toolInput) ---
 
@@ -1829,7 +1837,7 @@ class TestCopilotCLIInputs(unittest.TestCase):
     def test_camel_command_allows_bootstrap(self):
         # camelCase bootstrap must also be allowed — carve-out handles both formats.
         decision, code = run(copilot_command_camel('bash "%s" install' % BOOTSTRAP), which=None)
-        self.assertIsNone(decision)
+        self.assertEqual(decision, "allow")
         self.assertEqual(code, 0)
 
     def test_camel_command_allows_auth_recovery(self):
@@ -1851,6 +1859,63 @@ class TestCopilotCLIInputs(unittest.TestCase):
         decision, code = run(copilot_edit_camel("/src/bar.py"), authed=False)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 0)
+
+    # --- scannable-file carve-out (config/cx-scannable-files) ---
+
+    def test_unscannable_md_allowed_when_cx_absent(self):
+        decision, code = run(copilot_create("/src/README.md", "# hi"), which=None)
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
+
+    def test_unscannable_css_allowed_when_unauthenticated(self):
+        decision, code = run(copilot_edit("/src/app.css"), authed=False)
+        self.assertIsNone(decision)
+        self.assertEqual(code, 0)
+
+    def test_scannable_py_still_gated_when_cx_absent(self):
+        decision, code = run(copilot_create("/src/app.py", "x = 1"), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 0)
+
+    def test_gate_all_files_overrides_unscannable(self):
+        decision, code = run(
+            copilot_create("/src/README.md", "# hi"), which=None,
+            env={"CX_GATE_ALL_FILES": "1"})
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 0)
+
+    def test_json_is_scannable_kics(self):
+        self.assertTrue(cx_check._is_scannable_file(copilot_create("/src/tsconfig.json", "{}")))
+        self.assertTrue(cx_check._is_scannable_file(copilot_create("/src/app.py", "x")))
+        self.assertFalse(cx_check._is_scannable_file(copilot_create("/src/README.md", "#")))
+        self.assertFalse(cx_check._is_scannable_file(copilot_create("/src/notes.txt", "x")))
+
+    def test_record_login_observes_powershell_flags(self):
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        os.unlink(path)
+        try:
+            cmd = (
+                'cx auth login --base-auth-uri https://eu.ast.checkmarx.net '
+                '--tenant acme-corp 1>/dev/null'
+            )
+            cx_check._record_login_attempt(cmd, path=path)
+            entries = cx_check._load_login_history(path)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["base_auth_uri"], "https://eu.ast.checkmarx.net")
+            self.assertEqual(entries[0]["tenant"], "acme-corp")
+            self.assertEqual(entries[0]["status"], "pending")
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_oauth_bullet_offers_confirmed_history(self):
+        bullet = cx_check._oauth_recovery_bullet(
+            {}, history=[("https://eu.ast.checkmarx.net", "acme-corp")])
+        self.assertIn("acme-corp", bullet)
+        self.assertIn("https://eu.ast.checkmarx.net", bullet)
+        self.assertNotIn("<url>", bullet)
+        self.assertIn("EARLIER", bullet)
 
 
 if __name__ == "__main__":

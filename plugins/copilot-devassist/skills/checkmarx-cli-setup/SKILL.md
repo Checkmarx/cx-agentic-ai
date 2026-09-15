@@ -152,7 +152,7 @@ The hooks resolve `cx` in a separate process with a different PATH snapshot, so 
    (`references/mcp.md`).
 
 Only once the gate clears: "Setup complete. The `cx` CLI is installed, configured, and
-authenticated, and the security hooks are enforcing." If a gated action is still denied after `cx
+authenticated, and the security hooks are enforcing." If a scannable-file write is still denied after `cx
 version` works in the shell, see `references/troubleshooting.md`.
 
 ## Error Handling (Any Phase)

@@ -24,11 +24,13 @@ PY_SCRIPT="$SCRIPT_DIR/cx_check.py"
 INPUT=$(cat)
 
 # DEBUG LOGGING — set CX_CHECK_DEBUG=1 to capture the raw stdin JSON and key decisions
-# to $HOME/.checkmarx/agent-logs/cx_check_debug.log. Lets you verify the exact field names
-# (toolName vs tool_name, toolInput vs tool_input) that the agent client actually sends.
+# to $HOME/.checkmarx/agent-logs/copilot-cli/cx_check_debug.log. Lets you verify the exact field
+# names (toolName vs tool_name, toolInput vs tool_input) that the agent client actually sends.
+# The copilot-cli leaf mirrors cx_check.py's _agent_log_dir() so the debug trace sits next to the
+# state files and the jsonl instead of in the shared agent-logs root.
 # Never enabled by default; has no effect on gate behaviour.
 if [ "${CX_CHECK_DEBUG:-0}" = "1" ]; then
-    _DEBUG_LOG="${CX_LOG_DIR:-${HOME}/.checkmarx/agent-logs}/cx_check_debug.log"
+    _DEBUG_LOG="${CX_LOG_DIR:-${HOME}/.checkmarx/agent-logs/copilot-cli}/cx_check_debug.log"
     mkdir -p "$(dirname "$_DEBUG_LOG")" 2>/dev/null
     printf '[cx_check.sh] %s stdin=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo ts-unavail)" "$INPUT" >> "$_DEBUG_LOG"
 fi
@@ -105,12 +107,15 @@ if [ -z "$PYTHON_BIN" ]; then
         . "$SCRIPT_DIR/_cx_bootstrap_match.sh"
         cx_is_bootstrap_command "$INPUT" "$SCRIPT_DIR" && exit 0
     fi
-    # No working Python 3 ⇒ the gate cannot evaluate ⇒ fail CLOSED.
+    # NO file-type carve-out here, deliberately. The scannable-file rule lives in exactly ONE place —
+    # cx_check.py's _is_scannable_file — and cannot be evaluated without Python. So: no Python 3 ⇒
+    # the gate cannot evaluate ⇒ fail CLOSED, for every file type. Shell commands no longer reach
+    # this launcher (they run the non-blocking observer instead).
     # Exit-code contract: Claude Code requires exit 2 to treat a deny as a block (exit 0 = allow).
     # Copilot CLI requires exit 0 — a non-zero exit is treated as a hook error (fail-open, no reason shown).
     # JSON shape also differs by client.
     _NO_PY_REASON="The Checkmarx security gate could not run: no working Python 3 interpreter was found, so the scanner is inactive. This operation is BLOCKED fail-closed."
-    _NO_PY_CONTEXT="Install Python 3, then retry. Windows: install from https://python.org (NOT the Microsoft Store stub). macOS: \`xcode-select --install\` or \`brew install python3\`. Linux: \`apt install python3\` / \`dnf install python3\` / \`apk add python3\`. The plugin's bundled bootstrap (scripts/cx-bootstrap.sh) installs the cx CLI and itself needs NO Python, but this version/auth gate does. All agent actions remain blocked until a Python 3 interpreter is available."
+    _NO_PY_CONTEXT="Install Python 3, then retry. Windows: install from https://python.org (NOT the Microsoft Store stub). macOS: \`xcode-select --install\` or \`brew install python3\`. Linux: \`apt install python3\` / \`dnf install python3\` / \`apk add python3\`. The plugin's bundled bootstrap (scripts/cx-bootstrap.sh) installs the cx CLI and itself needs NO Python, but this version/auth gate does. Without Python 3 the gate cannot tell which files Checkmarx can scan, so ALL file writes are blocked. Shell commands are never blocked, so you can install Python 3 and cx from here."
     case "$*" in
         *--copilot-cli*)
             printf '{"permissionDecision":"deny","permissionDecisionReason":"%s %s"}\n' "$_NO_PY_REASON" "$_NO_PY_CONTEXT"
