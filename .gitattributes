@@ -6,12 +6,18 @@
 # Files that MUST be LF on every OS (executed by /bin/sh, /usr/bin/env bash, or read into a
 # version string where a trailing CR would corrupt comparisons):
 *.sh            text eol=lf
+hooks/cx_record_login.sh text eol=lf
 *.py            text eol=lf
 *.json          text eol=lf
 *.yaml          text eol=lf
 *.yml           text eol=lf
 *.md            text eol=lf
 plugins/cx-devassist/scripts/cx-min-version text eol=lf
+scripts/cx-min-version text eol=lf
+scripts/cx-release-tag text eol=lf
+config/cx-scannable-files text eol=lf
+*.properties    text eol=lf
+**/SKILL.md     text eol=lf
 
 # Binary assets must never be EOL-normalized.
 *.png  binary
