@@ -19,6 +19,7 @@ Describe what changed and why.
     - [ ] Claude
     - [ ] Windsurf
     - [ ] GitHub Copilot
+    - [ ] Gemini CLI
     - [ ] Kiro
 ## DCO
 

@@ -1,0 +1,10 @@
+# Minimum cx version - a NUMERIC FLOOR, not the capability decision. The authoritative gate is
+# the capability probe in hooks/cx_check.py (`cx mcp bridge --help` + `cx hooks gemini-before-tool
+# --help` must exit 0); a build that passes this number but fails the probe is reported `incapable`.
+# 2.3.65 (GA) is confirmed to ship the gemini-* hook subcommands, so this floor is now a REAL
+# capability guarantee for the public release, not just a numeric pre-filter - the probe still runs
+# and remains authoritative for anything unexpected.
+# Synced fail-closed fallbacks: hooks/cx_check.py, scripts/cx-bootstrap.sh, and
+# scripts/cx-mcp-guard.sh (search: CX_MIN_VERSION).
+# Format: a single MAJOR.MINOR.PATCH line (the first non-comment, non-empty line wins).
+2.3.65
