@@ -162,33 +162,45 @@ class TestMinVersionSync(unittest.TestCase):
     def test_copilot_four_sites_agree(self):
         self._check_four_sites(_COPILOT_PLUGIN_ROOT)
 
+    def test_cursor_four_sites_agree(self):
+        self._check_four_sites(_CURSOR_PLUGIN_ROOT)
+
     def test_gemini_four_sites_agree(self):
         self._check_four_sites(_GEMINI_PLUGIN_ROOT)
 
 
-class TestGeminiReleaseTagSync(unittest.TestCase):
-    """Gemini bootstrap pins ast-cli downloads to scripts/cx-release-tag (search: CX_RELEASE_TAG)."""
+class TestReleaseTagSync(unittest.TestCase):
+    """Bootstrap pins ast-cli downloads to scripts/cx-release-tag (search: CX_RELEASE_TAG)."""
 
-    def _canonical_tag(self):
-        for line in _read(_GEMINI_PLUGIN_ROOT, "scripts", "cx-release-tag").splitlines():
+    def _canonical_tag(self, plugin_root):
+        for line in _read(plugin_root, "scripts", "cx-release-tag").splitlines():
             s = line.strip()
             if s and not s.startswith("#"):
                 return s
-        self.fail("no tag line found in scripts/cx-release-tag")
+        self.fail("no tag line found in %s/scripts/cx-release-tag" % plugin_root)
 
-    def test_release_tag_two_sites_agree(self):
-        canon = self._canonical_tag()
+    def _check_release_tag_sites(self, plugin_root):
+        canon = self._canonical_tag(plugin_root)
         self.assertTrue(canon, "cx-release-tag is empty")
-        sh = _read(_GEMINI_PLUGIN_ROOT, "scripts", "cx-bootstrap.sh")
+        sh = _read(plugin_root, "scripts", "cx-bootstrap.sh")
         m = re.search(r'MIN_CX_RELEASE_TAG_FALLBACK="([^"]+)"', sh)
         self.assertIsNotNone(m, "cx-bootstrap.sh: MIN_CX_RELEASE_TAG_FALLBACK not found")
         self.assertEqual(m.group(1), canon, "cx-bootstrap.sh fallback != cx-release-tag")
-
-    def test_bootstrap_uses_load_release_tag(self):
-        sh = _read(_GEMINI_PLUGIN_ROOT, "scripts", "cx-bootstrap.sh")
         self.assertIn("load_release_tag", sh)
         self.assertRegex(sh, r'tag="\$\(load_release_tag\)"')
         self.assertNotIn("resolve_latest_tag", sh)
+
+    def test_release_tag_sync_claude(self):
+        self._check_release_tag_sites(_CLAUDE_PLUGIN_ROOT)
+
+    def test_release_tag_sync_copilot(self):
+        self._check_release_tag_sites(_COPILOT_PLUGIN_ROOT)
+
+    def test_release_tag_sync_cursor(self):
+        self._check_release_tag_sites(_CURSOR_PLUGIN_ROOT)
+
+    def test_release_tag_sync_gemini(self):
+        self._check_release_tag_sites(_GEMINI_PLUGIN_ROOT)
 
 
 class TestGeminiExtension(unittest.TestCase):
@@ -351,17 +363,24 @@ class TestShippedBytes(unittest.TestCase):
             return f.read()
 
     def test_no_carriage_returns(self):
-        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT, _GEMINI_PLUGIN_ROOT):
+        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT, _CURSOR_PLUGIN_ROOT,
+                            _GEMINI_PLUGIN_ROOT):
             for parts in self._LF_FILES:
                 self.assertNotIn(b"\r", self._bytes(plugin_root, *parts),
                                  "%s/%s contains CR bytes — must be LF-only" % (
                                      os.path.basename(plugin_root), parts[-1]))
+            self.assertNotIn(b"\r", self._bytes(plugin_root, "scripts", "cx-release-tag"),
+                             "%s/cx-release-tag contains CR bytes — must be LF-only" % (
+                                 os.path.basename(plugin_root)))
         for parts in self._GEMINI_ONLY_LF_FILES:
+            if parts[-1] == "cx-release-tag":
+                continue
             self.assertNotIn(b"\r", self._bytes(_GEMINI_PLUGIN_ROOT, *parts),
                              "cx-agentic-ai/%s contains CR bytes — must be LF-only" % parts[-1])
 
     def test_cx_min_version_is_pure_ascii(self):
-        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT, _GEMINI_PLUGIN_ROOT):
+        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT, _CURSOR_PLUGIN_ROOT,
+                            _GEMINI_PLUGIN_ROOT):
             try:
                 self._bytes(plugin_root, "scripts", "cx-min-version").decode("ascii")
             except UnicodeDecodeError as e:
@@ -369,11 +388,15 @@ class TestShippedBytes(unittest.TestCase):
                           "(would crash the gate under LANG=C): %s" % (
                               os.path.basename(plugin_root), e))
 
-    def test_gemini_cx_release_tag_file_is_pure_ascii(self):
-        try:
-            self._bytes(_GEMINI_PLUGIN_ROOT, "scripts", "cx-release-tag").decode("ascii")
-        except UnicodeDecodeError as e:
-            self.fail("cx-release-tag is not pure ASCII (would break bootstrap under LANG=C): %s" % e)
+    def test_cx_release_tag_file_is_pure_ascii(self):
+        for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT, _CURSOR_PLUGIN_ROOT,
+                            _GEMINI_PLUGIN_ROOT):
+            try:
+                self._bytes(plugin_root, "scripts", "cx-release-tag").decode("ascii")
+            except UnicodeDecodeError as e:
+                self.fail("%s/scripts/cx-release-tag is not pure ASCII "
+                          "(would break bootstrap under LANG=C): %s" % (
+                              os.path.basename(plugin_root), e))
 
 
 class TestHookWiring(unittest.TestCase):
