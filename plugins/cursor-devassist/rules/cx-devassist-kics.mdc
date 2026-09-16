@@ -1,5 +1,5 @@
 ---
-description: Scan and remediate IaC (Infrastructure-as-Code) misconfigurations in Dockerfile, Terraform, Kubernetes YAML, and other IaC files using Checkmarx KICS and the Checkmarx MCP imageRemediation tool.
+description: Scan and remediate IaC (Infrastructure-as-Code) misconfigurations in Dockerfile, Terraform, Kubernetes YAML, and other IaC files using Checkmarx KICS and the Checkmarx MCP codeRemediation tool.
 alwaysApply: false
 globs: "**/{Dockerfile,.dockerfile,*.tf,*.yaml,*.yml,*.json,*.auto.tfvars,*.terraform.tfvars,*.proto}"
 ---
@@ -28,22 +28,13 @@ If KICS findings are already in context (hook deny `agent_message`, `CHECKMARX_H
 "$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan iac-realtime -s "<file-path>"
 ```
 
-Report findings (title, severity, line, description). KICS findings are **deterministic IaC rule matches** — they are never false positives caused by missing cross-file context. **Fix every finding; do not suppress or dismiss any as a false positive.**
+If the scan fails because no container engine is running, relay the exact error message to the user — see `skills/cx-devassist-kics/SKILL.md` → Error Handling.
+
+Report findings (title, severity, line, description). KICS findings are deterministic IaC rule matches — treat every finding as real and fix by default. Suppress only when the user explicitly requests it via `cx ignore-vulnerability --scan-type iac ...`.
 
 ## Remediation (MCP-only)
 
-For each finding, call **`mcp__plugin-cx-devassist-Checkmarx__imageRemediation`** with:
-
-```json
-{
-  "type": "iac",
-  "metadata": {
-    "title": "[Title from finding]",
-    "description": "[Description from finding]",
-    "remediationAdvice": "[how to harden this configuration]"
-  }
-}
-```
+For each finding, call **`mcp__plugin-cx-devassist-Checkmarx__codeRemediation`** with `type: "iac"` and metadata from the scan (`title`, `description`, `remediationAdvice`). Do not use `imageRemediation` — that tool is for container image CVE scanning, not KICS IaC findings (including Dockerfile/docker-compose).
 
 - **MCP available** → apply `remediation_steps` in order; change only code at/near the flagged line
 - **MCP unavailable** → **STOP.** No manual fixes. Run `/cx-cli-setup` if auth fails; ask developer to **Developer: Reload Window** for MCP
@@ -54,9 +45,9 @@ If a fix genuinely requires resources outside this file (e.g. a separate KMS key
 
 ## Skill compliance (mandatory)
 
-**Follow this rule's workflow exactly as written — as-is, with no paraphrasing, summarizing, or skipping steps. Do not abbreviate, substitute your own judgment for, or reorder any step (Scan → Report → Remediate via MCP → Re-scan → Step 5 summary).**
+**Invoke and follow `skills/cx-devassist-kics/SKILL.md` exactly as written — as-is, with no paraphrasing, summarizing, or reimplementing its steps inline in this rule or in chat. Do not skip, abbreviate, substitute your own judgment for, or reorder any step.**
 
-The **Step 5 Remediation Summary** is mandatory output — **always** produce and show it to the user **verbatim**, in full, after remediation completes, even for a single finding. Never omit it, shorten it, or fold it into other output:
+The **Step 4 Remediation Summary** is mandatory output — **always** produce and show it to the user **verbatim**, in full, after remediation completes, even for a single finding. Never omit it, shorten it, or fold it into other output. Scan `Line` is 0-based; show **`Line + 1`** in the summary only.
 
 ```
 IaC Remediation Summary
@@ -64,14 +55,14 @@ IaC Remediation Summary
 Rule:             [title]
 Severity:         [severity]
 Issue Type:       IaC Misconfiguration
-Problematic Line: [line]
+Problematic Line: [Line + 1]
 
 Files Modified:
 1. [file]
    - Line [n]: [description of change]
 
 Pre-existing findings (NOT fixed — outside the scope of this remediation):
-- [title] — line [n] — [severity]
+- [title] — line [Line + 1] — [severity]
 - (omit this section entirely when the re-scan reports none)
 ```
 

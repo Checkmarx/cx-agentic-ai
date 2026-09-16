@@ -16,7 +16,7 @@
 
 # cx_is_bootstrap_command <hook_input_json> <hooks_dir>
 #   $1 = the raw PreToolUse JSON the launcher read from stdin
-#   $2 = the sourcing launcher's OWN directory (…/plugins/checkmarx-devassist/hooks), used to resolve the
+#   $2 = the sourcing launcher's OWN directory (…/plugins/cx-devassist/hooks), used to resolve the
 #        bundled bootstrap by absolute path so a foreign cx-bootstrap.sh elsewhere cannot match.
 #   returns 0 (allow — it is the sanctioned bootstrap) or 1 (not a match → caller denies).
 cx_is_bootstrap_command() {

@@ -5,5 +5,6 @@
 *.sh                 text eol=lf
 *.py                 text eol=lf
 cx-min-version       text eol=lf
+cx-release-tag       text eol=lf
 cx-scannable-files   text eol=lf
 *.properties         text eol=lf

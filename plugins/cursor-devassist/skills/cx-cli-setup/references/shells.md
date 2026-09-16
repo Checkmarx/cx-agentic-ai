@@ -75,6 +75,7 @@ outer `"..."` and backslash-escape the inner `"`, even under `--%`:
 ```powershell
 # PowerShell — preferred: --%, JSON wrapped in one outer quote, inner quotes backslash-escaped
 & "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" --% ignore-vulnerability --scan-type asca --data "{\"FileName\":\"Demo.java\",\"Line\":5,\"RuleID\":1027}"
+& "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" --% ignore-vulnerability --scan-type iac --data "{\"Title\":\"Missing User Instruction\",\"SimilarityID\":\"7540e8c3cdc3b13c3a24b8ce501d9e39fb485368e20922df18cec9564e075049\"}"
 ```
 
 When `--%` is not an option (cmd.exe, bash/sh), double-quote the whole value and escape every inner
@@ -119,6 +120,7 @@ Then ignore (one bare command):
 
 ```powershell
 & "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" ignore-vulnerability --scan-type asca --data "@c:\project\.checkmarx\finding.json" --ignored-file-path "c:\project\.checkmarx\checkmarxIgnoredTempList.json"
+& "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" ignore-vulnerability --scan-type iac --data "@c:\project\.checkmarx\kics-finding.json" --ignored-file-path "c:\project\.checkmarx\checkmarxIgnoredTempList.json"
 ```
 
 After a successful ignore, **retry the original Write/StrReplace once** — the write hook runs a

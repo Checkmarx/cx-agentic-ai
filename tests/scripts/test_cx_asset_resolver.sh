@@ -8,8 +8,8 @@ set +e  # cx-asset-resolver.sh sets `set -e`; turn it off so we can assert on fa
 
 pass=0; fail=0
 
-want() {  # desc  expected_asset  uname_s  uname_m
-    local got; got="$(resolve_cx_asset "$3" "$4" 2>/dev/null)"
+want() {  # desc  expected_asset  uname_s  uname_m  [release_tag]
+    local got; got="$(resolve_cx_asset "$3" "$4" "${5:-}" 2>/dev/null)"
     if [[ "$got" == "$2" ]]; then pass=$((pass + 1)); printf 'ok   - %s\n' "$1"
     else fail=$((fail + 1)); printf 'FAIL - %s (got "%s" want "%s")\n' "$1" "$got" "$2"; fi
 }
@@ -34,6 +34,11 @@ want "windows_nt"          "ast-cli_windows_x64.zip"    "Windows_NT"       "x86_
 want "windows arm64→x64"   "ast-cli_windows_x64.zip"    "Windows_NT"       "arm64"
 unsupported "unknown OS"   "Plan9"  "x86_64"
 unsupported "unknown arch" "Linux"  "sparc64"
+
+TAG="2.3.65-kics-improvement"
+want "linux x64 versioned" "ast-cli_${TAG}_linux_x64.tar.gz" "Linux" "x86_64" "$TAG"
+want "darwin arm64 versioned" "ast-cli_${TAG}_darwin_x64.tar.gz" "Darwin" "arm64" "$TAG"
+want "windows versioned" "ast-cli_${TAG}_windows_x64.zip" "Windows_NT" "x86_64" "$TAG"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

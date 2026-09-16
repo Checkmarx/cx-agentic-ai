@@ -146,22 +146,25 @@ plugins/cx-devassist/
 └── skills/
     ├── cx-cli-setup/            # guided cx install + authentication (router + references/)
     ├── cx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
-    └── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
+    ├── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
+    └── cx-devassist-kics/       # on-demand IaC (KICS) scan + remediation for Dockerfile/Terraform/K8s YAML
 ```
 
 > Tests live at the **repo root** (`tests/`), outside the shipped plugin, so they aren't distributed.
 
 ### On-demand scanning (skills)
 
-Beyond the automatic PreToolUse gate, two skills scan on request and remediate via the Checkmarx MCP:
+Beyond the automatic PreToolUse gate, three skills scan on request and remediate via the Checkmarx MCP:
 
 | Ask | Skill | Engine |
 |---|---|---|
 | "scan this file" / "check app.py" (source code) | `cx-devassist-asca` | SAST (ASCA) → `mcp__Checkmarx__codeRemediation` |
 | "scan my dependencies" / "check package.json" (manifest/lockfile) | `cx-devassist-sca` | SCA / OSS → `mcp__Checkmarx__packageRemediation` |
+| "scan this Dockerfile" / "check main.tf" (IaC file) | `cx-devassist-kics` | IaC (KICS) → `mcp__Checkmarx__codeRemediation` |
 | whole project / cloud-scale scan | Checkmarx MCP (Cx1 cloud) tools | — |
 
-A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA.
+A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA;
+an IaC file (Dockerfile, `.tf`, `.yaml`/`.yml`, …) → KICS.
 
 ### Admin onboarding pre-fill (optional)
 

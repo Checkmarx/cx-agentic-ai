@@ -4,6 +4,95 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 
 ---
 
+### Changed in cx-devassist v1.0.2 (08-09-2026)
+
+#### Added — on-demand KICS (IaC) scanning
+
+- New `cx-devassist-kics` skill scans and remediates Infrastructure-as-Code files — Dockerfile,
+  Terraform, Kubernetes YAML, `.auto.tfvars`, `.terraform.tfvars`, `.proto`, and similar templates —
+  via `cx scan iac-realtime` and the Checkmarx MCP `codeRemediation` tool (`type: "iac"`).
+- Routing guidance in the skill and README: source code → `cx-devassist-asca`; dependency
+  manifests → `cx-devassist-sca`; IaC → `cx-devassist-kics`.
+
+#### Added — structured audit for KICS fail-open skips
+
+When KICS cannot run because a container engine is missing, not running, or an image pull fails,
+ast-cli fail-opens the guardrail and surfaces a user message on stderr. The hook now records that
+skip as a redacted `scan_decision` instead of silently allowing with no trace:
+
+- New `hooks/_cx_scan_audit.sh` — parses the native scanner's stdout/stderr and maps KICS skip notes
+  to allowlisted enums; never logs the raw message text.
+- `scan_decision` events now accept `reason_code=iac_scan_skipped` plus optional `guardrail`,
+  `container_engine` (`docker`, `podman`, `both`, `unknown`), and `skip_reason`
+  (`engine_not_running`, `all_engines_not_running`, `engine_not_found`, `image_pull_failed`,
+  `scan_error`, `unknown`).
+- `hooks/cx_run.sh` sources the audit helper after stage-2 capture and passes the derived fields to
+  `cx_log.py`.
+
+---
+
+### Changed in copilot-devassist v1.0.1 (08-09-2026)
+
+#### Gate parity with cx-devassist v1.0.1
+
+Copilot CLI now ships the same fail-closed gate improvements released for Claude Code in v1.0.1:
+
+- **Scannable-file-only gating** — shell commands are never gated; file writes are blocked only for
+  types an engine can scan (ASCA, KICS, SCA), driven by `config/cx-scannable-files`.
+- **Remembered login environments** — `hooks/cx_record_login.sh` observes `cx auth login` and the
+  gate offers confirmed URL/tenant pairs on later auth denials.
+- **Fixes carried forward** — trailing-slash `--base-auth-uri` handling, invalid `CX_BINARY` loop
+  guidance, `py -3` audit logging on Windows, and cx-absent stage-2 deferral for unscannable writes.
+
+#### Added — on-demand KICS (IaC) scanning
+
+- New `cx-devassist-kics` skill (same routing and remediation model as Claude/Cursor).
+
+#### Added — structured audit for KICS fail-open skips
+
+- `hooks/_cx_scan_audit.sh` and extended `scan_decision` schema (`iac_scan_skipped`, `guardrail`,
+  `container_engine`, `skip_reason`), wired through `hooks/cx_run.sh`.
+
+#### Renamed — unified `cx-devassist` identity
+
+Skills, slash commands, log files, and marketplace references now use the `cx-devassist` name
+consistently (replacing the earlier `checkmarx-devassist` / `checkmarx-cli-setup` spelling):
+
+- `checkmarx-cli-setup` → `cx-cli-setup`; `checkmarx-devassist-asca` / `-sca` → `cx-devassist-asca` /
+  `cx-devassist-sca`.
+- JSONL audit log: `~/.checkmarx/agent-logs/copilot-cli/cx-devassist.jsonl`.
+- Marketplace install/update commands: `cx-devassist@cx-devassist-marketplace`.
+- Gate and MCP deny messages point at `/cx-cli-setup`.
+
+#### Fixed
+
+- **`hooks/cx_run.sh` audit logging on Windows** — consolidated into one `_cxrun_log()` helper that
+  tries `python3` → `python` → `py -3`, so `scan_decision` and `mcp_connect` records are no longer
+  dropped on hosts where only the `py` launcher exposes Python 3.
+
+---
+
+### Changed in cursor-devassist v1.0.1 (08-09-2026)
+
+#### Added — on-demand KICS (IaC) scanning
+
+- New `cx-devassist-kics` skill for Dockerfile, Terraform, Kubernetes YAML, and related IaC templates.
+- Updated `rules/cx-devassist-kics.mdc` — routing table, MCP remediation contract, and mandatory
+  compliance with the skill's Step 4 Remediation Summary.
+
+#### Added — structured audit for KICS fail-open skips
+
+- `hooks/_cx_scan_audit.sh` and extended `scan_decision` schema, wired through `hooks/cx_run.sh` and
+  `hooks/cx_log.py` (same redacted enums as Claude/Copilot).
+
+#### Changed
+
+- README and quick-start now list `/cx-devassist-kics` alongside ASCA and SCA.
+- `skills/cx-cli-setup/references/troubleshooting.md` — additional MCP reconnect and hook-path
+  guidance; `references/mcp.md` and `references/shells.md` minor clarifications.
+
+---
+
 ### Added in gemini-cli-devassist v1.0.0 (03-09-2026)
 
 #### Gemini CLI extension
@@ -29,6 +118,8 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 
 #### Remediation MCP
 - Bundled in `gemini-extension.json` `mcpServers` (`cx mcp bridge`) — no manual MCP registration; re-spawn with `/mcp reload`
+
+---
 
 ### Changed in cx-devassist v1.0.1 (21-08-2026)
 
