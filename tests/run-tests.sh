@@ -9,13 +9,16 @@
 set -uo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Two plugins are covered: copilot-devassist (the older suites under hooks/ and scripts/) and
-# cx-devassist (the gate suites directly under tests/).
+# Three plugins are covered: copilot-devassist (the older suites under hooks/ and scripts/),
+# cx-devassist (the Claude gate suites directly under tests/), and the Gemini CLI extension
+# (hooks/ at repo root). Gemini suites live in test_gemini_*.py so they never share an
+# interpreter with Claude/Copilot — one process can only hold one module named `cx_check`.
 # NOT named CLAUDE_PLUGIN_ROOT: that is a real env var cx_check.py reads, and Claude Code exports it to
 # hooks. A bash assignment keeps an inherited export attribute, so reusing the name would silently
 # redefine it for every test subprocess on any machine where it is already exported.
 PLUGIN_ROOT="$(cd "$DIR/../plugins/copilot-devassist" && pwd)"
 CX_PLUGIN_ROOT="$(cd "$DIR/../plugins/cx-devassist" && pwd)"
+GEMINI_ROOT="$(cd "$DIR/.." && pwd)"
 
 # --- pick a Python 3 interpreter (mirrors the gate's own Py3 requirement) -------------------
 # PY is an ARRAY so the `py -3` launcher (two words) invokes correctly under `"${PY[@]}"`.
@@ -37,9 +40,8 @@ if [ "${#PY[@]}" -eq 0 ]; then
 fi
 
 # --- coverage.py is optional --------------------------------------------------------------
-# Measure BOTH plugins' hooks: the copilot suites exercise one tree, the cx-devassist gate suites the
-# other. Sourcing only one would report the other as 0% and hide real gaps.
-COV_SOURCES="$PLUGIN_ROOT/hooks,$CX_PLUGIN_ROOT/hooks"
+# Measure all three hook trees. Sourcing only one would report the others as 0% and hide real gaps.
+COV_SOURCES="$PLUGIN_ROOT/hooks,$CX_PLUGIN_ROOT/hooks,$GEMINI_ROOT/hooks"
 COV=0
 if "${PY[@]}" -c 'import coverage' >/dev/null 2>&1; then
     COV=1
@@ -95,7 +97,10 @@ run_py "$DIR/test_packaging.py"
 run_py_discover "test_cx_check_scannable_files.py"
 run_py_discover "test_cx_check_login_history.py"
 run_py_discover "test_cx_check_admin_config.py"
+run_py_discover "test_gemini_cx_check_scannable_files.py"
+run_py_discover "test_gemini_cx_check_login_history.py"
 run_sh "$DIR/scripts/test_cx_asset_resolver.sh"
+run_sh "$DIR/scripts/test_cx_asset_resolver_gemini.sh"
 run_sh "$DIR/scripts/test_cx_path_probe.sh"
 run_sh "$DIR/scripts/test_cx_bootstrap.sh"
 run_sh "$DIR/scripts/test_cx_resolution_contract.sh"

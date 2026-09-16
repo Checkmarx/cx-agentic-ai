@@ -44,7 +44,7 @@ Before using the MCP server you need:
 2. Your **Checkmarx API host** (e.g., `ast.checkmarx.net`) — provided by your Checkmarx administrator
 3. Your **tenant ID** (e.g., `cx_eu`, `checkmarx`)
 4. An **API key** if using API Key authentication (see [authentication.md](authentication.md))
-5. An MCP-compatible AI client (Cursor, Claude, Windsurf, GitHub Copilot, etc.)
+5. An MCP-compatible AI client (Cursor, Claude, Windsurf, GitHub Copilot, Gemini CLI, etc.)
 
 ---
 

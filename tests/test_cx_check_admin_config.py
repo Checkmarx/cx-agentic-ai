@@ -92,7 +92,7 @@ class LoadAdminConfig(unittest.TestCase):
         self.assertEqual(self._load("cx_base_auth_uri=https://eu.ast.checkmarx.net --foo\n"), {})
 
     def test_overlong_tenant_rejected(self):
-        self.assertEqual(self._load("cx_tenant=" + ("a" * 65) + "\n"), {})
+        self.assertEqual(self._load("cx_tenant=" + ("ab" * 32 + "c") + "\n"), {})
 
 
 class OAuthRecoveryBullet(unittest.TestCase):
