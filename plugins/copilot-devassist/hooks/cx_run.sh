@@ -8,7 +8,7 @@
 # for two cases:
 #   - The two blocking scan subcommands (…pre-tool-use / …pre-file-write), where stdout and the exit
 #     code are captured (not exec'd) just long enough to record the native scanner's own allow/deny to
-#     checkmarx-devassist.jsonl via cx_log.py, then relayed unchanged. stderr still streams through live.
+#     cx-devassist.jsonl via cx_log.py, then relayed unchanged. stderr still streams through live.
 #   - `mcp bridge` — this is THE command .mcp.json declares as the MCP server itself, spawned by
 #     Claude Code outside the hook system entirely (no PreToolUse gate runs first). A resolved cx that
 #     is below the minimum version or missing the `mcp bridge` subcommand must NOT be exec'd blindly:
@@ -16,7 +16,7 @@
 #     which Claude Code surfaces as a generic, undiagnosable "-32000 / failed to reconnect". So this
 #     one case is version/capability-checked first (scripts/cx-mcp-guard.sh, the same decision
 #     cx-bootstrap.sh's verify() and cx_check.py's gate already make) and the exact outcome is logged
-#     to checkmarx-devassist.jsonl via cx_log.py — on success as well as denial — before exec'ing or refusing.
+#     to cx-devassist.jsonl via cx_log.py — on success as well as denial — before exec'ing or refusing.
 #
 # When cx CANNOT be resolved at all, the fail mode depends on the sub-command so a missing cx is
 # never a silent fail-OPEN on the scan path:
@@ -27,6 +27,22 @@
 #     a fail-closed prompt-submit would deadlock the user before they could even install cx).
 #   - Anything else (mcp bridge, scan, auth, configure, version, …) -> stderr error + exit 1.
 set -u
+
+case "$0" in
+    */*) _CXRUN_DIR=${0%/*} ;;
+    *)   _CXRUN_DIR=. ;;
+esac
+
+# Write ONE cx_log.py audit record using the first WORKING Python 3: python3 -> python -> py -3.
+# Best-effort by contract: every failure is swallowed and callers ignore the status.
+_cxrun_log() {
+    for _cxrun_py in python3 python "py -3"; do
+        command -v "${_cxrun_py%% *}" >/dev/null 2>&1 || continue
+        # shellcheck disable=SC2086
+        $_cxrun_py "$_CXRUN_DIR/cx_log.py" "$@" >/dev/null 2>&1 && return 0
+    done
+    return 0
+}
 
 # OS detection mirrors cx_check.py's `os.name == "nt"`: on Windows the canonical store is under
 # %LOCALAPPDATA%; on Unix it is ~/.checkmarx/bin. Keeping the two adapters OS-consistent avoids the
@@ -136,16 +152,16 @@ if [ -n "$CX_RESOLVED" ]; then
 
         # Best-effort log — never let a missing/slow python or a logging failure affect the relay.
         _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
-        for _CXRUN_PY in python3 python; do
-            command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
-            # `break` only on a real success: on Windows, "python3" can resolve to the Microsoft
-            # Store's App Execution Alias stub, which is ON PATH but exits non-zero without running
-            # anything (no Python actually installed under that name) — falling through to "python"
-            # in that case is what makes this work on such machines.
-            "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" scan_decision \
-                "decision=$_CXRUN_DECISION" "tool_name=$_CXRUN_TOOL" "reason_code=$_CXRUN_REASON" \
-                >/dev/null 2>&1 && break
-        done
+        # shellcheck source=_cx_scan_audit.sh
+        . "$_CXRUN_DIR/_cx_scan_audit.sh"
+        cx_scan_audit_extras "$_CXRUN_OUTPUT"
+        if [ -n "$_CXSCAN_REASON_CODE" ]; then
+            _CXRUN_REASON="$_CXSCAN_REASON_CODE"
+        fi
+        # shellcheck disable=SC2086
+        _cxrun_log scan_decision \
+            "decision=$_CXRUN_DECISION" "tool_name=$_CXRUN_TOOL" "reason_code=$_CXRUN_REASON" \
+            $_CXSCAN_LOG_EXTRAS
 
         printf '%s\n' "$_CXRUN_OUTPUT"
         exit "$_CXRUN_STATUS"
@@ -186,38 +202,34 @@ if [ -n "$CX_RESOLVED" ]; then
         # records which resolution tier supplied $CX_RESOLVED, so the log can explain (via
         # cx_log.py's message synthesis) why a CX_BINARY-pinned denial won't self-heal from a
         # bootstrap upgrade — see the matching stderr note below.
-        for _CXRUN_PY in python3 python; do
-            command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
-            "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" mcp_connect \
-                "result=$_CXRUN_MCP_RESULT" "reason_code=$_CXRUN_MCP_REASON" \
-                "version_have=$_CXRUN_MCP_HAVE" "version_min=$_CXRUN_MCP_MIN" \
-                "tier=$_CX_RESOLVED_TIER" \
-                >/dev/null 2>&1 && break
-        done
+        _cxrun_log mcp_connect \
+            "result=$_CXRUN_MCP_RESULT" "reason_code=$_CXRUN_MCP_REASON" \
+            "version_have=$_CXRUN_MCP_HAVE" "version_min=$_CXRUN_MCP_MIN" \
+            "tier=$_CX_RESOLVED_TIER"
 
         if [ "$_CXRUN_MCP_RESULT" = denied ]; then
             # Refuse to exec a subcommand this build can't run — that is what corrupts the stdio
             # transport into today's opaque -32000. stdout stays untouched (no partial MCP framing);
             # the reason goes to stderr, surfaced to the Copilot agent as the MCP connection error.
-            # AND to checkmarx-devassist.jsonl above, so a connect failure always has an exact cause on disk.
+            # AND to cx-devassist.jsonl above, so a connect failure always has an exact cause on disk.
             #
             # For Copilot: this message is informational only. Enforcement happens via the preToolUse
             # hook (cx_check.sh/cx_check.py) on the next file operation — that hook blocks the action
             # and drives the agent to install/upgrade cx. The MCP reconnects after /restart.
             case "$_CXRUN_MCP_REASON" in
                 below)
-                    printf 'cx v%s is below the required v%s. The security hook will prompt you to upgrade automatically on your next file edit, or run /checkmarx-cli-setup now to upgrade immediately.\n' \
+                    printf 'cx v%s is below the required v%s. The security hook will prompt you to upgrade automatically on your next file edit, or run /cx-cli-setup now to upgrade immediately.\n' \
                         "$_CXRUN_MCP_HAVE" "$_CXRUN_MCP_MIN" >&2
                     ;;
                 incapable)
-                    printf 'cx v%s is missing the MCP capability. The security hook will prompt you to upgrade automatically on your next file edit, or run /checkmarx-cli-setup now to upgrade immediately.\n' \
+                    printf 'cx v%s is missing the MCP capability. The security hook will prompt you to upgrade automatically on your next file edit, or run /cx-cli-setup now to upgrade immediately.\n' \
                         "$_CXRUN_MCP_HAVE" >&2
                     ;;
                 unrunnable)
-                    printf 'cx CLI could not be run. The security hook will prompt you to reinstall cx automatically on your next file edit, or run /checkmarx-cli-setup now to reinstall immediately.\n' >&2
+                    printf 'cx CLI could not be run. The security hook will prompt you to reinstall cx automatically on your next file edit, or run /cx-cli-setup now to reinstall immediately.\n' >&2
                     ;;
                 *)
-                    printf 'MCP not connected (%s). The security hook will guide you automatically on your next file edit, or run /checkmarx-cli-setup now.\n' \
+                    printf 'MCP not connected (%s). The security hook will guide you automatically on your next file edit, or run /cx-cli-setup now.\n' \
                         "$_CXRUN_MCP_REASON" >&2
                     ;;
             esac
@@ -226,7 +238,7 @@ if [ -n "$CX_RESOLVED" ]; then
             # CX_BINARY-pinned denial. Say so explicitly instead of leaving a confusing "I upgraded
             # but it's still broken" loop.
             if [ "$_CX_RESOLVED_TIER" = "binary" ]; then
-                printf 'checkmarx-devassist: Note: CX_BINARY is pinned to this exact binary and takes priority over the canonical store, so running the bootstrap will NOT fix this. Unset CX_BINARY, replace the binary at that path, or repoint CX_BINARY at the canonical store after upgrading.\n' >&2
+                printf 'cx-devassist: Note: CX_BINARY is pinned to this exact binary and takes priority over the canonical store, so running the bootstrap will NOT fix this. Unset CX_BINARY, replace the binary at that path, or repoint CX_BINARY at the canonical store after upgrading.\n' >&2
             fi
             exit 1
         fi
@@ -263,11 +275,11 @@ case "${1:-} ${2:-}" in
         # reads the nested hookSpecificOutput wrapper. Emit the correct shape per client.
         case "$*" in
             *copilot-cli*)
-                printf '{"permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: cx CLI not found (not in CX_BINARY, canonical store, or PATH). This operation is BLOCKED fail-closed. Run /checkmarx-cli-setup to install cx, then retry."}\n'
+                printf '{"permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: cx CLI not found (not in CX_BINARY, canonical store, or PATH). This operation is BLOCKED fail-closed. Run /cx-cli-setup to install cx, then retry."}\n'
                 ;;
             *)
                 cat <<'JSON'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.","additionalContext":"Run /checkmarx-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. All agent actions remain blocked until cx is available."}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The Checkmarx security scanner could not run: the cx CLI could not be resolved (not found via CX_BINARY, the canonical store, or PATH). This operation is BLOCKED fail-closed.","additionalContext":"Run /cx-cli-setup to install and authenticate the cx CLI, then retry. The gate resolves cx from the canonical store (%LOCALAPPDATA%\\Checkmarx\\cx\\cx.exe on Windows, ~/.checkmarx/bin/cx on Unix) by absolute path — this deny means it could not be found there or on PATH. All agent actions remain blocked until cx is available."}}
 JSON
                 ;;
         esac
@@ -280,15 +292,10 @@ JSON
         ;;
     *)
         if [ "$_CXRUN_MCP" = 1 ]; then
-            _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
-            for _CXRUN_PY in python3 python; do
-                command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
-                "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" mcp_connect \
-                    "result=denied" "reason_code=cx_absent" >/dev/null 2>&1 && break
-            done
-            printf 'cx CLI is not installed. The security hook will prompt you to install cx automatically on your next file edit, or run /checkmarx-cli-setup now to install immediately.\n' >&2
+            _cxrun_log mcp_connect "result=denied" "reason_code=cx_absent"
+            printf 'cx CLI is not installed. The security hook will prompt you to install cx automatically on your next file edit, or run /cx-cli-setup now to install immediately.\n' >&2
         else
-            printf 'checkmarx-devassist: cx CLI not found (looked at CX_BINARY, the canonical store, and PATH). Run /checkmarx-cli-setup to install it.\n' >&2
+            printf 'cx-devassist: cx CLI not found (looked at CX_BINARY, the canonical store, and PATH). Run /cx-cli-setup to install it.\n' >&2
         fi
         exit 1
         ;;

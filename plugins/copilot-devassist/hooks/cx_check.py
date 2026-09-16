@@ -880,14 +880,14 @@ def _oauth_recovery_bullet(cfg, history=None):
             "recent first; an \"Other\" option lets the developer type a different URL + "
             "tenant instead -- and do NOT run any login until the developer explicitly picks one "
             "(they may want a different tenant this time). If they pick \"Other\", ask for the "
-            "URL/tenant per the checkmarx-cli-setup skill's oauth.md Question 2 (free-text form) -- NEVER "
+            "URL/tenant per the cx-cli-setup skill's oauth.md Question 2 (free-text form) -- NEVER "
             "guess or default values that are not listed. Ready-to-run command for each:" + pairs
         )
     cmd = _cx_recovery_command_str("auth login --base-auth-uri <url> --tenant <tenant>")
     return _OAUTH_BULLET_LEAD + (
         "Only AFTER OAuth is chosen, ask for the "
         "URL/tenant -- NEVER guess or default the --base-auth-uri or --tenant values (e.g. do not try "
-        "'iam.checkmarx.net' or a tenant of 'checkmarx') -- ask the developer, per the checkmarx-cli-setup "
+        "'iam.checkmarx.net' or a tenant of 'checkmarx') -- ask the developer, per the cx-cli-setup "
         "skill's oauth.md Question 2. Regional URL examples: US https://ast.checkmarx.net, "
         "US2 https://us.ast.checkmarx.net, EU https://eu.ast.checkmarx.net, "
         "ANZ https://anz.ast.checkmarx.net, India https://ind.ast.checkmarx.net, or their on-prem "
@@ -1626,12 +1626,12 @@ def cx_check():
         _deny(
             reason=(
                 "The Checkmarx CLI (cx) is not installed. Security scanning cannot run, so this "
-                "operation is BLOCKED. Run /checkmarx-cli-setup to install and authenticate it, then retry."
+                "operation is BLOCKED. Run /cx-cli-setup to install and authenticate it, then retry."
             ),
             context=(
                 "cx CLI is not installed on this machine (not found via CX_BINARY, the canonical "
                 "store, or PATH). All agent actions are blocked fail-closed until it is installed and "
-                "authenticated. IMMEDIATELY invoke the checkmarx-cli-setup skill (via /checkmarx-cli-setup). "
+                "authenticated. IMMEDIATELY invoke the cx-cli-setup skill (via /cx-cli-setup). "
                 + _install_instruction
             ),
             reason_code="cx_absent",
@@ -1651,7 +1651,7 @@ def cx_check():
         min_ver = ".".join(str(n) for n in _load_min_version())
         _upgrade_instruction = (
             _bootstrap_copilot_cli_instruction("upgrade") if _COPILOT_CLI_MODE else
-            "Invoke /checkmarx-cli-setup (Phase 1b — Upgrade). To self-upgrade now, run "
+            "Invoke /cx-cli-setup (Phase 1b — Upgrade). To self-upgrade now, run "
             "the plugin's bundled bootstrap by its resolved absolute path:\n    {0}{1}".format(
                 _bootstrap_command_str("upgrade"), _cx_binary_pin_note(effective_tier)
             )
@@ -1673,7 +1673,7 @@ def cx_check():
     if state == "unrunnable":
         _reinstall_instruction = (
             _bootstrap_copilot_cli_instruction("install") if _COPILOT_CLI_MODE else
-            "Invoke /checkmarx-cli-setup. To reinstall now, run the plugin's bundled bootstrap "
+            "Invoke /cx-cli-setup. To reinstall now, run the plugin's bundled bootstrap "
             "by its resolved absolute path:\n    " + _bootstrap_command_str("install")
             + _cx_binary_pin_note(effective_tier)
         )
@@ -1762,15 +1762,15 @@ def cx_check():
         _deny(
             reason=(
                 "The Checkmarx CLI (cx) could not authenticate to Checkmarx One. If you JUST signed in, "
-                "the backend may have been slow — retry the operation once. Otherwise run /checkmarx-cli-setup "
+                "the backend may have been slow — retry the operation once. Otherwise run /cx-cli-setup "
                 "to (re)authenticate, then retry."
             ),
             context=(
                 "cx auth validate did not succeed within the gate's timeout — cx is either not "
                 "authenticated (credentials missing or expired) OR the backend was slow/unreachable, so "
                 "a valid session that simply timed out looks the same here. Retry once; if it persists, "
-                "invoke the checkmarx-cli-setup skill "
-                "(/checkmarx-cli-setup) for the guided flow. ASK THE DEVELOPER WHICH METHOD FIRST — do not "
+                "invoke the cx-cli-setup skill "
+                "(/cx-cli-setup) for the guided flow. ASK THE DEVELOPER WHICH METHOD FIRST — do not "
                 "assume OAuth and do not ask for a URL/tenant before this choice is made. There are two "
                 "ways to authenticate, and they differ in who runs them:\n"
                 "- API key (ask this first / simplest): the DEVELOPER runs this in their own terminal "
@@ -1801,7 +1801,7 @@ def cx_check():
     #     extracts an API key and otherwise runs in SILENT PASS-THROUGH (allow everything, NO scan).
     #     A validate-OK-but-scanner-pass-through state is therefore a silent fail-OPEN — exactly the
     #     gap an OAuth `cx auth login` opens. Treat it as NOT authenticated for scanning and fail
-    #     CLOSED with the same visible /checkmarx-cli-setup message. UNKNOWN (probe error/timeout) defers to
+    #     CLOSED with the same visible /cx-cli-setup message. UNKNOWN (probe error/timeout) defers to
     #     the real stage-2 scanner — no worse than before — so a flaky probe can't over-block a
     #     genuinely-authenticated user. (Carve-outs in steps 1/2/5 already returned, so the bootstrap,
     #     read-only commands, and `cx auth`/`cx configure` recovery commands never reach this probe.)
@@ -1855,7 +1855,7 @@ def cx_check():
                 "`cx auth validate` passed, but `cx hooks check-auth` reports the scanner is not "
                 "authenticated — the native scanner could not authenticate with the current "
                 "stored credential (stale/expired, or the backend was unreachable) and would silently "
-                "allow everything UNSCANNED. Re-authenticate via the checkmarx-cli-setup skill (/checkmarx-cli-setup). "
+                "allow everything UNSCANNED. Re-authenticate via the cx-cli-setup skill (/cx-cli-setup). "
                 "ASK THE DEVELOPER WHICH METHOD FIRST — do not assume OAuth and do not ask for a "
                 "URL/tenant before this choice is made.\n"
                 "- API key (ask this first / simplest): the DEVELOPER runs this in their own terminal "
@@ -1890,7 +1890,7 @@ def _fail_closed_on_crash():
                 "permissionDecision": "deny",
                 "permissionDecisionReason": (
                     "The Checkmarx security gate hit an internal error and could not evaluate "
-                    "this action, so it is BLOCKED fail-closed. Re-run /checkmarx-cli-setup, or set "
+                    "this action, so it is BLOCKED fail-closed. Re-run /cx-cli-setup, or set "
                     "CX_ALLOW_UNSCANNED=1 to bypass scanning (audited)."
                 ),
             }))
@@ -1905,7 +1905,7 @@ def _fail_closed_on_crash():
                     ),
                     "additionalContext": (
                         "An unexpected error occurred inside cx_check.py. All agent actions remain "
-                        "blocked until it is resolved. Re-run /checkmarx-cli-setup, or set CX_ALLOW_UNSCANNED=1 "
+                        "blocked until it is resolved. Re-run /cx-cli-setup, or set CX_ALLOW_UNSCANNED=1 "
                         "to bypass scanning (audited)."
                     ),
                 }

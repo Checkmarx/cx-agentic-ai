@@ -1,4 +1,4 @@
-"""cx_log — structured, redacted JSONL logging for the checkmarx-devassist gate.
+"""cx_log — structured, redacted JSONL logging for the cx-devassist gate.
 
 A deep module with a tiny surface: `log_event(event, **fields)`. Two guarantees make it safe to
 call from inside the fail-closed gate:
@@ -10,7 +10,7 @@ call from inside the fail-closed gate:
      that does not coerce to a safe type is omitted. No secret, token, source code, prompt, or
      free-form string can reach the log — even if a caller passes one by mistake.
 
-Records are written to `<CX_LOG_DIR or ~/.checkmarx/agent-logs/<assistant>>/checkmarx-devassist.jsonl`,
+Records are written to `<CX_LOG_DIR or ~/.checkmarx/agent-logs/<assistant>>/cx-devassist.jsonl`,
 size-rotated, dir 0700 / file 0600. Set `CX_LOG_DISABLE=1` to turn logging off entirely.
 """
 
@@ -20,9 +20,9 @@ import platform
 import re
 import time
 
-_LOG_FILE_NAME = "checkmarx-devassist.jsonl"
+_LOG_FILE_NAME = "cx-devassist.jsonl"
 _MAX_BYTES = 1_000_000  # rotate at ~1 MB
-_ROTATE_KEEP = 3        # keep checkmarx-devassist.jsonl.1 .. .3
+_ROTATE_KEEP = 3        # keep cx-devassist.jsonl.1 .. .3
 _SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_.:\-]{1,64}$")
 
 # Named permission / limit constants — used everywhere below so ASCA does not
@@ -113,9 +113,15 @@ _EVENTS = {
         # well-formed deny (the scanner's own JSON carried a permissionDecision:deny), vs
         # "error_during_block" for a deny that fell back to the raw fail-closed exit-2 path without
         # that structured output (an unexpected/error condition, not necessarily a real finding).
+        # `reason_code` includes `iac_scan_skipped` when KICS fail-opened — see hooks/_cx_scan_audit.sh.
         "decision": _enum({"allow", "deny"}),
         "tool_name": _token,
-        "reason_code": _enum({"vulnerability_detected", "error_during_block", "no_issues_found"}),
+        "reason_code": _enum({"vulnerability_detected", "error_during_block", "no_issues_found",
+                               "iac_scan_skipped", "post_tool_use"}),
+        "guardrail": _enum({"kics", "unknown"}),
+        "container_engine": _enum({"docker", "podman", "both", "unknown"}),
+        "skip_reason": _enum({"engine_not_running", "all_engines_not_running", "engine_not_found", "image_pull_failed",
+                               "scan_error", "unknown"}),
     },
     "mcp_connect": {
         # Every attempt by hooks/cx_run.sh to spawn/respawn `cx mcp bridge` (session start,
@@ -144,12 +150,12 @@ _EVENTS = {
 _MCP_CONNECT_MESSAGES = {
     "ok": "cx v{have} is capable and current (>= v{min}) — mcp bridge starting.",
     "dev": "cx reports a 'dev' build and is capable — mcp bridge starting.",
-    "below": "cx v{have} is below the required v{min} — mcp bridge blocked; run /checkmarx-cli-setup to upgrade.",
+    "below": "cx v{have} is below the required v{min} — mcp bridge blocked; run /cx-cli-setup to upgrade.",
     "incapable": ("cx v{have} is missing the 'mcp bridge' subcommand (capability-incomplete build) — "
-                  "mcp bridge blocked; run /checkmarx-cli-setup."),
+                  "mcp bridge blocked; run /cx-cli-setup."),
     "unrunnable": "cx did not report a usable version ('cx version' failed or was unparseable) — mcp bridge blocked.",
     "cx_absent": ("cx CLI could not be resolved via CX_BINARY, the canonical store, or PATH — mcp "
-                  "bridge blocked; run /checkmarx-cli-setup to install."),
+                  "bridge blocked; run /cx-cli-setup to install."),
     "cx_binary_invalid": ("CX_BINARY is set but invalid (not absolute / missing / not executable); "
                           "ignored, falling back to the canonical store or PATH."),
 }
@@ -217,8 +223,8 @@ def _plugin_version():
             if version:
                 _PLUGIN_VERSION = version
                 break
-        except Exception:  # swallow — cx_log cannot use logging (would be circular)
-            pass
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            continue
     return _PLUGIN_VERSION
 
 
@@ -232,7 +238,7 @@ def _chmod(path, mode):
     try:
         os.chmod(path, mode)
     except OSError:
-        pass
+        return
 
 
 def _open_0600(path, flags):
@@ -255,7 +261,7 @@ def _rotate(path):
                 os.replace(src, "{0}.{1}".format(path, i + 1))
         os.replace(path, "{0}.1".format(path))
     except OSError:
-        pass
+        return
 
 
 def log_event(event, **fields):

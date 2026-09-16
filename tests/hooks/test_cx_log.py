@@ -34,7 +34,7 @@ class _Base(unittest.TestCase):
 
     @property
     def logfile(self):
-        return os.path.join(self.dir, "checkmarx-devassist.jsonl")
+        return os.path.join(self.dir, cx_log._LOG_FILE_NAME)
 
     def raw(self):
         with open(self.logfile, encoding="utf-8") as f:
@@ -134,6 +134,47 @@ class TestRedaction(_Base):
         rec = self.records()[0]
         self.assertNotIn("exit_code", rec)
 
+    def test_scan_decision_iac_scan_skipped_allowlist(self):
+        cx_log.log_event(
+            "scan_decision",
+            decision="allow",
+            tool_name="Write",
+            reason_code="iac_scan_skipped",
+            guardrail="kics",
+            container_engine="docker",
+            skip_reason="engine_not_running",
+            user_message="Checkmarx IaC guardrail skipped Dockerfile: container engine 'docker' is installed but not running",
+        )
+        rec = self.records()[0]
+        self.assertEqual(rec["reason_code"], "iac_scan_skipped")
+        self.assertEqual(rec["guardrail"], "kics")
+        self.assertEqual(rec["container_engine"], "docker")
+        self.assertEqual(rec["skip_reason"], "engine_not_running")
+        self.assertNotIn("user_message", rec)
+        self.assertNotIn("installed but not running", self.raw())
+
+    def test_scan_decision_iac_scan_skipped_all_engines_not_running(self):
+        cx_log.log_event(
+            "scan_decision",
+            decision="allow",
+            tool_name="Write",
+            reason_code="iac_scan_skipped",
+            guardrail="kics",
+            container_engine="both",
+            skip_reason="all_engines_not_running",
+            user_message=(
+                "Checkmarx IaC guardrail skipped Dockerfile: container engines 'docker' and "
+                "'podman' are installed but not running"
+            ),
+        )
+        rec = self.records()[0]
+        self.assertEqual(rec["reason_code"], "iac_scan_skipped")
+        self.assertEqual(rec["guardrail"], "kics")
+        self.assertEqual(rec["container_engine"], "both")
+        self.assertEqual(rec["skip_reason"], "all_engines_not_running")
+        self.assertNotIn("user_message", rec)
+        self.assertNotIn("docker and", self.raw())
+
     def test_scan_decision_unknown_value_coerces_to_other(self):
         cx_log.log_event("scan_decision", decision="maybe", tool_name="Write")
         rec = self.records()[0]
@@ -153,7 +194,7 @@ class TestRedaction(_Base):
         self.assertEqual(rec["version_min"], "2.3.54")
         self.assertEqual(
             rec["message"],
-            "cx v2.1.0 is below the required v2.3.54 — mcp bridge blocked; run /checkmarx-cli-setup to upgrade.")
+            "cx v2.1.0 is below the required v2.3.54 — mcp bridge blocked; run /cx-cli-setup to upgrade.")
 
     def test_mcp_connect_ignores_caller_supplied_message(self):
         # `message` is not in the mcp_connect schema at all — a caller passing one (accidentally or

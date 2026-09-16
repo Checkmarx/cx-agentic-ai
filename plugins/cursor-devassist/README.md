@@ -1,7 +1,7 @@
 # Checkmarx DevAssist for Cursor (`cx-devassist-cursor`)
 
 A **fail-closed security gate** for **Cursor**, backed by
-[Checkmarx CxOne](https://checkmarx.com/). Plugin id `cx-devassist` · version `1.0.0` · Apache-2.0.
+[Checkmarx CxOne](https://checkmarx.com/). Plugin id `cx-devassist` · version `1.0.1` · Apache-2.0.
 
 Before Cursor writes or edits a file the Checkmarx engines can scan — source code, IaC, or a dependency
 manifest — the plugin asks the `cx` CLI to scan the proposed content **before the write lands**, and
@@ -42,8 +42,8 @@ to stop — it cannot block the agent from stopping.
    ```
    then restart the CLI session (`/exit`, then `agent` again) so the hooks, rules, and MCP bridge load.
 3. **Start coding.** Every scannable file write and every Checkmarx MCP call is now scanned
-   automatically; `/cx-devassist-asca` and `/cx-devassist-sca` are available on demand for source files
-   and dependency manifests.
+   automatically; `/cx-devassist-asca`, `/cx-devassist-sca`, and `/cx-devassist-kics` are available on
+   demand for source files, dependency manifests, and IaC files.
 
 Already have `cx` installed and hooks wired elsewhere? Just authenticate: run `/cx-cli-setup` any time
 `cx` is missing, outdated, or a hook denies with an auth error.
@@ -220,7 +220,8 @@ so `cx auth login` cannot leak its token). Everything outside this set is gated 
 │   ├── cx-cli-setup/            # guided cx install + authentication (router + references/)
 │   ├── cx-install-wiring/       # on-demand CLI-only: hooks + rules → auto-continues into cx-cli-setup
 │   ├── cx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
-│   └── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
+│   ├── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
+│   └── cx-devassist-kics/       # on-demand IaC (KICS) scan + remediation for Dockerfile/Terraform/K8s YAML
 └── examples/
     └── cursor-mcp-bridge.json   # manual MCP config example
 ```
@@ -229,15 +230,18 @@ so `cx auth login` cannot leak its token). Everything outside this set is gated 
 
 ### On-demand scanning (skills)
 
-Beyond the automatic hook gates, two skills scan on request and remediate via the Checkmarx MCP —
-invoked with `/cx-devassist-asca` / `/cx-devassist-sca` in chat, or autonomously by the agent:
+Beyond the automatic hook gates, three skills scan on request and remediate via the Checkmarx MCP —
+invoked with `/cx-devassist-asca` / `/cx-devassist-sca` / `/cx-devassist-kics` in chat, or autonomously
+by the agent:
 
 | Ask | Skill | Engine |
 |---|---|---|
 | "scan this file" / "check app.py" (source code) | `cx-devassist-asca` | SAST (ASCA) → `mcp__plugin-cx-devassist-Checkmarx__codeRemediation` |
 | "scan my dependencies" / "check package.json" (manifest/lockfile) | `cx-devassist-sca` | SCA / OSS → `mcp__plugin-cx-devassist-Checkmarx__packageRemediation` |
+| "scan this Dockerfile" / "check main.tf" (IaC file) | `cx-devassist-kics` | IaC (KICS) → `mcp__plugin-cx-devassist-Checkmarx__codeRemediation` |
 
-A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA.
+A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA;
+an IaC file (Dockerfile, `.tf`, `.yaml`/`.yml`, …) → KICS.
 
 ### Setup skills (when to use which)
 

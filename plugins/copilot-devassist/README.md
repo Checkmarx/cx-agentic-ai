@@ -51,7 +51,7 @@ When a finding needs fixing, remediation runs through the **Checkmarx MCP server
 declared in `.mcp.json` and started automatically by Copilot CLI — no manual registration step. It
 exposes code- and package-remediation tools (`mcp__Checkmarx__codeRemediation`, …) that the agent calls
 directly. A single `cx` sign-in covers both the CLI and the MCP. See
-[`skills/checkmarx-cli-setup/references/mcp.md`](skills/checkmarx-cli-setup/references/mcp.md).
+[`skills/cx-cli-setup/references/mcp.md`](skills/cx-cli-setup/references/mcp.md).
 
 ---
 
@@ -72,7 +72,7 @@ hardened against the cross-OS holes that would otherwise let an unscanned action
   blocked.
 
 If cx is missing, below the minimum version, missing the required subcommands (`incapable`), or
-unauthenticated, the gate denies with a clear, actionable message pointing at `/checkmarx-cli-setup`.
+unauthenticated, the gate denies with a clear, actionable message pointing at `/cx-cli-setup`.
 
 **What that deny covers:** writes to [scannable files](#scannable-file-types). **What it does not:**
 shell commands — ever. So a developer whose cx is broken can still run `git`, `npm`, `mvn`, `pytest`
@@ -132,30 +132,33 @@ plugins/copilot-devassist/
 │   ├── cx-path-probe.sh         # first writable on-PATH directory
 │   └── cx-min-version           # minimum cx version (numeric floor)
 └── skills/
-    ├── checkmarx-cli-setup/            # guided cx install + authentication (router + references/)
-    ├── checkmarx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
-    └── checkmarx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
+    ├── cx-cli-setup/            # guided cx install + authentication (router + references/)
+    ├── cx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
+    ├── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
+    └── cx-devassist-kics/       # on-demand IaC (KICS) scan + remediation for Dockerfile/Terraform/K8s YAML
 ```
 
 > Tests live at the **repo root** (`tests/`), outside the shipped plugin, so they aren't distributed.
 
 ### On-demand scanning (skills)
 
-Beyond the automatic PreToolUse gate, two skills scan on request and remediate via the Checkmarx MCP:
+Beyond the automatic PreToolUse gate, three skills scan on request and remediate via the Checkmarx MCP:
 
 | Ask | Skill | Engine |
 |---|---|---|
-| "scan this file" / "check app.py" (source code) | `checkmarx-devassist-asca` | SAST (ASCA) → `mcp__Checkmarx__codeRemediation` |
-| "scan my dependencies" / "check package.json" (manifest/lockfile) | `checkmarx-devassist-sca` | SCA / OSS → `mcp__Checkmarx__packageRemediation` |
+| "scan this file" / "check app.py" (source code) | `cx-devassist-asca` | SAST (ASCA) → `mcp__Checkmarx__codeRemediation` |
+| "scan my dependencies" / "check package.json" (manifest/lockfile) | `cx-devassist-sca` | SCA / OSS → `mcp__Checkmarx__packageRemediation` |
+| "scan this Dockerfile" / "check main.tf" (IaC file) | `cx-devassist-kics` | IaC (KICS) → `mcp__Checkmarx__codeRemediation` |
 | whole project / cloud-scale scan | Checkmarx MCP (Cx1 cloud) tools | — |
 
-A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA.
+A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA;
+an IaC file (Dockerfile, `.tf`, `.yaml`/`.yml`, …) → KICS.
 
 ### Admin onboarding pre-fill (optional)
 
 An administrator can pre-seed the Checkmarx One **URL** and **tenant** for browser (OAuth) sign-in by
 editing `config/cx-onboarding.properties`. When set (and valid), the values are embedded straight into
-the gate's `cx auth login` recovery command and the `checkmarx-cli-setup` skill skips the URL/tenant
+the gate's `cx auth login` recovery command and the `cx-cli-setup` skill skips the URL/tenant
 question. Edit the file in your **forked / internal marketplace copy** (the reviewed, versioned
 artifact) — not in an end-user's live install, which is overwritten on plugin update. Values are
 strictly validated (https-only host for the URL; a shell-inert charset for the tenant); an invalid value
@@ -205,7 +208,7 @@ proceeds **UNSCANNED**. Without Git for Windows, Copilot CLI's own Bash tool fal
 and the `sh`-based gate can't launch either, so **Git for Windows is a hard prerequisite** — install and
 verify it *before* relying on the gate.
 
-Then the **`cx` CLI** itself, which the bundled **`checkmarx-cli-setup`** skill installs (with download
+Then the **`cx` CLI** itself, which the bundled **`cx-cli-setup`** skill installs (with download
 checksum verification), puts on PATH, and authenticates (API key or OAuth). The minimum version is a
 numeric floor in `scripts/cx-min-version`; the real capability decision is a runtime probe (the
 `cx mcp bridge` and `cx hooks copilot-cli-*` subcommands must all respond to `--help`).
@@ -218,7 +221,7 @@ numeric floor in `scripts/cx-min-version`; the real capability decision is a run
 
 ```
 /plugin marketplace add https://github.com/Checkmarx/cx-agentic-ai
-/plugin install checkmarx-devassist@checkmarx-devassist-marketplace
+/plugin install cx-devassist@cx-devassist-marketplace
 ```
 
 After updating hook scripts, reload them into the session:
@@ -228,7 +231,7 @@ After updating hook scripts, reload them into the session:
 ```
 
 On first use the gate will detect that `cx` is missing and walk you through installing and
-authenticating it via the **`checkmarx-cli-setup`** skill (`/checkmarx-cli-setup`).
+authenticating it via the **`cx-cli-setup`** skill (`/cx-cli-setup`).
 
 ---
 
@@ -237,13 +240,13 @@ authenticating it via the **`checkmarx-cli-setup`** skill (`/checkmarx-cli-setup
 Update the plugin to the latest version published on the marketplace:
 
 ```
-/plugin update checkmarx-devassist@checkmarx-devassist-marketplace
+/plugin update cx-devassist@cx-devassist-marketplace
 ```
 
 Update the marketplace listing itself (picks up newly published plugin versions):
 
 ```
-/plugin marketplace update checkmarx-devassist-marketplace
+/plugin marketplace update cx-devassist-marketplace
 ```
 
 After updating hook scripts, reload them into the session:
@@ -261,13 +264,13 @@ After updating hook scripts, reload them into the session:
 Remove just the plugin (keeps the marketplace registered, so it can be reinstalled later):
 
 ```
-/plugin uninstall checkmarx-devassist@checkmarx-devassist-marketplace
+/plugin uninstall cx-devassist@cx-devassist-marketplace
 ```
 
 Remove the marketplace entirely (also removes any plugins installed from it):
 
 ```
-/plugin marketplace remove checkmarx-devassist-marketplace
+/plugin marketplace remove cx-devassist-marketplace
 ```
 
 Uninstalling the plugin removes the hook wiring and skills, but does **not** remove the `cx` CLI itself
@@ -311,7 +314,7 @@ All optional — sensible defaults apply.
 ## Privacy & logging
 
 The gate writes one redacted JSONL record per decision to
-`~/.checkmarx/agent-logs/copilot-cli/checkmarx-devassist.jsonl` — both the stage-1 readiness gate's own
+`~/.checkmarx/agent-logs/copilot-cli/cx-devassist.jsonl` — both the stage-1 readiness gate's own
 allow/deny (`gate_decision`) and the stage-2 native scanner's allow/deny (`scan_decision`), so a tool
 call blocked because of an actual finding is recorded, not just a blocked-because-cx-isn't-ready
 decision. Logging uses a **redaction allowlist**: each event declares the exact keys it may write and a
