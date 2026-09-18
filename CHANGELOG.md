@@ -4,6 +4,35 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 
 ---
 
+### Changed in codex-devassist v1.0.1 (18-09-2026)
+
+#### Added — on-demand KICS (IaC) scanning
+
+- New `cx-devassist-kics` skill scans and remediates Infrastructure-as-Code files — Dockerfile,
+  Terraform, Kubernetes YAML, `.auto.tfvars`, `.terraform.tfvars`, `.proto`, and similar templates —
+  via `cx scan iac-realtime` and the Checkmarx MCP `codeRemediation` tool (`type: "iac"`).
+- Routing guidance in the skill and README: source code → `cx-devassist-asca`; dependency
+  manifests → `cx-devassist-sca`; IaC → `cx-devassist-kics`.
+- Brings the Codex CLI plugin to parity with the KICS support already shipped for Claude Code,
+  Copilot CLI, and Cursor in `cx-devassist v1.0.2`.
+
+#### Added — structured audit for KICS fail-open skips
+
+When KICS cannot run because a container engine is missing, not running, or an image pull fails,
+ast-cli fail-opens the guardrail and surfaces a user message on stderr. The hook now records that
+skip as a redacted `scan_decision` instead of silently allowing with no trace:
+
+- New `hooks/_cx_scan_audit.sh` — parses the native scanner's stdout/stderr and maps KICS skip notes
+  to allowlisted enums; never logs the raw message text.
+- `scan_decision` events now accept `reason_code=iac_scan_skipped` plus optional `guardrail`,
+  `container_engine` (`docker`, `podman`, `both`, `unknown`), and `skip_reason`
+  (`engine_not_running`, `all_engines_not_running`, `engine_not_found`, `image_pull_failed`,
+  `scan_error`, `unknown`).
+- `hooks/cx_run.sh` sources the audit helper after stage-2 capture and passes the derived fields to
+  `cx_log.py`.
+
+---
+
 ### Added in gemini-cli-devassist v1.0.0 (03-09-2026)
 
 #### Gemini CLI extension
