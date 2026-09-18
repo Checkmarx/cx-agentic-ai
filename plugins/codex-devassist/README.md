@@ -147,11 +147,12 @@ Checkmarx Realtime scanners run automatically on every `apply_patch` call and Ch
 Codex CLI performs (shell commands are not gated — see [How it works](#how-it-works)). In addition, you
 can manually run the scanners by asking Codex to scan a file or check your dependencies. When you ask
 to scan a source code file, the ASCA scanner runs. When you ask to scan a manifest file, the
-OSS-Realtime scanner runs.
+OSS-Realtime scanner runs. When you ask to scan an IaC file (Dockerfile, `.tf`, Kubernetes YAML, …), the
+KICS scanner runs.
 
-You can run the ASCA and OSS scanners explicitly by calling the dedicated skills `$cx-devassist-asca`
-and `$cx-devassist-sca` respectively (Codex CLI invokes skills with a **`$name`** prefix, not a
-`/slash-command` or `namespace:skill-name`).
+You can run the ASCA, OSS, and KICS scanners explicitly by calling the dedicated skills
+`$cx-devassist-asca`, `$cx-devassist-sca`, and `$cx-devassist-kics` respectively (Codex CLI invokes
+skills with a **`$name`** prefix, not a `/slash-command` or `namespace:skill-name`).
 
 **Skill discovery caveat:** Codex CLI's confirmed skill-discovery paths are `.agents/skills` (repo,
 user, and admin scope) — not a plugin-relative `skills/` folder the way Claude Code and Copilot CLI
@@ -319,7 +320,8 @@ plugins/codex-devassist/
 └── skills/
     ├── cx-cli-setup/            # guided cx install + authentication (router + references/)
     ├── cx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
-    └── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
+    ├── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
+    └── cx-devassist-kics/       # on-demand IaC (KICS) scan + remediation for Dockerfile/Terraform/K8s YAML
 ```
 
 > Tests live at the **repo root** (`tests/`), outside the shipped plugin, so they aren't distributed.
