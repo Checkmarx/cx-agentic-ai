@@ -9,8 +9,7 @@
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/Checkmarx/cx-agentic-ai.git",
-        "path": "plugins/codex-devassist",
-        "ref": "feature/codex"
+        "path": "plugins/codex-devassist"
       },
       "policy": {
         "installation": "AVAILABLE",
