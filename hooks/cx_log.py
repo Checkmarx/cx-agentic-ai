@@ -15,15 +15,26 @@ size-rotated, dir 0700 / file 0600. Set `CX_LOG_DISABLE=1` to turn logging off e
 """
 
 import json
+import logging
 import os
 import platform
 import re
+import sys
 import time
 
 _LOG_FILE_NAME = "checkmarx-devassist.jsonl"
 _MAX_BYTES = 1_000_000  # rotate at ~1 MB
 _ROTATE_KEEP = 3        # keep checkmarx-devassist.jsonl.1 .. .3
 _SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_.:\-]{1,64}$")
+
+# Stderr-only logger — never calls log_event, so it cannot recurse into the gate audit path.
+_DIAG_LOG = logging.getLogger("cx_devassist.cx_log")
+if not _DIAG_LOG.handlers:
+    _handler = logging.StreamHandler(sys.stderr)
+    _handler.setFormatter(logging.Formatter("%(levelname)s cx_log: %(message)s"))
+    _DIAG_LOG.addHandler(_handler)
+    _DIAG_LOG.propagate = False
+    _DIAG_LOG.setLevel(logging.WARNING)
 
 # Named permission / limit constants — used everywhere below so ASCA does not
 # flag bare octal literals as "magic numbers" (they are intentional POSIX constants).
@@ -111,9 +122,17 @@ _EVENTS = {
         # well-formed deny (the scanner's own JSON carried a permissionDecision:deny), vs
         # "error_during_block" for a deny that fell back to the raw fail-closed exit-2 path without
         # that structured output (an unexpected/error condition, not necessarily a real finding).
+        # `reason_code` includes `iac_scan_skipped` when KICS fail-opened (container engine missing,
+        # not running, image pull failure, etc.) — see hooks/_cx_scan_audit.sh. Optional `guardrail`,
+        # `container_engine`, and `skip_reason` accompany that case; never log the skip note text.
         "decision": _enum({"allow", "deny"}),
         "tool_name": _token,
-        "reason_code": _enum({"vulnerability_detected", "error_during_block", "no_issues_found"}),
+        "reason_code": _enum({"vulnerability_detected", "error_during_block", "no_issues_found",
+                               "iac_scan_skipped", "post_tool_use"}),
+        "guardrail": _enum({"kics", "unknown"}),
+        "container_engine": _enum({"docker", "podman", "both", "unknown"}),
+        "skip_reason": _enum({"engine_not_running", "all_engines_not_running", "engine_not_found", "image_pull_failed",
+                               "scan_error", "unknown"}),
     },
     "mcp_connect": {
         # Every attempt by hooks/cx_run.sh to spawn/respawn `cx mcp bridge` (session start,
@@ -212,8 +231,8 @@ def _plugin_version():
             if version:
                 _PLUGIN_VERSION = version
                 break
-        except Exception:  # swallow — cx_log cannot use logging (would be circular)
-            pass
+        except Exception as exc:
+            _DIAG_LOG.debug("plugin version read failed for %s: %s", rel, exc)
     return _PLUGIN_VERSION
 
 
@@ -226,8 +245,8 @@ def _chmod(path, mode):
         return
     try:
         os.chmod(path, mode)
-    except OSError:
-        pass
+    except OSError as exc:
+        _DIAG_LOG.warning("chmod failed for %s: %s", path, exc)
 
 
 def _open_0600(path, flags):
@@ -249,8 +268,8 @@ def _rotate(path):
             if os.path.exists(src):
                 os.replace(src, "{0}.{1}".format(path, i + 1))
         os.replace(path, "{0}.1".format(path))
-    except OSError:
-        pass
+    except OSError as exc:
+        _DIAG_LOG.warning("log rotate failed for %s: %s", path, exc)
 
 
 def log_event(event, **fields):
@@ -291,8 +310,9 @@ def log_event(event, **fields):
         with open(path, "a", encoding="utf-8", newline="\n", opener=_open_0600) as f:
             f.write(line + "\n")
         _chmod(path, _FILE_MODE)
-    except Exception:
+    except Exception as exc:
         # Logging must NEVER break the gate.
+        _DIAG_LOG.exception("log_event failed: %s", exc)
         return
 
 
@@ -301,8 +321,6 @@ if __name__ == "__main__":
     # process passes `event key=value key=value ...` as argv, never as a shell-interpolated string,
     # so a hostile value can't reach a shell. Same guarantees as log_event: never raises, drops
     # anything not on the per-event allowlist.
-    import sys
-
     try:
         _event = sys.argv[1] if len(sys.argv) > 1 else ""
         _fields = dict(_arg.split("=", 1) for _arg in sys.argv[2:] if "=" in _arg)
@@ -315,5 +333,5 @@ if __name__ == "__main__":
             except ValueError:
                 pass
         log_event(_event, **_fields)
-    except Exception:
-        pass
+    except Exception as exc:
+        _DIAG_LOG.exception("cx_log CLI failed: %s", exc)

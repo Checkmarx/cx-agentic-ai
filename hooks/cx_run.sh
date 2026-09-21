@@ -176,8 +176,16 @@ if [ -n "$CX_RESOLVED" ]; then
         esac
         _CXRUN_TOOL=$(printf '%s' "$_CXRUN_INPUT" | sed -n 's/.*"tool_name" *: *"\([A-Za-z0-9_.:-]*\)".*/\1/p' | head -1)
 
+        # shellcheck source=_cx_scan_audit.sh
+        . "$_CXRUN_DIR/_cx_scan_audit.sh"
+        cx_scan_audit_extras "$_CXRUN_OUTPUT"
+        if [ -n "$_CXSCAN_REASON_CODE" ]; then
+            _CXRUN_REASON="$_CXSCAN_REASON_CODE"
+        fi
+        # shellcheck disable=SC2086
         _cxrun_log scan_decision \
-            "decision=$_CXRUN_DECISION" "tool_name=$_CXRUN_TOOL" "reason_code=$_CXRUN_REASON"
+            "decision=$_CXRUN_DECISION" "tool_name=$_CXRUN_TOOL" "reason_code=$_CXRUN_REASON" \
+            $_CXSCAN_LOG_EXTRAS
 
         printf '%s\n' "$_CXRUN_OUTPUT"
         # Gemini CLI: non-zero exit marks the hook FAILED (generic F12 warning) even when stdout
