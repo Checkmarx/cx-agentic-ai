@@ -59,4 +59,5 @@ If a remediation call fails with "tool not found", use `GetMcpTools` with patter
 |------|-----------|
 | SAST / ASCA fix | `mcp__plugin-cx-devassist-Checkmarx__codeRemediation` |
 | SCA / package fix | `mcp__plugin-cx-devassist-Checkmarx__packageRemediation` |
-| IaC / image fix | `mcp__plugin-cx-devassist-Checkmarx__imageRemediation` |
+| IaC fix (KICS) | `mcp__plugin-cx-devassist-Checkmarx__codeRemediation` |
+| Container image CVE fix | `mcp__plugin-cx-devassist-Checkmarx__imageRemediation` |

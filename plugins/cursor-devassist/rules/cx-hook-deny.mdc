@@ -63,7 +63,7 @@ When a Write/StrReplace/EditNotebook is blocked with ASCA findings:
 | cx not authenticated | Ask developer which auth method first (API key vs OAuth) as `agent_message` instructs; run only recovery commands until auth succeeds |
 | Fresh-login window | Wait 30–60s; **do NOT** re-run `cx auth login`; retry the original operation |
 | cx below minimum / incapable | Run bootstrap **upgrade** from `agent_message`; do not bypass |
-| KICS / IaC finding | Call `imageRemediation` per `agent_message`; fix every finding; retry write |
+| KICS / IaC finding | **Ask the user**: "An IaC misconfiguration was detected. Would you like to **remediate** it (harden the configuration via MCP) or **suppress** it (accept the risk)?" — then call `codeRemediation` or run the `ignore-vulnerability` command from `agent_message`; retry write |
 | SCA / manifest finding | **Ask the user**: "A vulnerable/malicious package was detected. Would you like to **remediate** it (upgrade/remove via MCP) or **suppress** it (accept the risk)?" — then call `packageRemediation` or follow `agent_message` steps; retry write |
 
 ## If `agent_message` is missing

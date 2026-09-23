@@ -6,3 +6,4 @@
 *.py            text eol=lf
 cx-min-version  text eol=lf
 *.properties    text eol=lf
+cx-scannable-files text eol=lf

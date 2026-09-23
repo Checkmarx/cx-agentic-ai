@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # cx-bootstrap.sh — self-install / self-upgrade the Checkmarx One `cx` CLI.
 #
-# This is the ONE command the checkmarx-devassist gate allows through while it is blocking (see
+# This is the ONE command the cx-devassist gate allows through while it is blocking (see
 # hooks/cx_check.py `_is_bootstrap_command` and hooks/cx_check.sh's shell carve-out). It is
 # whitelisted by its resolved absolute path and accepts at most one argument:
 #
@@ -39,7 +39,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Numeric floor only (capability is decided by the gate's probe, not this number). Keep IDENTICAL
 # to scripts/cx-min-version and the fallback in hooks/cx_check.py. (search marker: CX_MIN_VERSION)
-MIN_CX_VERSION_FALLBACK="2.3.58"
+MIN_CX_VERSION_FALLBACK="2.3.66"
 
 GITHUB_RELEASES="https://github.com/Checkmarx/ast-cli/releases"
 GITHUB_LATEST="$GITHUB_RELEASES/latest/download"
@@ -52,10 +52,22 @@ TMP_BASE="${TMPDIR:-${TEMP:-${TMP:-/tmp}}}"
 # place lets the next hook fire re-probe the just-installed/upgraded cx immediately.
 # Bootstrap is client-agnostic — clear caches for BOTH claude and copilot-cli so whichever client
 # fired the bootstrap sees the fresh version on its next hook call.
-_LOG_BASE="${CX_LOG_DIR:-$HOME/.checkmarx/agent-logs}"
-AGENT_LOG_DIR="$_LOG_BASE/claude"
-VERSION_CACHE_FILE="$AGENT_LOG_DIR/cx_version_cache"
-_COPILOT_VERSION_CACHE="$_LOG_BASE/copilot-cli/cx_version_cache"
+#
+# CX_LOG_DIR is a FULL path, not a base: cx_check.py's _agent_log_dir() and cx_log.py's _log_dir()
+# both return the override verbatim without appending a client leaf. Appending one here anyway
+# (the previous "$CX_LOG_DIR/claude") made the bootstrap clear a directory the gate never writes,
+# so under an override the stale cx_version_cache survived the upgrade and the gate kept reporting
+# the pre-upgrade version until the 30-minute TTL expired.
+if [[ -n "${CX_LOG_DIR:-}" ]]; then
+    AGENT_LOG_DIR="$CX_LOG_DIR"
+    VERSION_CACHE_FILE="$AGENT_LOG_DIR/cx_version_cache"
+    _COPILOT_VERSION_CACHE="$VERSION_CACHE_FILE"
+else
+    _LOG_BASE="$HOME/.checkmarx/agent-logs"
+    AGENT_LOG_DIR="$_LOG_BASE/claude"
+    VERSION_CACHE_FILE="$AGENT_LOG_DIR/cx_version_cache"
+    _COPILOT_VERSION_CACHE="$_LOG_BASE/copilot-cli/cx_version_cache"
+fi
 
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -317,11 +329,12 @@ install_binary_atomically() {
 # (fresh account), CREATE the login file for the user's shell (zsh -> ~/.zprofile, else ~/.profile)
 # so a brand-new account still gets it. Never fails the install.
 ensure_dir_on_path_profile() {
-    local dir="$1" marker="# added by checkmarx-devassist (cx-bootstrap)" prof wrote=""
+    local dir="$1" marker="# added by cx-devassist (cx-bootstrap)" prof wrote=""
     on_path "$dir" && return 0
     for prof in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.zprofile"; do
         [[ -f "$prof" ]] || continue
-        if grep -qF "$marker" "$prof" 2>/dev/null; then wrote=1; continue; fi
+        if grep -qF "$marker" "$prof" 2>/dev/null \
+            || grep -qF "# added by checkmarx-devassist (cx-bootstrap)" "$prof" 2>/dev/null; then wrote=1; continue; fi
         printf '\n%s\nexport PATH="%s:$PATH"\n' "$marker" "$dir" >> "$prof" 2>/dev/null && wrote=1
     done
     if [[ -z "$wrote" ]]; then

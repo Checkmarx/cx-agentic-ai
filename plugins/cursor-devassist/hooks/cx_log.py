@@ -100,9 +100,15 @@ _EVENTS = {
         # well-formed deny (the scanner's own JSON carried a permissionDecision:deny), vs
         # "error_during_block" for a deny that fell back to the raw fail-closed exit-2 path without
         # that structured output (an unexpected/error condition, not necessarily a real finding).
+        # `reason_code` includes `iac_scan_skipped` when KICS fail-opened — see hooks/_cx_scan_audit.sh.
         "decision": _enum({"allow", "deny"}),
         "tool_name": _token,
-        "reason_code": _enum({"vulnerability_detected", "error_during_block", "no_issues_found"}),
+        "reason_code": _enum({"vulnerability_detected", "error_during_block", "no_issues_found",
+                               "iac_scan_skipped", "post_tool_use"}),
+        "guardrail": _enum({"kics", "unknown"}),
+        "container_engine": _enum({"docker", "podman", "both", "unknown"}),
+        "skip_reason": _enum({"engine_not_running", "all_engines_not_running", "engine_not_found", "image_pull_failed",
+                               "scan_error", "unknown"}),
     },
     "mcp_connect": {
         # Every attempt by hooks/cx_run.sh to spawn/respawn `cx mcp bridge` (session start,
