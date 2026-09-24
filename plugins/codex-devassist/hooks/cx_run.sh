@@ -134,16 +134,25 @@ if [ -n "$CX_RESOLVED" ]; then
         esac
         _CXRUN_TOOL=$(printf '%s' "$_CXRUN_INPUT" | sed -n 's/.*"tool_name" *: *"\([A-Za-z0-9_.:-]*\)".*/\1/p' | head -1)
 
-        # Best-effort log — never let a missing/slow python or a logging failure affect the relay.
         _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
+        # shellcheck source=_cx_scan_audit.sh
+        . "$_CXRUN_DIR/_cx_scan_audit.sh"
+        cx_scan_audit_extras "$_CXRUN_OUTPUT"
+        if [ -n "$_CXSCAN_REASON_CODE" ]; then
+            _CXRUN_REASON="$_CXSCAN_REASON_CODE"
+        fi
+
+        # Best-effort log — never let a missing/slow python or a logging failure affect the relay.
         for _CXRUN_PY in python3 python; do
             command -v "$_CXRUN_PY" >/dev/null 2>&1 || continue
             # `break` only on a real success: on Windows, "python3" can resolve to the Microsoft
             # Store's App Execution Alias stub, which is ON PATH but exits non-zero without running
             # anything (no Python actually installed under that name) — falling through to "python"
             # in that case is what makes this work on such machines.
+            # shellcheck disable=SC2086
             "$_CXRUN_PY" "$_CXRUN_DIR/cx_log.py" scan_decision \
                 "decision=$_CXRUN_DECISION" "tool_name=$_CXRUN_TOOL" "reason_code=$_CXRUN_REASON" \
+                $_CXSCAN_LOG_EXTRAS \
                 >/dev/null 2>&1 && break
         done
 

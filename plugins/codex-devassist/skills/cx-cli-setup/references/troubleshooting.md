@@ -67,7 +67,7 @@ Install pointers:
 ## `cx` is installed but INCAPABLE (missing the agent-security subcommands)
 
 If the deny says cx is installed but **missing `cx mcp bridge` / `cx hooks codex-*`**, the installed
-build predates `2.3.65` (`scripts/cx-min-version`) — the GA release that ships the agent-security
+build predates `2.3.66` (`scripts/cx-min-version`) — the GA release that ships the agent-security
 hooks — or otherwise lacks them. Run `$cx-cli-setup` (or `sh scripts/cx-bootstrap.sh upgrade`
 directly) to fetch the current release; this is **not** the same incapable build, since the
 bootstrap resolves `latest` unless a temp testing pin is in place.

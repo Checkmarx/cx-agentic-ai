@@ -35,7 +35,7 @@ def _log(event, **fields):
 # is a fast pre-filter: capability is decided by the probe below (_capabilities_present), not by
 # this number. Keep IDENTICAL to scripts/cx-min-version and scripts/cx-bootstrap.sh.
 # (search marker: CX_MIN_VERSION)
-_MIN_VERSION_FALLBACK = (2, 3, 65)
+_MIN_VERSION_FALLBACK = (2, 3, 66)
 
 # The cx executable the GATE invokes for its own probes, resolved by ABSOLUTE path where possible so
 # the gate works the instant cx is installed — even before it is on PATH. A freshly-installed cx in
@@ -1752,14 +1752,14 @@ def cx_check():
         _deny(
             reason=(
                 "The Checkmarx CLI (cx) is installed but MISSING the security-scanner subcommands "
-                "(cx mcp bridge / cx hooks codex-*). This build predates 2.3.65 (the version that "
+                "(cx mcp bridge / cx hooks codex-*). This build predates 2.3.66 (the version that "
                 "ships these subcommands) or otherwise lacks them — this operation is BLOCKED until "
                 "upgraded."
             ),
             context=(
                 "cx ran `cx version` but the `cx mcp bridge` / `cx hooks codex-*` capability probes "
                 "failed — this build predates the agent-security hooks (capability_missing), and a "
-                "numeric version match is NOT sufficient. The fix is to upgrade to cx 2.3.65 or later "
+                "numeric version match is NOT sufficient. The fix is to upgrade to cx 2.3.66 or later "
                 "(scripts/cx-min-version) via the bundled bootstrap (`sh scripts/cx-bootstrap.sh "
                 "upgrade`) or $cx-cli-setup — re-running it will fetch the current release, not the "
                 "same incapable build. Do NOT try to work around the gate — do NOT hand-place a cx "
