@@ -59,6 +59,8 @@ skip as a redacted `scan_decision` instead of silently allowing with no trace:
 #### Remediation MCP
 - Bundled in `gemini-extension.json` `mcpServers` (`cx mcp bridge`) — no manual MCP registration; re-spawn with `/mcp reload`
 
+---
+
 ### Changed in cx-devassist v1.0.1 (21-08-2026)
 
 #### The readiness gate now blocks only what Checkmarx can actually scan
