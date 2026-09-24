@@ -4,6 +4,30 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 
 ---
 
+### Changed in gemini-cli-devassist v1.0.1 (17-09-2026)
+
+#### Added — on-demand KICS (IaC) scanning
+
+- New `cx-devassist-kics` skill scans and remediates Infrastructure-as-Code files — Dockerfile,
+  Terraform, Kubernetes YAML, `.auto.tfvars`, `.terraform.tfvars`, `.proto`, and similar templates —
+  via `cx scan iac-realtime` and the Checkmarx MCP `codeRemediation` tool (`type: "iac"`).
+- Routing in `GEMINI.md` and `docs/gemini-cli-devassist.md`: source code → `cx-devassist-asca`;
+  dependency manifests → `cx-devassist-sca`; IaC → `cx-devassist-kics`.
+
+#### Added — structured audit for KICS fail-open skips
+
+When KICS cannot run because a container engine is missing, not running, or an image pull fails,
+ast-cli fail-opens the guardrail and surfaces a user message on stderr. The hook now records that
+skip as a redacted `scan_decision` instead of silently allowing with no trace:
+
+- New `hooks/_cx_scan_audit.sh` — maps KICS skip notes to allowlisted enums; never logs raw message text.
+- `scan_decision` events accept `reason_code=iac_scan_skipped` plus optional `guardrail`,
+  `container_engine`, and `skip_reason`.
+- `hooks/cx_run.sh` sources the audit helper after stage-2 capture and passes derived fields to
+  `cx_log.py`.
+
+---
+
 ### Changed in cx-devassist v1.0.2 (08-09-2026)
 
 #### Added — on-demand KICS (IaC) scanning
