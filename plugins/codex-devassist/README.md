@@ -10,8 +10,8 @@ authenticating with Checkmarx One. Once in place, the plugin runs automatically 
 Checkmarx MCP tool call Codex CLI performs. Shell commands are **not** gated — see
 [Realtime Scanners](#realtime-scanners) below.
 
-> **Minimum `cx` CLI version: 2.3.65.** This plugin's native scanner calls `cx hooks
-> codex-pre-tool-use` / `codex-pre-file-write` / `codex-stop`, which ship starting with the `2.3.65`
+> **Minimum `cx` CLI version: 2.3.66.** This plugin's native scanner calls `cx hooks
+> codex-pre-tool-use` / `codex-pre-file-write` / `codex-stop`, which ship starting with the `2.3.66`
 > GA release (`scripts/cx-min-version`). A build below this floor, or one otherwise missing these
 > subcommands, is reported `incapable` and the gate correctly **fails closed** (blocks every gated
 > action) rather than running unscanned. See
@@ -209,7 +209,7 @@ scratch. Stored in `cx_login_history.json` in the gate's private `0700` state di
 Unlike the readiness checks (present/recent/authenticated), the native scan step requires the
 external `cx` CLI to expose `cx hooks codex-pre-tool-use`, `cx hooks codex-pre-file-write`, and
 `cx hooks codex-stop` subcommands. These are **not part of this repository** — they ship in the `cx`
-(ast-cli) binary, maintained centrally by Checkmarx, starting with the `2.3.65` GA release
+(ast-cli) binary, maintained centrally by Checkmarx, starting with the `2.3.66` GA release
 (`scripts/cx-min-version`). A build below that version, or any build otherwise missing these
 subcommands, is reported `incapable`, and the gate correctly **blocks every gated action** rather
 than scan with a build that can't. This is expected fail-closed behavior, not a bug in this plugin.
@@ -264,7 +264,7 @@ The `cx` CLI itself updates independently. Run `$cx-cli-setup` if prompted, or m
 |---|---|---|---|
 | 1 | Message says cx CLI is not installed or cannot be found. | cx is missing, or the plugin cannot resolve its path. | Run `$cx-cli-setup`. If `cx version` still shows "command not found" (exit code 127) right after, that is expected — do not re-run the installer. Proceed to use the plugin and see if the error persists. |
 | 2 | Message says cx is older than the required version. | The installed cx is older than the minimum supported version for this plugin. | Run `$cx-cli-setup` — it detects the outdated build and upgrades automatically. Then restart the Codex CLI session so the remediation MCP picks up the new binary. |
-| 3 | Message says required scanner commands are missing (`incapable`). | The installed cx build predates `2.3.65` (or otherwise lacks the agent-security subcommands) but numerically looks fine. Re-running setup re-downloads the same build only if it's still pinned below the floor. | Run `$cx-cli-setup` to upgrade to `2.3.65` or later — see [External dependency](#external-dependency-cx-cli-capability). If you have access to a newer internal build already, set `CX_BINARY` to its absolute path instead. |
+| 3 | Message says required scanner commands are missing (`incapable`). | The installed cx build predates `2.3.66` (or otherwise lacks the agent-security subcommands) but numerically looks fine. Re-running setup re-downloads the same build only if it's still pinned below the floor. | Run `$cx-cli-setup` to upgrade to `2.3.66` or later — see [External dependency](#external-dependency-cx-cli-capability). If you have access to a newer internal build already, set `CX_BINARY` to its absolute path instead. |
 | 4 | Signed in but the very next action is immediately blocked. | Token propagation delay — the credential was just written but validation is still returning invalid. | Wait ~30–60s and retry the SAME action. Do NOT sign in again — each sign-in cancels the previous token and restarts the wait, creating a loop. |
 | 5 | Message says authentication to Checkmarx One failed. | Credential is missing, expired, or the tenant is unreachable. | Check the error text: `invalid`/`unauthorized`/`401` = credential — re-authenticate via `$cx-cli-setup`. `no such host`/`connection refused`/`timeout` = network — check firewall, proxy, and tenant URL. |
 | 6 | The Checkmarx MCP is not connected. | Remediation service started before cx was authenticated, or cannot reach the tenant URL. | Confirm cx sign-in is valid (`cx auth validate`), then restart the Codex CLI session so it re-spawns the MCP bridge. |
