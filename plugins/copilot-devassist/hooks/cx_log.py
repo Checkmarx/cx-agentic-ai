@@ -1,4 +1,4 @@
-"""cx_log — structured, redacted JSONL logging for the checkmarx-devassist gate.
+"""cx_log — structured, redacted JSONL logging for the cx-devassist gate.
 
 A deep module with a tiny surface: `log_event(event, **fields)`. Two guarantees make it safe to
 call from inside the fail-closed gate:
@@ -10,7 +10,7 @@ call from inside the fail-closed gate:
      that does not coerce to a safe type is omitted. No secret, token, source code, prompt, or
      free-form string can reach the log — even if a caller passes one by mistake.
 
-Records are written to `<CX_LOG_DIR or ~/.checkmarx/agent-logs/<assistant>>/checkmarx-devassist.jsonl`,
+Records are written to `<CX_LOG_DIR or ~/.checkmarx/agent-logs/<assistant>>/cx-devassist.jsonl`,
 size-rotated, dir 0700 / file 0600. Set `CX_LOG_DISABLE=1` to turn logging off entirely.
 """
 
@@ -20,9 +20,9 @@ import platform
 import re
 import time
 
-_LOG_FILE_NAME = "checkmarx-devassist.jsonl"
+_LOG_FILE_NAME = "cx-devassist.jsonl"
 _MAX_BYTES = 1_000_000  # rotate at ~1 MB
-_ROTATE_KEEP = 3        # keep checkmarx-devassist.jsonl.1 .. .3
+_ROTATE_KEEP = 3        # keep cx-devassist.jsonl.1 .. .3
 _SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_.:\-]{1,64}$")
 
 # Named permission / limit constants — used everywhere below so ASCA does not
@@ -81,6 +81,18 @@ _EVENTS = {
         "mode": _enum({"install", "upgrade", "unknown"}),
         "allowed": _as_bool,
     },
+    "login_history": {
+        # Lifecycle of the remembered base-URL/tenant login pairs (cx_login_history.json):
+        # recorded (a `cx auth login` attempt was captured as pending), promoted (auth succeeded →
+        # the pair becomes offerable), offered (pairs were embedded into an auth-recovery deny),
+        # invalid (a tampered/garbled entry was dropped on read), pruned (a stale or superseded
+        # pending attempt was discarded), skipped (an `auth login` went past that could NOT be
+        # parsed into a valid URL/tenant pair, so nothing was remembered — the one event that makes
+        # a silent drop diagnosable). NEVER carries the URL or tenant value itself — only the
+        # action and, for offers, how many pairs were shown.
+        "action": _enum({"recorded", "promoted", "offered", "invalid", "pruned", "skipped"}),
+        "count": _as_int,
+    },
     "admin_config": {
         # Outcome of loading the bundled admin onboarding config
         # (config/cx-onboarding.properties). NEVER carries the offending VALUE (which an admin -- or a
@@ -101,9 +113,15 @@ _EVENTS = {
         # well-formed deny (the scanner's own JSON carried a permissionDecision:deny), vs
         # "error_during_block" for a deny that fell back to the raw fail-closed exit-2 path without
         # that structured output (an unexpected/error condition, not necessarily a real finding).
+        # `reason_code` includes `iac_scan_skipped` when KICS fail-opened — see hooks/_cx_scan_audit.sh.
         "decision": _enum({"allow", "deny"}),
         "tool_name": _token,
-        "reason_code": _enum({"vulnerability_detected", "error_during_block", "no_issues_found"}),
+        "reason_code": _enum({"vulnerability_detected", "error_during_block", "no_issues_found",
+                               "iac_scan_skipped", "post_tool_use"}),
+        "guardrail": _enum({"kics", "unknown"}),
+        "container_engine": _enum({"docker", "podman", "both", "unknown"}),
+        "skip_reason": _enum({"engine_not_running", "all_engines_not_running", "engine_not_found", "image_pull_failed",
+                               "scan_error", "unknown"}),
     },
     "mcp_connect": {
         # Every attempt by hooks/cx_run.sh to spawn/respawn `cx mcp bridge` (session start,
@@ -132,12 +150,12 @@ _EVENTS = {
 _MCP_CONNECT_MESSAGES = {
     "ok": "cx v{have} is capable and current (>= v{min}) — mcp bridge starting.",
     "dev": "cx reports a 'dev' build and is capable — mcp bridge starting.",
-    "below": "cx v{have} is below the required v{min} — mcp bridge blocked; run /checkmarx-cli-setup to upgrade.",
+    "below": "cx v{have} is below the required v{min} — mcp bridge blocked; run /cx-cli-setup to upgrade.",
     "incapable": ("cx v{have} is missing the 'mcp bridge' subcommand (capability-incomplete build) — "
-                  "mcp bridge blocked; run /checkmarx-cli-setup."),
+                  "mcp bridge blocked; run /cx-cli-setup."),
     "unrunnable": "cx did not report a usable version ('cx version' failed or was unparseable) — mcp bridge blocked.",
     "cx_absent": ("cx CLI could not be resolved via CX_BINARY, the canonical store, or PATH — mcp "
-                  "bridge blocked; run /checkmarx-cli-setup to install."),
+                  "bridge blocked; run /cx-cli-setup to install."),
     "cx_binary_invalid": ("CX_BINARY is set but invalid (not absolute / missing / not executable); "
                           "ignored, falling back to the canonical store or PATH."),
 }
@@ -162,9 +180,13 @@ def _assistant():
     """Identify which agent client is running. Reads CX_ASSISTANT env var set by the hooks
     config (hooks.json sets CX_ASSISTANT=claude, hooks-copilot-cli.json sets
     CX_ASSISTANT=copilot-cli) so each client writes to its own log subdirectory and every
-    log entry carries the correct assistant label. Falls back to 'claude' when unset so
-    existing Claude Code deployments that don't yet pass CX_ASSISTANT keep working."""
-    return _token(os.environ.get("CX_ASSISTANT", "")) or "claude"
+    log entry carries the correct assistant label. Falls back to 'copilot-cli' when unset —
+    this plugin only ever ships to Copilot CLI, so an unset CX_ASSISTANT (a hook config that
+    predates the env block, or a manual invocation) must still land in the SAME directory
+    cx_check.py's _agent_log_dir() uses; defaulting to 'claude' split the jsonl away from the
+    state files and polluted the Claude plugin's directory. Sibling plugins default to their
+    own client the same way ('claude', 'cursor')."""
+    return _token(os.environ.get("CX_ASSISTANT", "")) or "copilot-cli"
 
 
 def _log_dir():
@@ -201,8 +223,8 @@ def _plugin_version():
             if version:
                 _PLUGIN_VERSION = version
                 break
-        except Exception:  # swallow — cx_log cannot use logging (would be circular)
-            pass
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            continue
     return _PLUGIN_VERSION
 
 
@@ -216,7 +238,7 @@ def _chmod(path, mode):
     try:
         os.chmod(path, mode)
     except OSError:
-        pass
+        return
 
 
 def _open_0600(path, flags):
@@ -239,7 +261,7 @@ def _rotate(path):
                 os.replace(src, "{0}.{1}".format(path, i + 1))
         os.replace(path, "{0}.1".format(path))
     except OSError:
-        pass
+        return
 
 
 def log_event(event, **fields):

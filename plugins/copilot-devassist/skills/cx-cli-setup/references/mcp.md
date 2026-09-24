@@ -1,6 +1,6 @@
 # The Checkmarx Remediation MCP (bundled)
 
-The `checkmarx-devassist-asca` skill remediates findings via the **Checkmarx Security MCP**
+The `cx-devassist-asca` skill remediates findings via the **Checkmarx Security MCP**
 (`mcp__Checkmarx__codeRemediation`). The plugin declares this server in `.mcp.json`, so Copilot
 starts it **automatically** whenever the plugin is enabled — there is **no registration step**. The
 server command is the native **`cx mcp bridge`** subcommand, which reads the credential from the cx
@@ -31,8 +31,8 @@ Everywhere else in this skill that says "reload the MCP" means run `/restart`.
   still not connected, for dev/on-prem hosts whose `iam`→`ast` mapping doesn't hold, pass the full URL
   via the `--mcp-url` flag in `.mcp.json` args. The bridge's stderr is captured in the Copilot MCP log
   under the Copilot cache directory for the OS:
-  - **Windows:** `%LOCALAPPDATA%\GitHub Copilot\<project>\mcp-logs-checkmarx-devassist-Checkmarx\*.jsonl`
-  - **macOS/Linux:** `~/.copilot/<project>/mcp-logs-checkmarx-devassist-Checkmarx/*.jsonl`
+  - **Windows:** `%LOCALAPPDATA%\GitHub Copilot\<project>\mcp-logs-cx-devassist-Checkmarx\*.jsonl`
+  - **macOS/Linux:** `~/.copilot/<project>/mcp-logs-cx-devassist-Checkmarx/*.jsonl`
 
 > The bridge reads the credential from the cx config and sends it **only** in the `Authorization`
 > header — never printed to chat or logs. The server accepts the raw credential (it exchanges it
