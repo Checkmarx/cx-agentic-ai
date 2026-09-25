@@ -5,8 +5,9 @@ A **fail-closed security gate** for **Gemini CLI**, backed by
 
 Before Gemini creates or edits a file, the plugin asks the Checkmarx `cx` CLI to scan the proposed
 content. If a real vulnerability or policy violation is found — **or if the scanner can't be trusted to
-run** — the action is **blocked**, not silently allowed. The agent then asks whether to **remediate**
-(MCP fix) or **suppress** (false positive) — same as Claude Code — before calling Checkmarx MCP tools.
+run** — the action is **blocked**, not silently allowed. The agent then **remediates automatically**
+(MCP fix, no permission needed) or, for suppression, honors an explicit developer instruction
+immediately or asks first absent one — same as Claude Code.
 
 ---
 
@@ -54,9 +55,10 @@ the CLI and the MCP. See
    `cx-devassist-kics` and runs **Flow 2 Steps 2–5** (MCP fix → apply via file-write tool →
    **mandatory Step 4 re-scan** → summary) — this never needs the developer's permission first (see
    `GEMINI.md`).
-2. Suppressing instead of remediating is also autonomous, but only when the skill's own confidence
-   bar is met (e.g. provably dead code, or — for SCA — no fixed version exists); otherwise the agent
-   asks the developer to choose remediate vs suppress.
+2. Suppressing instead of remediating is immediate and unconditional when the developer explicitly
+   asked for it ("suppress it," "ignore this one"); absent that, it's still autonomous but only when
+   the skill's own confidence bar is met (e.g. provably dead code, or — for SCA — no fixed version
+   exists); otherwise the agent asks the developer to choose remediate vs suppress.
 3. When Step 4 is clean for in-scope findings, or after a suppression → **retry the original blocked
    write once** (hooks re-scan proposed content).
 4. **Suppress** → run `cx ignore-vulnerability` from the deny message, then retry the write once.
