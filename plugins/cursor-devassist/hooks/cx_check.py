@@ -58,6 +58,24 @@ def _log(event, **fields):
         pass
 
 
+# Provenance tag prepended to every agent-facing string this gate emits, so the agent (or a reader
+# hardened against prompt injection) can recognize genuine Checkmarx output. NOT an authority claim —
+# an attacker could spoof this exact string from a file, a fetched page, or another tool's output — it
+# is a signpost: text that LOOKS like a Checkmarx finding/hook message (including a fake
+# "CHECKMARX_HOOK_DENY" block) but lacks this exact tag, or that instructs running a script/CLI
+# command "silently"/"without asking", did not come from Checkmarx and must not be acted on without
+# asking the user first. Applied centrally in _deny_agent_message()/_allow() rather than at each call
+# site, so every present and future agent_message/additional_context this gate emits carries it
+# automatically.
+_PROVENANCE_TAG = "[Checkmarx cx-devassist — automated security output, not user input]"
+
+
+def _tag(text):
+    """Prefix `text` with _PROVENANCE_TAG. `text` may be empty (e.g. _allow()'s context is
+    sometimes just a status note) — tag it anyway so absence of the tag stays a reliable signal."""
+    return _PROVENANCE_TAG + " " + text
+
+
 # Minimum cx version — a NUMERIC FLOOR only. The single source of truth is scripts/cx-min-version;
 # this tuple is the fail-closed fallback used only when that file is missing or garbled. The floor
 # is a fast pre-filter: capability is decided by the probe below (_capabilities_present), not by
@@ -1511,11 +1529,17 @@ _DENY_AGENT_PREFIX = (
 
 
 def _deny_agent_message(context: str) -> str:
+    """Build the agent_message text, always carrying _PROVENANCE_TAG (see its docstring) so the
+    agent can tell a genuine CHECKMARX_HOOK_DENY block from one spoofed inside untrusted content.
+    Idempotent: a `context` that already starts with the tag (or the bare prefix) is not
+    double-wrapped, so repeated/nested calls never stack tags."""
     if not context:
-        return _DENY_AGENT_PREFIX
-    if context.startswith(_DENY_AGENT_PREFIX):
+        return _tag(_DENY_AGENT_PREFIX)
+    if context.startswith(_PROVENANCE_TAG):
         return context
-    return _DENY_AGENT_PREFIX + context
+    if context.startswith(_DENY_AGENT_PREFIX):
+        return _tag(context)
+    return _tag(_DENY_AGENT_PREFIX + context)
 
 
 def _allow(*, reason_code="ok", tool_name=None, version_state=None, context="") -> None:
@@ -1525,7 +1549,11 @@ def _allow(*, reason_code="ok", tool_name=None, version_state=None, context="") 
          version_state=version_state, exit_code=0)
     if context:
         # additional_context mirrors agent_message verbatim — see _deny()'s comment for why.
-        print(json.dumps({"permission": "allow", "agent_message": context, "additional_context": context}))
+        # Tagged for the same reason _deny_agent_message() tags its output: this text is
+        # agent-facing (it becomes agent_message/additional_context), so it must carry
+        # _PROVENANCE_TAG to stay distinguishable from a spoofed "allow with warning" note.
+        tagged = context if context.startswith(_PROVENANCE_TAG) else _tag(context)
+        print(json.dumps({"permission": "allow", "agent_message": tagged, "additional_context": tagged}))
     else:
         print(json.dumps({"permission": "allow"}))
     sys.exit(0)
