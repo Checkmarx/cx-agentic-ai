@@ -50,11 +50,15 @@ the CLI and the MCP. See
 
 **End-to-end flow after a hook deny (finding):**
 
-1. Agent presents findings and asks **remediate** vs **suppress** (see `GEMINI.md`).
-2. **Remediate** → activate `cx-devassist-asca`, `cx-devassist-sca`, or `cx-devassist-kics` and run
-   **Flow 2 Steps 2–5** (MCP fix → apply via file-write tool → **mandatory Step 4 re-scan** → summary).
-3. When Step 4 is clean for in-scope findings → **retry the original blocked write once** (hooks
-   re-scan proposed content).
+1. Agent presents findings, then activates `cx-devassist-asca`, `cx-devassist-sca`, or
+   `cx-devassist-kics` and runs **Flow 2 Steps 2–5** (MCP fix → apply via file-write tool →
+   **mandatory Step 4 re-scan** → summary) — this never needs the developer's permission first (see
+   `GEMINI.md`).
+2. Suppressing instead of remediating is also autonomous, but only when the skill's own confidence
+   bar is met (e.g. provably dead code, or — for SCA — no fixed version exists); otherwise the agent
+   asks the developer to choose remediate vs suppress.
+3. When Step 4 is clean for in-scope findings, or after a suppression → **retry the original blocked
+   write once** (hooks re-scan proposed content).
 4. **Suppress** → run `cx ignore-vulnerability` from the deny message, then retry the write once.
 
 Fixes must use the **file-write tool**, not `run_shell_command` — shell commands are never scanned.

@@ -43,16 +43,11 @@ development — and is **not** explicitly asking for a security scan or audit:
 
 If a write is **denied by a hook** because a security finding was detected:
 
-1. **STOP** — do not retry the write, do not call Checkmarx MCP tools, and do not apply fixes yet.
+1. **STOP** — do not retry the write yet.
 2. **Present the findings** from the hook deny message (file, rule, severity, description).
-3. **Ask the developer** (mandatory — same as Claude Code / Cursor):
-
-   > A security vulnerability was detected. Would you like to **remediate** it (apply an MCP-driven
-   > code fix) or **suppress** it (mark as a confirmed false positive and unblock the write)?
-
-4. **Wait for the answer** before doing anything else.
-5. **If remediate** — activate the relevant skill and run **Flow 2 in full (Steps 2–5)** — do not
-   stop after MCP or after applying the fix:
+3. **Remediate by default** — activate the relevant skill and run **Flow 2 in full (Steps 2–5)**;
+   this never needs the developer's permission first (same model as Claude Code / Codex / Copilot /
+   Cursor):
    - Source code (SAST/ASCA) → `cx-devassist-asca`
    - Dependency manifest (SCA/OSS) → `cx-devassist-sca`
    - IaC file (KICS) → `cx-devassist-kics`
@@ -61,19 +56,32 @@ If a write is **denied by a hook** because a security finding was detected:
      "proactive scanning".
    - Apply fixes with the **file-write tool** (`WriteFile` / `write_file` / `replace`) — not
      `run_shell_command`. Shell writes are not scanned by hooks.
-6. **After Flow 2** — when Step 4 shows in-scope findings are resolved, **retry the original blocked
-   write once** (same file-write tool) so the hook chain confirms the remediated content passes.
-7. **If suppress** (confirmed false positive only) — run the `cx ignore-vulnerability` command from
-   the hook deny message **verbatim** (per-shell form), then retry the original write **once**.
-8. **Never auto-remediate** on a hook deny. Calling `mcp__Checkmarx__codeRemediation` or
-   `mcp__Checkmarx__packageRemediation` without the developer choosing **remediate** is wrong.
+4. **Suppressing instead of remediating is a legitimate autonomous decision** — not every finding
+   needs a developer checkpoint — but only when grounded in something you can verify **in the file
+   itself**. Each skill's "Suppression" section states its exact confidence bar (e.g. provably
+   unreachable/dead code, a visible sanitizer/guard, or — for SCA — an actual remediation attempt
+   that came back with no fixed version). An intentionally-inserted vulnerability/misconfiguration is
+   never a free pass for suppression, no matter how confident you are it's deliberate — ask the
+   developer instead.
+5. **Not confident either way** — ask the developer rather than guessing:
+
+   > A security vulnerability was detected. Would you like to **remediate** it (apply an MCP-driven
+   > code fix) or **suppress** it (mark as a confirmed false positive and unblock the write)?
+
+6. **After Flow 2, or after a confident/developer-approved suppression** — retry the original
+   blocked write once (same file-write tool) so the hook chain confirms the fix/suppression took
+   effect.
+7. **If suppressing**, run the `cx ignore-vulnerability` command from the hook deny message
+   **verbatim** (per-shell form), then retry the write.
+8. **Tell the developer what you did and why**, even when it didn't need asking first — autonomous
+   is not the same as silent.
 
 For hook denies about missing/outdated/unauthenticated `cx`, activate `cx-cli-setup` instead.
 
 ## On-demand skills (explicit only)
 
 Activate a bundled skill **only** when the user **explicitly** requests a security scan, audit, or
-remediation — or when a hook deny leads to the developer choosing **remediate** (run the relevant
+remediation — or when a hook deny needs Flow 2 (remediation is the default there; run the relevant
 skill's Flow 2 in full, including Step 4 re-scan).
 
 | User intent | Skill |
@@ -90,8 +98,9 @@ skill's Flow 2 in full, including Step 4 re-scan).
 - Normal feature work, scaffolding, refactors, or test runs
 - Proactive "let me scan first" behavior the user did not ask for
 
-**Exception:** hook deny → developer chooses **remediate** → activate ASCA, SCA, or KICS and complete
-Flow 2 (Steps 2–5). Step 4 re-scan there is required verification, not proactive scanning.
+**Exception:** hook deny → activate ASCA, SCA, or KICS and complete Flow 2 (Steps 2–5) — remediation
+runs by default there, suppression only when that skill's confidence bar is met or the developer
+says so. Step 4 re-scan is required verification, not proactive scanning.
 
 Hooks still scan scannable writes automatically (`config/cx-scannable-files`); this list only means
 do not proactively invoke the on-demand ASCA/SCA/KICS scan skills. `cx-cli-setup` remains appropriate
