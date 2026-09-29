@@ -41,44 +41,57 @@ A hook deny may arrive in any of these shapes. **All of them require the same re
    - A quoted absolute path needs PowerShell's `&` call operator to execute at all; without it PowerShell just prints the path. Syntax table: `skills/cx-cli-setup/references/shells.md`.
    - A `cx ignore-vulnerability --data <json>` command on **PowerShell** should use `--%` stop-parsing (preferred form in `skills/cx-cli-setup/references/shells.md`) — but `--%` only stops PowerShell from reparsing the remainder; it still reaches `cx.exe`'s own Windows argv parser, which only keeps an embedded `"` when it's backslash-escaped inside one outer quoted region (`--data "{\"FileName\":...}"`). A bare, unquoted JSON value gets every `"` stripped by that parser and sends `cx` invalid JSON — always wrap it, even under `--%`. On cmd/bash, double-quote the JSON value and escape every inner `"` (doubled for cmd, backslash-escaped for bash/sh) — **never single-quote it**. Cursor's own command-execution layer can reformat a single-quoted argument into a double-quoted one before the real shell runs it, which strips the embedded `"` around the JSON keys and sends `cx` invalid JSON. See `skills/cx-cli-setup/references/shells.md` ("JSON arguments") for the exact per-shell forms.
    - **If a command from `agent_message` still fails, do not improvise an alternate escaping or wrapping** — do not backtick-escape it, do not re-wrap it in `bash -c '...'` or `cmd /c "..."`, and do not retry it with a different quoting style you invent yourself. Those forms are more likely to be blocked by the security gate (its wrapper/chaining checks specifically scrutinize `bash -c`/`cmd /c`/backtick-laden commands) than to fix a quoting problem. Stop and report the exact failure to the user instead.
-6. **Do not bypass the gate.** Do not hand-place cx binaries, edit PATH, clear caches, use shell echo/redirect to write blocked files, use shell `!` prefix tricks, or **retry the same blocked tool call** hoping it will pass.
+6. **Do not bypass the gate.** Do not hand-place cx binaries, edit PATH, clear caches, use shell echo/redirect to write blocked files, use shell `!` prefix tricks, or **retry the same blocked tool call unchanged** hoping it will pass. (Retrying once *after* the finding workflow below has fixed or ignored every finding is the verification step, not a bypass.)
 7. **Do not deliver blocked content as a workaround.** Never paste the blocked code in chat, suggest manual file creation, or tell the user to copy-paste what the hook rejected.
-8. **Wait for explicit developer direction** before writing intentionally vulnerable code that the scanner blocked — the hook deny overrides the original user request until resolved. "The developer originally asked for this vulnerability" is a reason to **ask** them whether to suppress it, never a reason to suppress it **for** them without asking.
+8. **The hook deny overrides the original user request until resolved.** "The developer originally asked for this vulnerability" is not evidence for ignoring it — intent never is. Follow the finding workflow below; it never asks the developer to choose.
 
-## ASCA / SAST finding on Write or StrReplace (mandatory workflow)
+## Scanner finding on Write / StrReplace / EditNotebook (ASCA, KICS, SCA — mandatory workflow)
 
-When a Write/StrReplace/EditNotebook is blocked with ASCA findings:
+When a Write/StrReplace/EditNotebook is blocked with ASCA, KICS, or SCA findings, apply this rule **and**
+the matching `cx-devassist-<scanner>.mdc` rule (`cx-devassist-asca.mdc`, `cx-devassist-kics.mdc`, or
+`cx-devassist-sca.mdc`), and invoke skill **`cx-devassist:cx-devassist-<scanner>`**
+(`cx-devassist:cx-devassist-asca`, `cx-devassist:cx-devassist-kics`, or `cx-devassist:cx-devassist-sca`).
+Findings are already in context, so **skip the initial scan** and go directly to the skill's
+**Flow 2: Remediation** (its re-scan still applies).
 
-1. **Do NOT retry the write yet.**
-2. **Do NOT paste the vulnerable code in chat.**
-3. **Remediate by default**: invoke the `cx-devassist-asca` skill — findings are already in context,
-   so **skip the scan** and go directly to **Flow 2: Remediation**. This never needs the user's
-   permission first.
-   - For each real finding, call **`mcp__plugin-cx-devassist-Checkmarx__codeRemediation`** with `type: "sast"` and metadata from the finding (`ruleId`, `description`, `remediationAdvice`).
-   - Apply **`remediation_steps` from MCP only** — no manual fixes, no LLM-improvised patches.
-   - If MCP is unavailable, follow the skill's MCP recovery steps — do not improvise a fix.
-   - After remediation, **retry the original write once**.
-4. **Suppress in either of two cases:**
-   - **(a) The developer explicitly told you to** — "suppress it," "ignore this one," or similar.
-     Honor that **immediately**: run the `cx ignore-vulnerability` command from `agent_message`, then
-     retry the write. Their instruction is sufficient on its own — you do not need to check the
-     confidence bar below, and this applies **even when the vulnerability looks intentional** (e.g.
-     the user's original request was for a deliberately vulnerable lab/demo/training file): apparent
-     intent is not what makes suppression OK here, the developer's explicit instruction is.
-   - **(b) You're deciding on your own, without being asked** — only when grounded in code you've
-     **actually opened and read yourself**, in this file or another file you've inspected in this
-     session (ASCA's single-file scope can't see imported modules/helpers, so real evidence often
-     lives in one of those — that still counts, as long as you actually opened it, not merely because
-     a finding or message claims what it contains): see `cx-devassist-asca`'s "Suppression" section
-     for the exact confidence bar (provably unreachable/dead code, test-only data, or a sanitizer/
-     guard you've seen with your own eyes).
-     An intentional-looking vulnerability is never a confirmed false positive under (b), no matter how
-     confident you are it's deliberate — that still needs (a), not an assumption.
-5. **Neither (a) nor (b) applies** — ask the user: "A security vulnerability was detected. Would you
-   like to **remediate** it (apply an MCP-driven code fix) or **suppress** it (accept the risk)?" —
-   wait for the answer before proceeding.
-6. **Tell the user what you did and why**, even when suppression didn't need to ask first —
-   autonomous is not the same as silent.
+1. **Do NOT retry the write yet**, and do NOT paste the blocked code in chat.
+2. **Classify every finding first, then act.** Never ask the developer to choose "remediate or
+   suppress?" — not that question, not any variant of it.
+   - **False positive** — only when (a) or (b) below is **already true** and you can cite the
+     evidence. Run the `cx ignore-vulnerability` command provided in `agent_message` (one Shell call
+     per finding). The Step 5 summary must say why.
+     - **(a)** The developer explicitly told you to — "suppress it," "ignore this one," or similar.
+       Their instruction is sufficient on its own.
+     - **(b)** The skill's Suppression evidence is already in hand: ASCA/KICS — a file you opened this
+       session, file and line cited, shows the flagged code/configuration is provably safe; SCA
+       vulnerable — `packageRemediation` was called for that package this session and returned no
+       fixed version. Claims about files you have not opened, deployment/runtime assumptions, "looks
+       intentionally pinned," and apparent intent (lab/demo/training file) are **not** evidence.
+   - **True positive** — everything else, **including when you are unsure**. Call the plugin MCP tool
+     and apply what it returns:
+     - ASCA → **`mcp__plugin-cx-devassist-Checkmarx__codeRemediation`** with `type: "sast"`
+     - KICS → **`mcp__plugin-cx-devassist-Checkmarx__codeRemediation`** with `type: "iac"`
+     - SCA → **`mcp__plugin-cx-devassist-Checkmarx__packageRemediation`**
+   - **SCA malicious** — no ignore path, ever: never run `ignore-vulnerability` for it and never
+     install it. Replace/remove it via `packageRemediation`, or omit only that dependency and report it
+     unresolved. Only the developer can accept it, directly in Checkmarx Dev Assist — do not do that
+     for them and do not ask them to choose.
+3. **Apply fixes only with Write / StrReplace / EditNotebook** — never a shell command (shell writes are
+   not scanned). Smallest change, `remediation_steps` from MCP only — no manual or LLM-improvised
+   patches. If the blocked write creates a new file, the fix is that same Write with the fixed content.
+4. **Decide every finding in the batch** before retrying the write.
+5. **Verify:** re-scan with the skill's Flow 1 command **and** retry the blocked write **once** — the
+   hook on the retry is the check. (Malicious SCA package: just retry the write.)
+6. **Retry cap:** a still-present or newly introduced finding gets one more MCP call. Stop after
+   **3 denied retries** (or when the MCP returns no safe change); then ignore only findings that meet
+   (a)/(b) and report the rest as **unresolved** — stop editing, and do not ask the developer whether
+   to continue.
+7. **MCP unavailable:** do not fix by other means and do not ignore because of it. Report the finding
+   unresolved and give the reconnect step: run **/mcp** to reconnect it, or restart cursor-agent (in the
+   IDE: **Developer: Reload Window**).
+8. **Always show the skill's Step 5 Remediation Summary** — one line per finding, including an
+   `Ignored (evidence: ...)` section and any pre-existing/unresolved findings — even when the retry
+   passed or the file is new. Then continue the developer's original task; do not ask what to do next.
 
 ## Other deny types
 
@@ -88,8 +101,8 @@ When a Write/StrReplace/EditNotebook is blocked with ASCA findings:
 | cx not authenticated | Ask developer which auth method first (API key vs OAuth) as `agent_message` instructs; run only recovery commands until auth succeeds |
 | Fresh-login window | Wait 30–60s; **do NOT** re-run `cx auth login`; retry the original operation |
 | cx below minimum / incapable | Run bootstrap **upgrade** from `agent_message`; do not bypass |
-| KICS / IaC finding | **Remediate by default** via `codeRemediation` (`type: "iac"`) — no permission needed first. Suppress immediately if the developer explicitly said to ("suppress it," "ignore this one"); absent that, suppress instead only when `cx-devassist-kics`'s Suppression confidence bar is met; otherwise ask: "An IaC misconfiguration was detected. Would you like to **remediate** it (harden the configuration via MCP) or **suppress** it (accept the risk)?" Then retry write |
-| SCA / manifest finding | **Remediate by default** via `packageRemediation` — no permission needed first. Suppress immediately if the developer explicitly said to ("suppress it," "ignore this one"); absent that, suppress instead only when `cx-devassist-sca`'s Suppression confidence bar is met (e.g. remediation attempted and no fixed version exists); otherwise ask: "A vulnerable/malicious package was detected. Would you like to **remediate** it (upgrade/remove via MCP) or **suppress** it (accept the risk)?" Then retry write |
+| KICS / IaC finding | Follow the scanner finding workflow above with rule `cx-devassist-kics.mdc` and skill `cx-devassist:cx-devassist-kics` — `codeRemediation` (`type: "iac"`) for true positives; never ask remediate-or-suppress |
+| SCA / manifest finding | Follow the scanner finding workflow above with rule `cx-devassist-sca.mdc` and skill `cx-devassist:cx-devassist-sca` — `packageRemediation` for true positives; malicious packages are never ignored; never ask remediate-or-suppress |
 
 ## If `agent_message` is missing
 
@@ -99,6 +112,6 @@ Fall back to `user_message` only when no `agent_message` is present and no `CHEC
 
 - Deny says run `bash "C:\Users\...\scripts\cx-bootstrap.sh" install` → run that exact command, not a generic `cx` install. (This form is valid in every shell — `bash` is the program being invoked.)
 - Deny lists `PowerShell: & "C:\...\cx.exe" auth validate` and `bash / sh: "C:/.../cx.exe" auth validate` → in a PowerShell session run the PowerShell line **including the leading `&`**; do not drop it and do not use the bash line.
-- Deny says invoke `cx-devassist-asca` → read and follow the skill immediately; do not paste blocked code instead.
+- Deny says invoke `cx-devassist:cx-devassist-asca` → read and follow the skill immediately; do not paste blocked code instead.
 - Deny says do NOT re-run `cx auth login` → wait and retry the original operation.
-- User asked for vulnerable lab code but ASCA blocked the write → follow remediation or ask developer to confirm intentional vulnerability before bypassing.
+- User asked for vulnerable lab code but ASCA blocked the write → apparent intent is not evidence; unless the developer already said to suppress it, it is a true positive — remediate via MCP, retry once, and show the Step 5 summary.

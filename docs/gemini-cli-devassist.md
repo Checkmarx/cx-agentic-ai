@@ -45,7 +45,7 @@ remediation MCP** — nothing more.
 When a finding needs fixing, remediation runs through the **Checkmarx MCP server** (`cx mcp bridge`),
 declared in the `mcpServers` block of `gemini-extension.json` and started automatically by Gemini CLI —
 no manual registration step. It exposes code- and package-remediation tools
-(`mcp__Checkmarx__codeRemediation`, …) that the agent calls directly. A single `cx` sign-in covers both
+(`mcp_Checkmarx_codeRemediation`, …) that the agent calls directly. A single `cx` sign-in covers both
 the CLI and the MCP. See
 [`skills/cx-cli-setup/references/mcp.md`](skills/cx-cli-setup/references/mcp.md).
 
@@ -186,9 +186,9 @@ hooks already scan those writes. See `GEMINI.md` for routing rules.
 
 | Ask | Skill | Engine |
 |---|---|---|
-| "scan this file" / "check app.py" (source code) | `cx-devassist-asca` | SAST (ASCA) → `mcp__Checkmarx__codeRemediation` |
-| "scan my dependencies" / "audit package.json for vulnerabilities" (manifest/lockfile) | `cx-devassist-sca` | SCA / OSS → `mcp__Checkmarx__packageRemediation` |
-| "scan this Dockerfile" / "check main.tf" (IaC file) | `cx-devassist-kics` | IaC (KICS) → `mcp__Checkmarx__codeRemediation` (`type: "iac"`) |
+| "scan this file" / "check app.py" (source code) | `cx-devassist-asca` | SAST (ASCA) → `mcp_Checkmarx_codeRemediation` |
+| "scan my dependencies" / "audit package.json for vulnerabilities" (manifest/lockfile) | `cx-devassist-sca` | SCA / OSS → `mcp_Checkmarx_packageRemediation` |
+| "scan this Dockerfile" / "check main.tf" (IaC file) | `cx-devassist-kics` | IaC (KICS) → `mcp_Checkmarx_codeRemediation` (`type: "iac"`) |
 | whole project / cloud-scale scan | Checkmarx MCP (Cx1 cloud) tools | — |
 
 A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA;
