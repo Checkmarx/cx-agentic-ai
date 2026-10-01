@@ -105,3 +105,30 @@ Rules and guarantees:
   or restart needed); it activates after one `/mcp reload`. Do not hand-edit `gemini-extension.json`.
 - `CX_BINARY` must be set in the environment Gemini is launched with (the hooks inherit it);
   setting it only inside an agent Bash command will not reach the gate.
+
+## KICS / IaC scans — Docker or Podman not running
+
+KICS realtime scans (`cx scan iac-realtime`) and the IaC write guardrail require a **running**
+container engine. If Docker Desktop or Podman is installed but stopped, cx reports an actionable
+error such as *"container engine 'docker' is installed but not running"* rather than a generic
+network failure.
+
+**On-demand scans:** relay the stderr message verbatim and ask the developer to start the engine.
+
+**Hook writes:** when neither engine can scan, the guardrail may allow the edit with a visible skip
+note (*"Checkmarx IaC guardrail skipped … The edit was allowed without an IaC security check"*).
+Do not treat that as a clean scan.
+
+**Both Docker and Podman installed:** cx tries the engine found first on PATH (usually `docker`).
+If that daemon is stopped but the other is running, recent cx versions retry automatically. If scans
+still fail, start the preferred engine or pin one explicitly:
+
+```bash
+# bash / sh — force Podman for hook scans and on-demand iac-realtime in this shell session
+export CX_HOOKS_CONTAINER_ENGINE=podman
+```
+
+On Windows PowerShell: `$env:CX_HOOKS_CONTAINER_ENGINE = "podman"`. Set this in the environment
+Gemini launches with if hooks should always use Podman.
+
+**Neither engine installed:** install Docker Desktop or Podman, then re-run the scan unchanged.

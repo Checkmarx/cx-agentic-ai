@@ -51,14 +51,15 @@ the CLI and the MCP. See
 **End-to-end flow after a hook deny (finding):**
 
 1. Agent presents findings and asks **remediate** vs **suppress** (see `GEMINI.md`).
-2. **Remediate** → activate `cx-devassist-asca` or `cx-devassist-sca` and run **Flow 2
-   Steps 2–5** (MCP fix → apply via file-write tool → **mandatory Step 4 re-scan** → summary).
+2. **Remediate** → activate `cx-devassist-asca`, `cx-devassist-sca`, or `cx-devassist-kics` and run
+   **Flow 2 Steps 2–5** (MCP fix → apply via file-write tool → **mandatory Step 4 re-scan** → summary).
 3. When Step 4 is clean for in-scope findings → **retry the original blocked write once** (hooks
    re-scan proposed content).
 4. **Suppress** → run `cx ignore-vulnerability` from the deny message, then retry the write once.
 
 Fixes must use the **file-write tool**, not `run_shell_command` — shell commands are never scanned.
-Step 4 re-scan (`cx scan asca` / `cx scan oss-realtime`) is verification, not optional proactive scanning.
+Step 4 re-scan (`cx scan asca` / `cx scan oss-realtime` / `cx scan iac-realtime`) is verification,
+not optional proactive scanning.
 
 ---
 
@@ -153,6 +154,7 @@ cx-agentic-ai/                   # repo root — also the extension root
 │   ├── _cx_bootstrap_match.sh   # shared bootstrap-command matcher for the shell stages
 │   ├── cx_record_login.sh       # non-blocking observer: remembers OAuth URL + tenant
 │   ├── cx_run.sh                # resolves cx by absolute path; runs the native scanner + MCP bridge
+│   ├── _cx_scan_audit.sh        # maps KICS fail-open skip notes to redacted scan_decision enums
 │   └── cx_log.py                # structured, redacted JSONL logging
 ├── scripts/
 │   ├── cx-bootstrap.sh          # download + checksum-verify + install the cx CLI (self-install)
@@ -164,14 +166,15 @@ cx-agentic-ai/                   # repo root — also the extension root
 └── skills/
     ├── cx-cli-setup/            # guided cx install + authentication (router + references/)
     ├── cx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
-    └── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
+    ├── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
+    └── cx-devassist-kics/       # on-demand IaC (KICS) scan + remediation for Dockerfile/Terraform/K8s YAML
 ```
 
 > Tests live at the **repo root** (`tests/`), outside the shipped plugin, so they aren't distributed.
 
 ### On-demand scanning (skills)
 
-Beyond the automatic PreToolUse gate, two skills scan on request and remediate via the Checkmarx MCP.
+Beyond the automatic PreToolUse gate, three skills scan on request and remediate via the Checkmarx MCP.
 **Skills are explicit-only** — do not activate them for normal file creation or dependency edits; the
 hooks already scan those writes. See `GEMINI.md` for routing rules.
 
@@ -179,9 +182,11 @@ hooks already scan those writes. See `GEMINI.md` for routing rules.
 |---|---|---|
 | "scan this file" / "check app.py" (source code) | `cx-devassist-asca` | SAST (ASCA) → `mcp__Checkmarx__codeRemediation` |
 | "scan my dependencies" / "audit package.json for vulnerabilities" (manifest/lockfile) | `cx-devassist-sca` | SCA / OSS → `mcp__Checkmarx__packageRemediation` |
+| "scan this Dockerfile" / "check main.tf" (IaC file) | `cx-devassist-kics` | IaC (KICS) → `mcp__Checkmarx__codeRemediation` (`type: "iac"`) |
 | whole project / cloud-scale scan | Checkmarx MCP (Cx1 cloud) tools | — |
 
-A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA.
+A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA;
+an IaC file (Dockerfile, `.tf`, `.yaml`/`.yml`, …) → KICS.
 Creating or editing `package.json` is **not** a scan request — just write the file and let the hook scan it.
 
 ### Admin onboarding pre-fill (optional)

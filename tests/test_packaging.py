@@ -13,6 +13,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import unittest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -280,6 +281,63 @@ class TestGeminiExtension(unittest.TestCase):
         self.assertIn("Do not skip Step 4", asca)
         self.assertIn("file-write tool", asca)
 
+    def test_kics_skill_present(self):
+        path = os.path.join(_GEMINI_PLUGIN_ROOT, "skills", "cx-devassist-kics", "SKILL.md")
+        self.assertTrue(os.path.isfile(path), "cx-devassist-kics skill must ship with Gemini")
+
+    def test_kics_skill_requires_hook_triage(self):
+        kics = _read(_GEMINI_PLUGIN_ROOT, "skills", "cx-devassist-kics", "SKILL.md")
+        self.assertIn("Flow 1b: Hook Triage", kics)
+        self.assertIn("remediate** it", kics)
+        self.assertIn("suppress** it", kics)
+        self.assertIn("codeRemediation", kics)
+        self.assertIn('type: "iac"', kics)
+        self.assertIn("Do **not** use", kics)
+        self.assertIn("`imageRemediation`", kics)
+
+    def test_cx_scan_audit_script_present(self):
+        path = os.path.join(_GEMINI_PLUGIN_ROOT, "hooks", "_cx_scan_audit.sh")
+        self.assertTrue(os.path.isfile(path))
+        run_sh = _read(_GEMINI_PLUGIN_ROOT, "hooks", "cx_run.sh")
+        self.assertIn("_cx_scan_audit.sh", run_sh)
+
+    def test_gemini_cx_log_iac_scan_skipped_redaction(self):
+        path = os.path.join(_GEMINI_PLUGIN_ROOT, "hooks", "cx_log.py")
+        spec = importlib.util.spec_from_file_location("gemini_cx_log", path)
+        cx_log = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cx_log)
+        log_py = _read(_GEMINI_PLUGIN_ROOT, "hooks", "cx_log.py")
+        self.assertIn("iac_scan_skipped", log_py)
+        tmp = tempfile.mkdtemp()
+        prev = {k: os.environ.get(k) for k in ("CX_LOG_DIR", "CX_LOG_DISABLE", "CX_ASSISTANT")}
+        try:
+            os.environ["CX_LOG_DIR"] = tmp
+            os.environ.pop("CX_LOG_DISABLE", None)
+            os.environ["CX_ASSISTANT"] = "gemini-cli"
+            cx_log.log_event(
+                "scan_decision",
+                decision="allow",
+                tool_name="WriteFile",
+                reason_code="iac_scan_skipped",
+                guardrail="kics",
+                container_engine="docker",
+                skip_reason="engine_not_running",
+                user_message="Checkmarx IaC guardrail skipped Dockerfile: secret-skip-text",
+            )
+            logfile = os.path.join(tmp, cx_log._LOG_FILE_NAME)
+            with open(logfile, encoding="utf-8") as fh:
+                raw = fh.read()
+            rec = json.loads(raw.strip())
+            self.assertEqual(rec["reason_code"], "iac_scan_skipped")
+            self.assertNotIn("user_message", rec)
+            self.assertNotIn("secret-skip-text", raw)
+        finally:
+            for k, v in prev.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
     def test_skill_files_have_no_utf8_bom(self):
         """Gemini CLI's SKILL.md parser requires frontmatter to start with '---'; a UTF-8 BOM breaks discovery."""
         skills_root = os.path.join(_GEMINI_PLUGIN_ROOT, "skills")
@@ -288,7 +346,7 @@ class TestGeminiExtension(unittest.TestCase):
             for name in files:
                 if name == "SKILL.md":
                     skill_files.append(os.path.join(root, name))
-        self.assertGreaterEqual(len(skill_files), 3, "expected at least 3 SKILL.md files")
+        self.assertGreaterEqual(len(skill_files), 4, "expected at least 4 SKILL.md files")
         for path in skill_files:
             with open(path, "rb") as f:
                 head = f.read(3)
@@ -344,6 +402,7 @@ class TestShippedBytes(unittest.TestCase):
     _GEMINI_ONLY_LF_FILES = [
         ("config", "cx-scannable-files"),
         ("scripts", "cx-release-tag"),
+        ("hooks", "_cx_scan_audit.sh"),
     ]
 
     def _bytes(self, plugin_root, *parts):

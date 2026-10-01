@@ -27,8 +27,8 @@ proceed without the readiness gate. See `config/cx-scannable-files` and
 When the user asks you to **create, edit, scaffold, or add dependencies** as part of normal
 development — and is **not** explicitly asking for a security scan or audit:
 
-- **Do not** proactively activate `cx-devassist-asca` or `cx-devassist-sca`. Use the
-  file-write tool directly instead.
+- **Do not** proactively activate `cx-devassist-asca`, `cx-devassist-sca`, or `cx-devassist-kics`.
+  Use the file-write tool directly instead.
 - **Scannable files** (`package.json`, `requirements.txt`, `app.py`, `main.tf`, … — see
   `config/cx-scannable-files`) are checked by the automatic hook chain: readiness gate first, then
   native scan of the proposed content. The write is denied if `cx` is not ready or a real finding is
@@ -55,8 +55,10 @@ If a write is **denied by a hook** because a security finding was detected:
    stop after MCP or after applying the fix:
    - Source code (SAST/ASCA) → `cx-devassist-asca`
    - Dependency manifest (SCA/OSS) → `cx-devassist-sca`
-   - **Step 4 re-scan is mandatory** — run `cx scan asca` or `cx scan oss-realtime` on the same
-     file/manifest after fixes. This is verification, not "proactive scanning".
+   - IaC file (KICS) → `cx-devassist-kics`
+   - **Step 4 re-scan is mandatory** — run `cx scan asca`, `cx scan oss-realtime`, or
+     `cx scan iac-realtime` on the same file/manifest after fixes. This is verification, not
+     "proactive scanning".
    - Apply fixes with the **file-write tool** (`WriteFile` / `write_file` / `replace`) — not
      `run_shell_command`. Shell writes are not scanned by hooks.
 6. **After Flow 2** — when Step 4 shows in-scope findings are resolved, **retry the original blocked
@@ -78,6 +80,7 @@ skill's Flow 2 in full, including Step 4 re-scan).
 |---|---|
 | Scan/audit **source code** for vulnerabilities | `cx-devassist-asca` |
 | Scan/audit **dependencies / manifests** for vulnerabilities | `cx-devassist-sca` |
+| Scan/audit **IaC** (Dockerfile, Terraform, K8s YAML, …) for misconfigurations | `cx-devassist-kics` |
 | Install, upgrade, or authenticate `cx` | `cx-cli-setup` |
 
 **Do NOT activate skills for:**
@@ -87,11 +90,11 @@ skill's Flow 2 in full, including Step 4 re-scan).
 - Normal feature work, scaffolding, refactors, or test runs
 - Proactive "let me scan first" behavior the user did not ask for
 
-**Exception:** hook deny → developer chooses **remediate** → activate ASCA/SCA and complete Flow 2
-(Steps 2–5). Step 4 re-scan there is required verification, not proactive scanning.
+**Exception:** hook deny → developer chooses **remediate** → activate ASCA, SCA, or KICS and complete
+Flow 2 (Steps 2–5). Step 4 re-scan there is required verification, not proactive scanning.
 
 Hooks still scan scannable writes automatically (`config/cx-scannable-files`); this list only means
-do not proactively invoke the on-demand ASCA/SCA scan skills. `cx-cli-setup` remains appropriate
+do not proactively invoke the on-demand ASCA/SCA/KICS scan skills. `cx-cli-setup` remains appropriate
 when hooks report `cx` is not ready.
 
 Mentioning a filename like `package.json` or a package name like `validator` in a **create/edit**
