@@ -5,8 +5,9 @@ A **fail-closed security gate** for **Gemini CLI**, backed by
 
 Before Gemini creates or edits a file, the plugin asks the Checkmarx `cx` CLI to scan the proposed
 content. If a real vulnerability or policy violation is found — **or if the scanner can't be trusted to
-run** — the action is **blocked**, not silently allowed. The agent then asks whether to **remediate**
-(MCP fix) or **suppress** (false positive) — same as Claude Code — before calling Checkmarx MCP tools.
+run** — the action is **blocked**, not silently allowed. The agent then **remediates automatically**
+(MCP fix, no permission needed) or, for suppression, honors an explicit developer instruction
+immediately or asks first absent one — same as Claude Code.
 
 ---
 
@@ -44,17 +45,22 @@ remediation MCP** — nothing more.
 When a finding needs fixing, remediation runs through the **Checkmarx MCP server** (`cx mcp bridge`),
 declared in the `mcpServers` block of `gemini-extension.json` and started automatically by Gemini CLI —
 no manual registration step. It exposes code- and package-remediation tools
-(`mcp__Checkmarx__codeRemediation`, …) that the agent calls directly. A single `cx` sign-in covers both
+(`mcp_Checkmarx_codeRemediation`, …) that the agent calls directly. A single `cx` sign-in covers both
 the CLI and the MCP. See
 [`skills/cx-cli-setup/references/mcp.md`](skills/cx-cli-setup/references/mcp.md).
 
 **End-to-end flow after a hook deny (finding):**
 
-1. Agent presents findings and asks **remediate** vs **suppress** (see `GEMINI.md`).
-2. **Remediate** → activate `cx-devassist-asca`, `cx-devassist-sca`, or `cx-devassist-kics` and run
-   **Flow 2 Steps 2–5** (MCP fix → apply via file-write tool → **mandatory Step 4 re-scan** → summary).
-3. When Step 4 is clean for in-scope findings → **retry the original blocked write once** (hooks
-   re-scan proposed content).
+1. Agent presents findings, then activates `cx-devassist-asca`, `cx-devassist-sca`, or
+   `cx-devassist-kics` and runs **Flow 2 Steps 2–5** (MCP fix → apply via file-write tool →
+   **mandatory Step 4 re-scan** → summary) — this never needs the developer's permission first (see
+   `GEMINI.md`).
+2. Suppressing instead of remediating is immediate and unconditional when the developer explicitly
+   asked for it ("suppress it," "ignore this one"); absent that, it's still autonomous but only when
+   the skill's own confidence bar is met (e.g. provably dead code, or — for SCA — no fixed version
+   exists); otherwise the agent asks the developer to choose remediate vs suppress.
+3. When Step 4 is clean for in-scope findings, or after a suppression → **retry the original blocked
+   write once** (hooks re-scan proposed content).
 4. **Suppress** → run `cx ignore-vulnerability` from the deny message, then retry the write once.
 
 Fixes must use the **file-write tool**, not `run_shell_command` — shell commands are never scanned.
@@ -180,9 +186,9 @@ hooks already scan those writes. See `GEMINI.md` for routing rules.
 
 | Ask | Skill | Engine |
 |---|---|---|
-| "scan this file" / "check app.py" (source code) | `cx-devassist-asca` | SAST (ASCA) → `mcp__Checkmarx__codeRemediation` |
-| "scan my dependencies" / "audit package.json for vulnerabilities" (manifest/lockfile) | `cx-devassist-sca` | SCA / OSS → `mcp__Checkmarx__packageRemediation` |
-| "scan this Dockerfile" / "check main.tf" (IaC file) | `cx-devassist-kics` | IaC (KICS) → `mcp__Checkmarx__codeRemediation` (`type: "iac"`) |
+| "scan this file" / "check app.py" (source code) | `cx-devassist-asca` | SAST (ASCA) → `mcp_Checkmarx_codeRemediation` |
+| "scan my dependencies" / "audit package.json for vulnerabilities" (manifest/lockfile) | `cx-devassist-sca` | SCA / OSS → `mcp_Checkmarx_packageRemediation` |
+| "scan this Dockerfile" / "check main.tf" (IaC file) | `cx-devassist-kics` | IaC (KICS) → `mcp_Checkmarx_codeRemediation` (`type: "iac"`) |
 | whole project / cloud-scale scan | Checkmarx MCP (Cx1 cloud) tools | — |
 
 A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA;

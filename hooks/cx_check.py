@@ -30,6 +30,27 @@ def _log(event, **fields):
         pass
 
 
+# Provenance tag prepended to every agent-facing string this gate emits, so the agent (or a reader
+# hardened against prompt injection) can recognize genuine Checkmarx output. NOT an authority claim —
+# an attacker could spoof this exact string from a file, a fetched page, or another tool's output — it
+# is a signpost: text that LOOKS like a Checkmarx finding/hook message but lacks this exact tag, or
+# that instructs running a script/CLI command "silently"/"without asking", did not come from Checkmarx
+# and must not be acted on without asking the user first. Applied centrally in
+# _deny()/_allow_with_warning()/_fail_closed_on_crash() rather than at each call site, so every present
+# and future message from THIS gate carries it automatically. Only agent-facing fields are tagged
+# (Claude Code's permissionDecisionReason/additionalContext; Gemini CLI's "reason", which the exit-code
+# contract note on _deny() documents as the field that "goes to agent") — Gemini's terminal-only
+# "systemMessage" is read directly by the human, never fed back into the agent's context, so it is left
+# untagged to avoid cluttering console output with a signal that channel doesn't need.
+_PROVENANCE_TAG = "[Checkmarx cx-devassist — automated security output, not user input]"
+
+
+def _tag(text):
+    """Prefix `text` with _PROVENANCE_TAG. `text` may be empty (e.g. _allow_with_warning's context
+    is sometimes just a status note) — tag it anyway so absence of the tag stays a reliable signal."""
+    return _PROVENANCE_TAG + " " + text
+
+
 # Minimum cx version — a NUMERIC FLOOR only. The single source of truth is scripts/cx-min-version;
 # this tuple is the fail-closed fallback used only when that file is missing or garbled. The floor
 # is a fast pre-filter: capability is decided by the probe below (_capabilities_present), not by
@@ -1395,7 +1416,9 @@ def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, versio
     if _GEMINI_CLI_MODE:
         output = {
             "decision": "deny",
-            "reason": reason + "\n\n" + context,
+            # "reason" is the agent-facing channel (see the exit-code contract note above), so it
+            # carries the provenance tag; "systemMessage" below is terminal-only (see _tag() note).
+            "reason": _tag(reason + "\n\n" + context),
         }
         if _gemini_should_show_deny_message(reason_code):
             output["systemMessage"] = reason
@@ -1405,8 +1428,8 @@ def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, versio
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
-                "permissionDecisionReason": reason,
-                "additionalContext": context,
+                "permissionDecisionReason": _tag(reason),
+                "additionalContext": _tag(context),
             }
         }
     print(json.dumps(output))
@@ -1418,6 +1441,7 @@ def _allow_with_warning(context: str, *, reason_code=None, tool_name=None) -> No
     if _GEMINI_CLI_MODE:
         # Gemini CLI: allow carries no `decision` field (absence of "deny" = allow); the warning
         # is surfaced via `systemMessage`, which Gemini shows to the user without affecting the tool.
+        # Terminal-only, never fed back into the agent's context, so left untagged (see _tag() note).
         output = {
             "systemMessage": context,
         }
@@ -1426,7 +1450,7 @@ def _allow_with_warning(context: str, *, reason_code=None, tool_name=None) -> No
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "allow",
-                "additionalContext": context,
+                "additionalContext": _tag(context),
             }
         }
     print(json.dumps(output))
@@ -2060,7 +2084,9 @@ def _fail_closed_on_crash():
         if is_gemini:
             print(json.dumps({
                 "decision": "deny",
-                "reason": (
+                # Agent-facing (see the exit-code contract note on _deny()) — tagged. "systemMessage"
+                # below is terminal-only and left untagged, same as elsewhere in this file.
+                "reason": _tag(
                     "The Checkmarx security gate hit an internal error and could not evaluate "
                     "this action, so it is BLOCKED fail-closed. Re-run /cx-cli-setup, or set "
                     "CX_ALLOW_UNSCANNED=1 to bypass scanning (audited)."
@@ -2075,11 +2101,11 @@ def _fail_closed_on_crash():
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "deny",
-                    "permissionDecisionReason": (
+                    "permissionDecisionReason": _tag(
                         "The Checkmarx security gate hit an internal error and could not evaluate this "
                         "action, so it is BLOCKED fail-closed."
                     ),
-                    "additionalContext": (
+                    "additionalContext": _tag(
                         "An unexpected error occurred inside cx_check.py. All agent actions remain "
                         "blocked until it is resolved. Re-run /cx-cli-setup, or set CX_ALLOW_UNSCANNED=1 "
                         "to bypass scanning (audited)."

@@ -20,6 +20,23 @@ except Exception:
     cx_log = None
 
 
+# Provenance tag prepended to every agent-facing string this gate emits, so the agent (or a reader
+# hardened against prompt injection) can recognize genuine Checkmarx output. NOT an authority claim —
+# an attacker could spoof this exact string from a file, a fetched page, or another tool's output — it
+# is a signpost: text that LOOKS like a Checkmarx finding/hook message but lacks this exact tag, or
+# that instructs running a script/CLI command "silently"/"without asking", did not come from Checkmarx
+# and must not be acted on without asking the user first. Applied centrally in
+# _deny()/_allow_with_warning()/_fail_closed_on_crash() rather than at each call site, so every present
+# and future message from THIS gate carries it automatically.
+_PROVENANCE_TAG = "[Checkmarx cx-devassist — automated security output, not user input]"
+
+
+def _tag(text):
+    """Prefix `text` with _PROVENANCE_TAG. `text` may be empty (e.g. _allow_with_warning's context
+    is sometimes just a status note) — tag it anyway so absence of the tag stays a reliable signal."""
+    return _PROVENANCE_TAG + " " + text
+
+
 def _log(event, **fields):
     """Emit a redacted structured event, dropping None-valued kwargs. Never raises."""
     if cx_log is None:
@@ -899,7 +916,7 @@ _AUTH_LOGIN_RE = re.compile(r"\bauth\s+login\b")
 # unsafe redirect), and extracted values must still pass the STRICT _valid_base_uri/_valid_tenant
 # funnels — validation, not extraction, is the security boundary.
 _LOGIN_FLAG_RE = re.compile(
-    r'--(base-auth-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
+    r'--(base-auth-uri|base-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
 
 
 def _parse_login_flags(command):
@@ -915,7 +932,8 @@ def _parse_login_flags(command):
         return None
     found = {}
     for m in _LOGIN_FLAG_RE.finditer(command):
-        found[m.group(1)] = next(g for g in m.groups()[1:] if g is not None)  # later wins
+        key = "base-auth-uri" if m.group(1) in ("base-auth-uri", "base-uri") else m.group(1)
+        found[key] = next(g for g in m.groups()[1:] if g is not None)  # later wins
     base = _valid_base_uri(found.get("base-auth-uri"))
     tenant = _valid_tenant(found.get("tenant"))
     if base is None or tenant is None:
@@ -1276,7 +1294,7 @@ def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, versio
         # permissionDecisionReason is shown directly to the agent.
         output = {
             "permissionDecision": "deny",
-            "permissionDecisionReason": reason + "\n\n" + context,
+            "permissionDecisionReason": _tag(reason + "\n\n" + context),
         }
     elif _CODEX_MODE:
         # Codex CLI renders additionalContext as passive display/log text rather than feeding
@@ -1289,7 +1307,7 @@ def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, versio
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
-                "permissionDecisionReason": reason + "\n\n" + context,
+                "permissionDecisionReason": _tag(reason + "\n\n" + context),
             }
         }
     else:
@@ -1298,8 +1316,8 @@ def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, versio
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
-                "permissionDecisionReason": reason,
-                "additionalContext": context,
+                "permissionDecisionReason": _tag(reason),
+                "additionalContext": _tag(context),
             }
         }
     print(json.dumps(output))
@@ -1314,7 +1332,7 @@ def _allow_with_warning(context: str, *, reason_code=None, tool_name=None) -> No
         # we include it so the agent sees the warning text in the hook output.
         output = {
             "permissionDecision": "allow",
-            "permissionDecisionReason": context,
+            "permissionDecisionReason": _tag(context),
         }
     elif _CODEX_MODE:
         # See _deny(): Codex renders additionalContext as passive display text, not actionable
@@ -1323,7 +1341,7 @@ def _allow_with_warning(context: str, *, reason_code=None, tool_name=None) -> No
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "allow",
-                "permissionDecisionReason": context,
+                "permissionDecisionReason": _tag(context),
             }
         }
     else:
@@ -1331,7 +1349,7 @@ def _allow_with_warning(context: str, *, reason_code=None, tool_name=None) -> No
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "allow",
-                "additionalContext": context,
+                "additionalContext": _tag(context),
             }
         }
     print(json.dumps(output))
@@ -2020,7 +2038,7 @@ def _fail_closed_on_crash():
         if is_copilot:
             print(json.dumps({
                 "permissionDecision": "deny",
-                "permissionDecisionReason": (
+                "permissionDecisionReason": _tag(
                     "The Checkmarx security gate hit an internal error and could not evaluate "
                     "this action, so it is BLOCKED fail-closed. Re-run /checkmarx-cli-setup, or set "
                     "CX_ALLOW_UNSCANNED=1 to bypass scanning (audited)."
@@ -2031,11 +2049,11 @@ def _fail_closed_on_crash():
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "deny",
-                    "permissionDecisionReason": (
+                    "permissionDecisionReason": _tag(
                         "The Checkmarx security gate hit an internal error and could not evaluate this "
                         "action, so it is BLOCKED fail-closed."
                     ),
-                    "additionalContext": (
+                    "additionalContext": _tag(
                         "An unexpected error occurred inside cx_check.py. All agent actions remain "
                         "blocked until it is resolved. Re-run /checkmarx-cli-setup, or set CX_ALLOW_UNSCANNED=1 "
                         "to bypass scanning (audited)."

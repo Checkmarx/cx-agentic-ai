@@ -40,8 +40,9 @@ set -u
 # advisory `exec` fast path nothing, and none of the three consumers needs cd-normalisation — they only
 # join a suffix onto it.
 case "$0" in
-    */*) _CXRUN_DIR=${0%/*} ;;
-    *)   _CXRUN_DIR=. ;;
+    */*)  _CXRUN_DIR=${0%/*} ;;
+    *\\*) _CXRUN_DIR=${0%\\*} ;;
+    *)    _CXRUN_DIR=. ;;
 esac
 
 # OS detection mirrors cx_check.py's `os.name == "nt"`: on Windows the canonical store is under
