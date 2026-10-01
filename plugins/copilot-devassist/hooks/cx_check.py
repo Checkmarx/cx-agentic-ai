@@ -929,7 +929,7 @@ _LOGIN_PENDING_TTL = 3600
 
 _AUTH_LOGIN_RE = re.compile(r"\bauth\s+login\b")
 _LOGIN_FLAG_RE = re.compile(
-    r'--(base-auth-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
+    r'--(base-auth-uri|base-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
 
 
 def _parse_login_flags(command):
@@ -940,7 +940,8 @@ def _parse_login_flags(command):
         return None
     found = {}
     for m in _LOGIN_FLAG_RE.finditer(command):
-        found[m.group(1)] = next(g for g in m.groups()[1:] if g is not None)
+        key = "base-auth-uri" if m.group(1) in ("base-auth-uri", "base-uri") else m.group(1)
+        found[key] = next(g for g in m.groups()[1:] if g is not None)
     base = _valid_base_uri(found.get("base-auth-uri"))
     tenant = _valid_tenant(found.get("tenant"))
     if base is None or tenant is None:

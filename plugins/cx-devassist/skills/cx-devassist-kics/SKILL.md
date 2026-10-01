@@ -239,33 +239,16 @@ when the tool returns no safe change — do not keep looping. At that point:
 
 ### Step 4 — Output Remediation Summary
 
-`Locations[0].Line` from scan is 0-based — show **`Line + 1`** in this summary (1-based, matches editors).
+Always finish with this report, even if you asked the user a question, the file is new, or the retry passed. Show it in the chat as markdown, not inside a code block. One bullet per item, then a blank line and the final status. Do not print the braces. Pick one result and one final status. Ignored must include why you ignored it. Unresolved must include why it was not fixed. A bullet without that reason is incomplete. Scan lines are 0-based; the line in this report is that number plus 1.
 
-```
-IaC Remediation Summary
+## Checkmarx Dev Assist IaC(KICS) Remediation Summary
 
-Rule:             [title]
-Severity:         [severity]
-Issue Type:       IaC Misconfiguration
-Problematic Line: [Line + 1]
+- **{title}** - {severity} - line {line plus 1} - **{Fixed, Ignored, or Unresolved}**
+  {Fixed: what changed. Ignored: Reason: why, citing the user's words or the file and line you read. Unresolved: Reason: why it was not fixed.}
 
-Files Modified:
-1. [file]
-   - Line [n]: [description of change]
+**Final status:** {All fixed, Partially fixed, or Unresolved}
 
-Ignored (evidence: [(a) the user's words | (b) file and line you read]):
-- [title] — line [Line + 1] — [severity] — [evidence]
-- (omit this section entirely when nothing was ignored)
-
-Pre-existing findings (NOT fixed — outside the scope of this remediation):
-- [title] — line [Line + 1] — [severity]
-- (omit this section entirely when none remain)
-```
-
-**Final status:**
-- ✅ All fixed: "Remediation completed for [title]. IaC file is clean on re-scan."
-- ⚠️ Partially fixed: "Remediation partially completed — manual review required. TODOs inserted where applicable."
-- ❌ Unresolved: "Remediation could not be completed for [title]: [reason]. This finding is unresolved, not suppressed, and the blocked write was not made." Report it and continue the user's original task — do not ask what to do next.
+Then continue the user's original task. Do not include that sentence in the report, and do not ask what to do next.
 
 ### Suppression — the only ignore rule
 

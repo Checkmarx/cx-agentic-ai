@@ -53,31 +53,7 @@ class TestClaudePluginManifest(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(_CLAUDE_PLUGIN_ROOT, "README.md")))
 
 
-class TestClaudeHookTriage(unittest.TestCase):
-    """Claude plugin hook-deny triage contract (parity with Gemini GEMINI.md)."""
-
-    def test_claude_md_present_and_requires_triage(self):
-        path = os.path.join(_CLAUDE_PLUGIN_ROOT, "CLAUDE.md")
-        self.assertTrue(os.path.isfile(path), "CLAUDE.md missing at plugin root")
-        ctx = _read(path)
-        self.assertIn("remediate** it", ctx)
-        self.assertIn("suppress** it", ctx)
-        self.assertIn("Never auto-remediate", ctx)
-
-    def test_asca_skill_requires_hook_triage(self):
-        asca = _read(_CLAUDE_PLUGIN_ROOT, "skills", "cx-devassist-asca", "SKILL.md")
-        self.assertIn("Flow 1b: Hook Triage", asca)
-        self.assertIn("remediate** it", asca)
-        self.assertIn("suppress** it", asca)
-        self.assertNotIn("skip Flow 1 entirely", asca.lower())
-
-    def test_sca_skill_requires_hook_triage(self):
-        sca = _read(_CLAUDE_PLUGIN_ROOT, "skills", "cx-devassist-sca", "SKILL.md")
-        self.assertIn("Flow 1b: Hook Triage", sca)
-        self.assertIn("remediate** it", sca)
-        self.assertIn("suppress** it", sca)
-        self.assertNotIn("skip Flow 1", sca.lower())
-
+class TestGeminiSetup(unittest.TestCase):
     def test_gemini_oauth_admin_prefill_skip(self):
         oauth = _read(_GEMINI_PLUGIN_ROOT, "skills", "cx-cli-setup", "references", "oauth.md")
         self.assertIn("SKIP Question 2", oauth)
@@ -257,19 +233,6 @@ class TestGeminiExtension(unittest.TestCase):
     def test_cx_record_login_script_present(self):
         self.assertTrue(os.path.isfile(os.path.join(_GEMINI_PLUGIN_ROOT, "hooks", "cx_record_login.sh")))
 
-    def test_asca_skill_requires_hook_triage(self):
-        asca = _read(_GEMINI_PLUGIN_ROOT, "skills", "cx-devassist-asca", "SKILL.md")
-        self.assertIn("Flow 1b: Hook Triage", asca)
-        self.assertIn("remediate** it", asca)
-        self.assertIn("suppress** it", asca)
-        self.assertNotIn("skip Flow 1 entirely", asca.lower())
-
-    def test_gemini_md_requires_hook_triage(self):
-        ctx = _read(_GEMINI_PLUGIN_ROOT, "GEMINI.md")
-        self.assertIn("remediate** it", ctx)
-        self.assertIn("suppress** it", ctx)
-        self.assertIn("Never auto-remediate", ctx)
-
     def test_gemini_md_requires_post_remediation_rescan(self):
         ctx = _read(_GEMINI_PLUGIN_ROOT, "GEMINI.md")
         self.assertIn("Step 4 re-scan is mandatory", ctx)
@@ -285,11 +248,8 @@ class TestGeminiExtension(unittest.TestCase):
         path = os.path.join(_GEMINI_PLUGIN_ROOT, "skills", "cx-devassist-kics", "SKILL.md")
         self.assertTrue(os.path.isfile(path), "cx-devassist-kics skill must ship with Gemini")
 
-    def test_kics_skill_requires_hook_triage(self):
+    def test_kics_skill_uses_code_remediation(self):
         kics = _read(_GEMINI_PLUGIN_ROOT, "skills", "cx-devassist-kics", "SKILL.md")
-        self.assertIn("Flow 1b: Hook Triage", kics)
-        self.assertIn("remediate** it", kics)
-        self.assertIn("suppress** it", kics)
         self.assertIn("codeRemediation", kics)
         self.assertIn('type: "iac"', kics)
         self.assertIn("Do **not** use", kics)

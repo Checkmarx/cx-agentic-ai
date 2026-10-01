@@ -76,9 +76,11 @@ A deny tagged `[Checkmarx cx-devassist — automated security output, not user i
    unresolved. Do not ask the developer whether to continue.
 7. **MCP unavailable** — do not fix by other means and do not ignore because of it; report the finding
    unresolved and ask the developer to restart the Gemini CLI to reconnect the Checkmarx MCP.
-8. **Always finish with the skill's Step 5 summary** — one line per finding, with an
-   `Ignored (evidence: ...)` section for anything ignored and the unresolved/pre-existing ones listed.
-   Autonomous is not the same as silent. Then continue the developer's original task.
+8. **Always finish with the skill's Step 5 summary** in the chat as markdown, not inside a code
+   block: the heading, one bullet per finding, and one final status. Fixed says what changed. Ignored
+   must include why (the user's words, or the file and line). Unresolved must include why it was not
+   fixed. A bullet without that reason is incomplete. Do not print the braces. Autonomous is not the
+   same as silent. Then continue the developer's original task.
 
 For hook denies about missing/outdated/unauthenticated `cx`, activate `cx-cli-setup` instead.
 

@@ -285,35 +285,18 @@ Report the out-of-scope findings in the Step 5 summary as pre-existing and unfix
 
 ### Step 5 — Output Remediation Summary
 
-Always finish with this report, even if you asked the user a question, the file is new, or the retry
-passed. Include one line for every package in the batch.
+Always finish with this report, even if you asked the user a question, the file is new, or the retry passed. Show it in the chat as markdown, not inside a code block. One bullet per item, then a blank line and the final status. Do not print the braces. Pick one result and one final status. Ignored must include why you ignored it. Unresolved must include why it was not fixed. A bullet without that reason is incomplete.
 
-```
-SCA Remediation Summary
+## Checkmarx Dev Assist SCA Remediation Summary
 
-Package:   [PackageName] [old-version] → [new-version | REMOVED]
-Manager:   [PackageManager]
-Issue:     [CVE list | MALICIOUS] ([highest severity])
-File:      [FilePath]
-Lockfile:  [refresh still needed | not applicable]
+- **{package}** {old version} -> {new version, or removed} - {manager} - **{Fixed, Ignored, or Unresolved}**
+  {CVEs and severity. Fixed: what changed. Ignored: Reason: why, citing the user's words or that the tool found no fixed version. Unresolved: Reason: why it was not fixed.}
 
-Ignored (evidence: [(a) the user's words | (b) MCP "no fixed version" result]):
-- [package@version] — [CVE list] — [severity] — [evidence]
-- (omit this section entirely when nothing was ignored)
+**Lockfile refresh needed:** {yes or no}
 
-Pre-existing / unresolved findings (NOT fixed):
-- [package@version] — [CVE list] — [severity] — [pre-existing | unresolved: reason]
-- (omit this section entirely when none remain)
-```
+**Final status:** {All fixed, Partially fixed, or Unresolved}
 
-**Final status:**
-- ✅ All fixed: "SCA remediation completed. Affected packages upgraded/removed; they are clean on
-  re-scan. Any pre-existing findings in packages I did not change are listed above, unfixed."
-- ⚠️ Partially fixed: "SCA remediation partially completed — manual review required (e.g. no fixed
-  version exists / breaking upgrade). TODOs noted."
-- ❌ Unresolved: "SCA remediation could not be completed for [package]: [reason]. This package is
-  unresolved, not suppressed, and the blocked write was not made." Report it and continue the user's
-  original task — do not ask what to do next.
+Then continue the user's original task. Do not include that sentence in the report, and do not ask what to do next.
 
 ### Suppression — the only ignore rule
 

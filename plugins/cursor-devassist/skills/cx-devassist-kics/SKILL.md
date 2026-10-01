@@ -17,7 +17,7 @@ This skill has two entry points:
    instead; if it is a **dependency manifest/lockfile** use `cx-devassist-sca` instead.
 2. **Remediation** — User asks to fix KICS findings, the agent receives a **hook deny** on Write/StrReplace (`agent_message` / `CHECKMARX_HOOK_DENY`), or KICS findings are surfaced via the stop hook's `followup_message`.
 
-> **If KICS findings are already present in context** (hook deny `agent_message`, `CHECKMARX_HOOK_DENY` block, prior scan result, or stop-hook message), **skip Flow 1 entirely** and proceed directly to Flow 2. Do not run the initial scan; Flow 2's re-scan still applies. Do not retry the blocked write until Flow 2 has decided every finding, and never paste code in chat or use shell workarounds.
+> **If KICS findings are already present in context** (hook deny `agent_message`, `CHECKMARX_HOOK_DENY` block, prior scan result, or stop-hook message), **skip Flow 1 entirely** and proceed directly to Flow 2. Do not run the initial scan; the retry of the blocked write is the verification. Do not retry the blocked write until Flow 2 has decided every finding, and never paste code in chat or use shell workarounds.
 
 ### Routing — which Checkmarx capability to use
 
@@ -241,31 +241,10 @@ the gate will simply deny again citing the ones left undecided.
 - **If Step 2 was triggered by an on-demand scan (Flow 1)**, applying the fix is itself a gated
   `StrReplace`/`Write` call, so the same hook scans it the first time — there is no separate write to
   retry.
-- **Also re-scan** with the same command as Flow 1 (canonical absolute-path invocation; bare `cx` only
-  when it is on PATH):
+- **Do not run a separate `cx scan iac-realtime`.** The hook on the retry is the only verification.
 
-```bash
-# bash / sh (macOS, Linux):
-"$HOME/.checkmarx/bin/cx" scan iac-realtime -s "<file-path>"
-# bash / sh (Git Bash on Windows):
-"$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan iac-realtime -s "<file-path>"
-```
-
-```powershell
-# PowerShell (Cursor's default shell on Windows) - the & call operator is REQUIRED
-& "$env:LOCALAPPDATA\Checkmarx\cx\cx.exe" scan iac-realtime -s "<file-path>"
-```
-
-```bat
-:: cmd.exe
-"%LOCALAPPDATA%\Checkmarx\cx\cx.exe" scan iac-realtime -s "<file-path>"
-```
-
-The scan reads the WHOLE file, so it also reports findings you never touched. **Remediate only
-the findings that belong to your own changes (or the original target)** — everything else is
-pre-existing and out of scope.
-
-Classify every finding against the changes you tracked in Step 2:
+If the retry is denied, its findings are what remains. Classify each against the changes you tracked in
+Step 2:
 
 - **In scope — remediate.** Either:
   - the finding you set out to fix is still there (same `title`, at or near its original line) — your
@@ -287,36 +266,16 @@ alone.
 
 ### Step 4 — Output Remediation Summary
 
-Always finish with this report, even if you asked the user a question, the file is new, or the retry
-passed. Include one line for every finding.
+Always finish with this report, even if you asked the user a question, the file is new, or the retry passed. Show it in the chat as markdown, not inside a code block. One bullet per item, then a blank line and the final status. Do not print the braces. Pick one result and one final status. Ignored must include why you ignored it. Unresolved must include why it was not fixed. A bullet without that reason is incomplete. Scan lines are 0-based; the line in this report is that number plus 1.
 
-`Locations[0].Line` from scan is 0-based — show **`Line + 1`** in this summary (1-based, matches editors).
+## Checkmarx Dev Assist IaC(KICS) Remediation Summary
 
-```
-IaC Remediation Summary
+- **{title}** - {severity} - line {line plus 1} - **{Fixed, Ignored, or Unresolved}**
+  {Fixed: what changed. Ignored: Reason: why, citing the user's words or the file and line you read. Unresolved: Reason: why it was not fixed.}
 
-Rule:             [title]
-Severity:         [severity]
-Issue Type:       IaC Misconfiguration
-Problematic Line: [Line + 1]
+**Final status:** {All fixed, Partially fixed, or Unresolved}
 
-Files Modified:
-1. [file]
-   - Line [n]: [description of change]
-
-Ignored (evidence: [(a) the user's words | (b) file and line you read]):
-- [title] — line [Line + 1] — [severity] — [evidence]
-- (omit this section entirely when nothing was ignored)
-
-Pre-existing / unresolved findings (NOT fixed):
-- [title] — line [Line + 1] — [severity] — [pre-existing | unresolved: reason]
-- (omit this section entirely when none remain)
-```
-
-**Final status:**
-- ✅ All fixed: "Remediation completed for [title]. IaC file is clean on re-scan."
-- ⚠️ Partially fixed: "Remediation partially completed — manual review required. TODOs inserted where applicable."
-- ❌ Unresolved: "Remediation could not be completed for [title]: [reason]. This finding is unresolved, not suppressed, and the blocked write was not made." Report it and continue the user's original task — do not ask what to do next.
+Then continue the user's original task. Do not include that sentence in the report, and do not ask what to do next.
 
 ### Suppression — the only ignore rule
 

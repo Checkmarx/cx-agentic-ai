@@ -29,8 +29,9 @@
 set -u
 
 case "$0" in
-    */*) _CXRUN_DIR=${0%/*} ;;
-    *)   _CXRUN_DIR=. ;;
+    */*)  _CXRUN_DIR=${0%/*} ;;
+    *\\*) _CXRUN_DIR=${0%\\*} ;;
+    *)    _CXRUN_DIR=. ;;
 esac
 
 # Write ONE cx_log.py audit record using the first WORKING Python 3: python3 -> python -> py -3.

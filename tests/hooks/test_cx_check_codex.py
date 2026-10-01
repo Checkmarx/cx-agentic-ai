@@ -3,7 +3,7 @@
 This does NOT duplicate the full cx-devassist / copilot-devassist gate-logic suite
 (tests/hooks/test_cx_check.py already covers that shared logic against the Claude copy) — it
 covers only what differs in the codex-devassist copy: the --codex argv flag / _CODEX_MODE
-detection, the $codex-cli-setup messaging via _setup_invocation(), the apply_patch matcher's
+detection, the $cx-cli-setup messaging via _setup_invocation(), the apply_patch matcher's
 _bash_command/_tool_name handling, and that deny/allow output stays in the Claude-shaped nested
 envelope (never the Copilot CLI flat shape) for a codex-mode invocation.
 
@@ -111,7 +111,7 @@ class TestCodexModeDetection(unittest.TestCase):
         # than the module flag after run() has already reset it.
         decision, _code = run(bash("npm test"), which=None, codex=True)
         self.assertEqual(decision, "deny")
-        self.assertIn("$codex-cli-setup", LAST_OUTPUT["permissionDecisionReason"])
+        self.assertIn("$cx-cli-setup", LAST_OUTPUT["permissionDecisionReason"])
 
     def test_no_codex_flag_leaves_codex_mode_false(self):
         decision, _code = run(bash("npm test"), which=None, codex=False)
@@ -121,7 +121,7 @@ class TestCodexModeDetection(unittest.TestCase):
     def test_setup_invocation_dollar_prefix_in_codex_mode(self):
         cx_check._CODEX_MODE = True
         try:
-            self.assertEqual(cx_check._setup_invocation(), "$codex-cli-setup")
+            self.assertEqual(cx_check._setup_invocation(), "$cx-cli-setup")
         finally:
             cx_check._CODEX_MODE = False
 
@@ -134,29 +134,29 @@ class TestCodexOutputEnvelope(unittest.TestCase):
     """Codex CLI's PreToolUse deny contract is confirmed identical to Claude Code's nested
     hookSpecificOutput shape — codex mode must NEVER take the Copilot CLI flat-JSON branch."""
 
-    def test_cx_absent_denies_nested_shape_exit_2(self):
+    def test_cx_absent_denies_nested_shape_exit_0(self):
         decision, code = run(bash("npm test"), which=None)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 2)
+        self.assertEqual(code, 0)
         self.assertIn("hookEventName", LAST_OUTPUT)
         self.assertEqual(LAST_OUTPUT["hookEventName"], "PreToolUse")
 
     def test_deny_reason_uses_dollar_invocation(self):
         decision, code = run(bash("npm test"), which=None)
         self.assertEqual(decision, "deny")
-        self.assertIn("$codex-cli-setup", LAST_OUTPUT["permissionDecisionReason"])
+        self.assertIn("$cx-cli-setup", LAST_OUTPUT["permissionDecisionReason"])
 
     def test_below_min_version_denies_with_dollar_invocation(self):
         decision, code = run(bash("npm test"), version_state="below")
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 2)
-        self.assertIn("$codex-cli-setup", LAST_OUTPUT["additionalContext"])
+        self.assertEqual(code, 0)
+        self.assertIn("$cx-cli-setup", LAST_OUTPUT["permissionDecisionReason"])
 
     def test_unauthenticated_denies_with_dollar_invocation(self):
         decision, code = run(bash("npm test"), authed=False)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 2)
-        self.assertIn("$codex-cli-setup", LAST_OUTPUT["additionalContext"])
+        self.assertEqual(code, 0)
+        self.assertIn("$cx-cli-setup", LAST_OUTPUT["permissionDecisionReason"])
 
     def test_allowed_when_ready(self):
         decision, code = run(bash("npm test"))
@@ -183,7 +183,7 @@ class TestApplyPatchMatcher(unittest.TestCase):
     def test_apply_patch_denies_fail_closed_when_cx_absent(self):
         decision, code = run(apply_patch("/src/foo.py"), which=None)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 2)
+        self.assertEqual(code, 0)
 
     def test_apply_patch_allowed_when_ready(self):
         decision, code = run(apply_patch("/src/foo.py", "x = 1"))

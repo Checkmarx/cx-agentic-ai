@@ -300,35 +300,16 @@ silent.
 
 ### Step 5 — Output Remediation Summary
 
-Always finish with this report, even if you asked the user a question, the file is new, or the retry
-passed. Include one line for every finding in the batch.
+Always finish with this report, even if you asked the user a question, the file is new, or the retry passed. Show it in the chat as markdown, not inside a code block. One bullet per item, then a blank line and the final status. Do not print the braces. Pick one result and one final status. Ignored must include why you ignored it. Unresolved must include why it was not fixed. A bullet without that reason is incomplete.
 
-```
-Remediation Summary
+## Checkmarx Dev Assist ASCA Remediation Summary
 
-Rule:             [rule_name]
-Severity:         [severity]
-Issue Type:       SAST Security Vulnerability
-Problematic Line: [line]
+- **{rule name}** - {severity} - line {line} - **{Fixed, Ignored, or Unresolved}**
+  {Fixed: what changed. Ignored: Reason: why, citing the user's words or the file and line you read. Unresolved: Reason: why it was not fixed.}
 
-Files Modified:
-1. [file]
-   - Line [n]: [description of change]
-   - [additional changes]
+**Final status:** {All fixed, Partially fixed, or Unresolved}
 
-Ignored (evidence: [(a) the user's words | (b) file and line you read]):
-- [rule_name] — line [n] — [severity] — [evidence]
-- (omit this section entirely when nothing was ignored)
-
-Pre-existing / unresolved findings (NOT fixed):
-- [rule_name] — line [n] — [severity] — [pre-existing | unresolved: reason]
-- (omit this section entirely when none remain)
-```
-
-**Final status:**
-- ✅ All fixed: "Remediation completed for security rule [rule_name]. Build status: PASS. Security tests: PASS."
-- ⚠️ Partially fixed: "Remediation partially completed — manual review required. TODOs inserted where applicable."
-- ❌ Unresolved: "Remediation could not be completed for security rule [rule_name]: [reason]. This finding is unresolved, not suppressed, and the blocked write was not made." Report it and continue the user's original task — do not ask what to do next.
+Then continue the user's original task. Do not include that sentence in the report, and do not ask what to do next.
 
 ### Constraints
 

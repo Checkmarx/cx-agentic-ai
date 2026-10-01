@@ -322,44 +322,16 @@ silent.
 
 ### Step 5 — Output Remediation Summary
 
-**This step is MANDATORY and is not satisfied by an ordinary prose completion message.** Always finish
-with this report, even if you asked the user a question, the file is new, or the retry passed — one line
-for every finding. After Step 4 finishes (regardless of outcome — fixed, partial, or unresolved), your response to the user MUST render the
-template below **verbatim in structure** — same section headers, same field order, inside a fenced code
-block exactly as shown — populated with this remediation's actual values. Do not summarize the result
-in your own words instead of, or in addition to, this block; do not drop the template because the fix
-was "simple" or the summary "seemed redundant." If a field is empty, emit its placeholder text (e.g.,
-"None" for no pre-existing findings), and omit only lines the template explicitly marks omittable.
+Always finish with this report, even if you asked the user a question, the file is new, or the retry passed. Show it in the chat as markdown, not inside a code block. One bullet per item, then a blank line and the final status. Do not print the braces. Pick one result and one final status. Ignored must include why you ignored it. Unresolved must include why it was not fixed. A bullet without that reason is incomplete.
 
-```
-Remediation Summary
+## Checkmarx Dev Assist ASCA Remediation Summary
 
-Rule:             [rule_name]
-Severity:         [severity]
-Issue Type:       SAST Security Vulnerability
-Problematic Line: [line]
+- **{rule name}** - {severity} - line {line} - **{Fixed, Ignored, or Unresolved}**
+  {Fixed: what changed. Ignored: Reason: why, citing the user's words or the file and line you read. Unresolved: Reason: why it was not fixed.}
 
-Files Modified:
-1. [file]
-   - Line [n]: [description of change]
-   - [additional changes]
+**Final status:** {All fixed, Partially fixed, or Unresolved}
 
-Ignored (evidence: [(a) the user's words | (b) file and line you read]):
-- [rule_name] — line [n] — [severity] — [evidence]
-- (omit this section entirely when nothing was ignored)
-
-Pre-existing / unresolved findings (NOT fixed):
-- [rule_name] — line [n] — [severity] — [pre-existing | unresolved: reason]
-- (omit this section entirely when none remain)
-```
-
-**Final status:**
-- ✅ All fixed: "Remediation completed for security rule [rule_name]. Build status: PASS. Security tests: PASS."
-- ⚠️ Partially fixed: "Remediation partially completed — manual review required. TODOs inserted where applicable."
-- ❌ Unresolved: "Remediation could not be completed for security rule [rule_name]: [reason]. This finding is unresolved, not suppressed, and the blocked write was not made." Report it and continue the user's original task — do not ask what to do next.
-
-Emit the **Final status** line immediately after the template block, in every case — including a
-failed or partial remediation, where the summary block above still records what was attempted.
+Then continue the user's original task. Do not include that sentence in the report, and do not ask what to do next.
 
 ### Constraints
 

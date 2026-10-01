@@ -726,7 +726,7 @@ _AUTH_LOGIN_RE = re.compile(r"\bauth\s+login\b")
 # unsafe redirect), and extracted values must still pass the STRICT _valid_base_uri/_valid_tenant
 # funnels — validation, not extraction, is the security boundary.
 _LOGIN_FLAG_RE = re.compile(
-    r'--(base-auth-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
+    r'--(base-auth-uri|base-uri|tenant)(?:=|\s+)(?:"([^"\s]+)"|\'([^\'\s]+)\'|([^\s"\']+))')
 
 
 def _parse_login_flags(command):
@@ -738,7 +738,8 @@ def _parse_login_flags(command):
         return None
     found = {}
     for m in _LOGIN_FLAG_RE.finditer(command):
-        found[m.group(1)] = next(g for g in m.groups()[1:] if g is not None)  # later wins
+        key = "base-auth-uri" if m.group(1) in ("base-auth-uri", "base-uri") else m.group(1)
+        found[key] = next(g for g in m.groups()[1:] if g is not None)  # later wins
     base = _valid_base_uri(found.get("base-auth-uri"))
     tenant = _valid_tenant(found.get("tenant"))
     if base is None or tenant is None:

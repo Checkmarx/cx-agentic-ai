@@ -52,7 +52,7 @@ the matching `cx-devassist-<scanner>.mdc` rule (`cx-devassist-asca.mdc`, `cx-dev
 `cx-devassist-sca.mdc`), and invoke skill **`cx-devassist:cx-devassist-<scanner>`**
 (`cx-devassist:cx-devassist-asca`, `cx-devassist:cx-devassist-kics`, or `cx-devassist:cx-devassist-sca`).
 Findings are already in context, so **skip the initial scan** and go directly to the skill's
-**Flow 2: Remediation** (its re-scan still applies).
+**Flow 2: Remediation**.
 
 1. **Do NOT retry the write yet**, and do NOT paste the blocked code in chat.
 2. **Classify every finding first, then act.** Never ask the developer to choose "remediate or
@@ -80,8 +80,8 @@ Findings are already in context, so **skip the initial scan** and go directly to
    not scanned). Smallest change, `remediation_steps` from MCP only — no manual or LLM-improvised
    patches. If the blocked write creates a new file, the fix is that same Write with the fixed content.
 4. **Decide every finding in the batch** before retrying the write.
-5. **Verify:** re-scan with the skill's Flow 1 command **and** retry the blocked write **once** — the
-   hook on the retry is the check. (Malicious SCA package: just retry the write.)
+5. **Verify:** retry the blocked write **once** — the hook on the retry is the check. Do not run a
+   separate `cx scan`.
 6. **Retry cap:** a still-present or newly introduced finding gets one more MCP call. Stop after
    **3 denied retries** (or when the MCP returns no safe change); then ignore only findings that meet
    (a)/(b) and report the rest as **unresolved** — stop editing, and do not ask the developer whether
@@ -89,9 +89,11 @@ Findings are already in context, so **skip the initial scan** and go directly to
 7. **MCP unavailable:** do not fix by other means and do not ignore because of it. Report the finding
    unresolved and give the reconnect step: run **/mcp** to reconnect it, or restart cursor-agent (in the
    IDE: **Developer: Reload Window**).
-8. **Always show the skill's Step 5 Remediation Summary** — one line per finding, including an
-   `Ignored (evidence: ...)` section and any pre-existing/unresolved findings — even when the retry
-   passed or the file is new. Then continue the developer's original task; do not ask what to do next.
+8. **Always show the remediation summary** in the chat as markdown, not inside a code block: the
+   heading, one bullet per finding, and one final status. Ignored must include why you ignored it.
+   Unresolved must include why it was not fixed. A bullet without that reason is incomplete. Do not
+   print the braces or an empty section. Do this even when the retry passed or the file is new. Then
+   continue the developer's original task; do not ask what to do next.
 
 ## Other deny types
 
