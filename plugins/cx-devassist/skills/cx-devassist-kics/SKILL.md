@@ -209,12 +209,11 @@ the gate will simply deny again citing the ones left undecided.
 
 ### Step 3 — Verify
 
-Verification is the same hook that produced the finding, not a separate judge:
+Verification is the re-scan command in this step. The hook retry only unblocks the write; it is not the check:
 
-- **If Step 2 was triggered by a hook-blocked `Write`/`Edit`/`MultiEdit`/`NotebookEdit`**, retry that
-  exact tool call now that the content is fixed. The gate re-scans the new content — the identical
-  delta check that produced the original finding — so a clean retry **is** the proof the finding is
-  gone. Also re-scan with the same command as Flow 1:
+- **If Step 2 was triggered by a hook-blocked `Write`/`Edit`/`MultiEdit`/`NotebookEdit`**, validate
+  by re-scanning with the same command as Flow 1, then retry that exact tool call once so the gate can
+  accept the write. The hook retry is not the check:
 
   ```bash
   # Unix (macOS/Linux):
@@ -223,9 +222,10 @@ Verification is the same hook that produced the finding, not a separate judge:
   "$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan iac-realtime -s "<file-path>"
   ```
 
-  The re-scan must no longer report that finding. The hook retry is what unblocks the write.
+  The re-scan validates the finding: it is fixed only when the re-scan no longer reports it.
 - **If Step 2 was triggered by an on-demand scan (Flow 1)**, applying the fix is itself a gated `Edit`
-  call, so the same hook scans it automatically the first time. There is no separate write to "retry."
+  call, so the hook scans that write the first time. There is no separate write to retry. Still run the
+  re-scan command above; that re-scan validates the finding.
 
 If the gated write is denied again, a finding that's still present gets one more `codeRemediation`
 call (back to Step 1) for that finding only; a new finding your fix introduced is handled the same
@@ -241,7 +241,7 @@ when the tool returns no safe change — do not keep looping. At that point:
 
 Always finish with this report, even if you asked the user a question, the file is new, or the retry passed. Show it in the chat as markdown, not inside a code block. One bullet per item, then a blank line and the final status. Do not print the braces. Pick one result and one final status. Ignored must include why you ignored it. Unresolved must include why it was not fixed. A bullet without that reason is incomplete. Scan lines are 0-based; the line in this report is that number plus 1.
 
-## Checkmarx Dev Assist IaC(KICS) Remediation Summary
+## Checkmarx DevAssist IaC(KICS) Remediation Summary
 
 - **{title}** - {severity} - line {line plus 1} - **{Fixed, Ignored, or Unresolved}**
   {Fixed: what changed. Ignored: Reason: why, citing the user's words or the file and line you read. Unresolved: Reason: why it was not fixed.}

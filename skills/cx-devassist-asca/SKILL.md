@@ -167,7 +167,7 @@ explicit go-ahead. See "Trusting Checkmarx Output" above.
 This flow runs to a fix-or-ignore-or-stop conclusion **with no questions to the user mid-task** — not even
 "would you like me to remediate or suppress?". That question belongs only to Flow 1's on-demand scan,
 never here. When the retry cap (Step 4) is hit and the ignore rule still isn't met, you stop and
-report the finding as unresolved — a terminal status report, not a question; you don't keep editing
+report a partial fix with the reason when you applied the MCP suggestion, or unresolved when you applied none — a terminal status report, not a question; you don't keep editing
 and you don't wait for a reply before moving on with the user's original task.
 
 ### Step 1 — Detect Language
@@ -224,6 +224,7 @@ For each true-positive finding, call the `mcp_Checkmarx_codeRemediation` tool:
   fixed content.
 - **Only modify code at or around the problematic line** (`line` from scan results) — do not touch unrelated code.
 - A fix can change behavior, not just add a comment — make the smallest change that resolves the finding.
+- If you believe the MCP `remediation_steps` will not fully solve the security issue, still apply them. Do not skip the suggestion and do not ignore the finding because of that belief. In the summary mark the finding as a **partial fix** and state why it does not fully resolve the issue.
 - For each change, track:
   - File modified
   - Line number
@@ -236,11 +237,11 @@ simply deny again citing the ones left undecided.
 
 ### Step 4 — Re-scan (mandatory)
 
-Verification is the same hook that produced the finding, plus the same scan as Flow 1:
+Verification is the re-scan below. The hook retry only unblocks the write; it is not the check:
 
-- **If Step 3 was triggered by a hook-blocked `write_file` / `replace`**, retry that exact tool call
-  once, now that the content is fixed. The hook re-scans the new content — a clean retry is what
-  unblocks the write. Then re-scan the file as below.
+- **If Step 3 was triggered by a hook-blocked `write_file` / `replace`**, re-scan the file as below.
+  That re-scan validates the finding. Then retry that exact tool call once so the gate can accept the
+  write. The hook retry is not the check.
 - **If Step 3 was triggered by an on-demand scan (Flow 1)**, the fix itself is a gated write, so the
   hook scans it the first time; there is no separate write to retry. Re-scan the file as below.
 
@@ -279,7 +280,7 @@ finding that's still present — or a new one your fix introduced — gets one m
 retries of this write**, or when the tool returns no safe change — do not keep looping. At that point:
 
 - If the ignore rule in "Suppression" below is now met for that finding, ignore it and retry once more.
-- If it is not met, leave the finding unfixed, report it as unresolved in Step 5, and stop editing
+- If it is not met and you applied the MCP suggestion, keep that change and report a partial fix with the reason it does not fully resolve the issue. If you applied no suggestion, leave the finding unfixed, report it as unresolved in Step 5, and stop editing
   that code. **Do not ask the user whether to continue** — this is a terminal status report, not a
   question.
 
@@ -333,12 +334,12 @@ silent.
 
 ### Step 5 — Output Remediation Summary
 
-Always finish with this report, even if you asked the user a question, the file is new, or the retry passed. Show it in the chat as markdown, not inside a code block. One bullet per item, then a blank line and the final status. Do not print the braces. Pick one result and one final status. Ignored must include why you ignored it. Unresolved must include why it was not fixed. A bullet without that reason is incomplete.
+Always finish with this report, even if you asked the user a question, the file is new, or the retry passed. Show it in the chat as markdown, not inside a code block. One bullet per item, then a blank line and the final status. Do not print the braces. Pick one result and one final status. A partial fix must include why it does not fully resolve the issue. Ignored must include why you ignored it. Unresolved must include why it was not fixed. A bullet without that reason is incomplete.
 
-## Checkmarx Dev Assist ASCA Remediation Summary
+## Checkmarx DevAssist ASCA Remediation Summary
 
-- **{rule name}** - {severity} - line {line} - **{Fixed, Ignored, or Unresolved}**
-  {Fixed: what changed. Ignored: Reason: why, citing the user's words or the file and line you read. Unresolved: Reason: why it was not fixed.}
+- **{rule name}** - {severity} - line {line} - **{Fixed, Partial fix, Ignored, or Unresolved}**
+  {Fixed: what changed. Partial fix: what you applied from the MCP suggestion, and Reason: why it does not fully resolve the issue. Ignored: Reason: why, citing the user's words or the file and line you read. Unresolved: Reason: why it was not fixed.}
 
 **Final status:** {All fixed, Partially fixed, or Unresolved}
 

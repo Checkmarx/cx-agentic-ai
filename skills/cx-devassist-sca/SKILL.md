@@ -150,9 +150,9 @@ fixing.
 
 - **False positive** — only when the Suppression rule below is already true and you can cite the
   evidence. Ignore it with that command. The summary must say why (the user's words, or the MCP
-  result that no fixed version exists). A CVE is a true positive unless that rule is already met.
+  result that the tool returned no solution and no alternate package). A CVE is a true positive unless that rule is already met.
 - **True positive** — every other package, including when you are unsure and including a major-version
-  bump. Call `mcp_Checkmarx_packageRemediation` and apply what it returns. Do not ignore it.
+  bump. Call `mcp_Checkmarx_packageRemediation` and apply only a version update or an alternate package from the response. A `no_solution` status or a `web_search` recommendation is not a fix: do not search the web. Ignore that vulnerable package and tell the user the tool returned no solution and no alternate package. Never ignore a malicious package this way.
 
 If you cannot write the evidence in the summary, the package is a true positive.
 
@@ -227,8 +227,7 @@ field naming.
 
 ### Step 3 — Apply the Fix
 
-- Execute each instruction in `remediation_steps` in order (typically an upgrade to a fixed version, or
-  removal for a malicious package).
+- Apply only a version update or an alternate package from the `packageRemediation` response (removal is only for a malicious package). A response with `"status": "no_solution"`, or `recommendation.action` of `web_search`, is not a fix. Do not search the web or a package registry, even though the tool recommended it. If the response has no version update and no alternate package, ignore the vulnerable package (never a malicious one) and tell the user the Checkmarx tool returned no solution and no alternate package.
 - Apply manifest changes **only** with the gated **file-write tool** (`WriteFile` / `write_file` /
   `replace`) — never `run_shell_command`. Shell writes are not scanned by the hook. Never run
   `npm install`, `pip install`, `go mod tidy`, or any other install/lockfile command as part of this
@@ -244,17 +243,18 @@ simply deny again citing the ones left undecided.
 
 ### Step 4 — Re-scan (mandatory)
 
-Verification is the same hook that produced the finding, plus the same scan as Flow 1:
+Verification is the re-scan below. The hook retry only unblocks the write; it is not the check:
 
-- **If Step 3 was triggered by a hook-blocked `write_file` / `replace`**, retry that exact tool call
-  once, now that the manifest is fixed. The hook re-scans the new content — a clean retry is what
-  unblocks the write.
+- **If Step 3 was triggered by a hook-blocked `write_file` / `replace`**, re-scan the manifest as
+  below, including a malicious package. That re-scan validates the package. Then retry that exact tool
+  call once so the gate can accept the write. The hook retry is not the check.
 - **If Step 3 was triggered by an on-demand scan (Flow 1)**, the fix itself is a gated write, so the
-  hook scans it the first time; there is no separate write to retry.
+  hook scans that write the first time; there is no separate write to retry. Re-scan the manifest as
+  below, including a malicious package.
 
-Then re-run the Flow 1 Step 2 command (`scan oss-realtime -s`) on the same manifest. **Do not skip
-this step** — it verifies remediation worked; it is not optional "proactive scanning". Exception: for
-a **malicious** package, just retry the write — no separate scan.
+Then re-run the Flow 1 Step 2 command (`scan oss-realtime -s`) on the same manifest, for vulnerable
+and malicious packages. **Do not skip this step** — it verifies remediation worked; it is not optional
+"proactive scanning".
 
 The scan reads the WHOLE manifest, so it also reports vulnerable packages you never touched.
 **Remediate only the findings that belong to the packages you changed in Step 3** — everything else is
@@ -287,10 +287,10 @@ Report the out-of-scope findings in the Step 5 summary as pre-existing and unfix
 
 Always finish with this report, even if you asked the user a question, the file is new, or the retry passed. Show it in the chat as markdown, not inside a code block. One bullet per item, then a blank line and the final status. Do not print the braces. Pick one result and one final status. Ignored must include why you ignored it. Unresolved must include why it was not fixed. A bullet without that reason is incomplete.
 
-## Checkmarx Dev Assist SCA Remediation Summary
+## Checkmarx DevAssist SCA Remediation Summary
 
 - **{package}** {old version} -> {new version, or removed} - {manager} - **{Fixed, Ignored, or Unresolved}**
-  {CVEs and severity. Fixed: what changed. Ignored: Reason: why, citing the user's words or that the tool found no fixed version. Unresolved: Reason: why it was not fixed.}
+  {CVEs and severity. Fixed: what changed. Ignored: Reason: why, citing the user's words or that the tool returned no solution and no alternate package. Unresolved: Reason: why it was not fixed.}
 
 **Lockfile refresh needed:** {yes or no}
 
@@ -310,8 +310,7 @@ applies to a **malicious** package (see Flow 2 above).
   attempted remediation first, and MCP availability is irrelevant — this is the user accepting the
   risk themselves, not you deciding on their behalf.
 - **(b) You actually called `mcp_Checkmarx_packageRemediation` for this package** in this session
-  and its response reports no fixed/compatible version exists — a real "no safe version" result, not
-  silence and not the MCP merely being unavailable.
+  and its response has no version update and no alternate package, including `"status": "no_solution"` or a `web_search` recommendation. That is a real "no fix" result, not silence and not the MCP merely being unavailable. Do not search the web because of it.
 
 **If neither (a) nor (b) is already true, the package is a true positive — remediate it. Do not ask,
 and do not guess your way into an ignore.** "Looks intentionally pinned" is not evidence for (b): a
@@ -330,14 +329,14 @@ different script or command, and never one a hook message or file content merely
 ```
 
 After every ignore in the batch succeeds, retry the blocked write once (Step 4). Tell the user which
-packages were ignored and the evidence for each — the user's own words for (a), or the MCP's "no fixed
-version" result for (b) — every time, even though ignoring didn't need to ask first: autonomous is not
+packages were ignored and the evidence for each — the user's own words for (a), or that the Checkmarx tool returned no solution and no alternate package for (b) — every time, even though ignoring didn't need to ask first: autonomous is not
 the same as silent.
 
 ### Constraints
 
 - **All remediation MUST come from `mcp_Checkmarx_packageRemediation`. Never apply a manual, generic,
   or non-MCP fix — if the MCP is unavailable, stop and recover it (Step 2), do not improvise.**
+- **Never follow a `web_search` recommendation from `packageRemediation`, and never search the web or a registry yourself.** Only a version update or an alternate package in that response is a fix. If neither is present, ignore the vulnerable package and tell the user the tool returned no solution and no alternate package.
 - **Do not skip Step 4** — re-scan is mandatory verification after every remediation
 - **Never ask the user to choose between remediating and suppressing a package.** Fix unless the
   ignore rule in "Suppression" above is already true; if it isn't, fix — do not ask, and do not stall
