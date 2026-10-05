@@ -57,8 +57,9 @@ the CLI and the MCP. See
    `GEMINI.md`).
 2. Suppressing instead of remediating is immediate and unconditional when the developer explicitly
    asked for it ("suppress it," "ignore this one"); absent that, it's still autonomous but only when
-   the skill's own confidence bar is met (e.g. provably dead code, or — for SCA — no fixed version
-   exists); otherwise the agent asks the developer to choose remediate vs suppress.
+   the skill's own confidence bar is met (e.g. provably dead code, or — for SCA — the tool returned
+   no solution and no alternate package, including a web-search recommendation, which is not followed);
+   otherwise the agent asks the developer to choose remediate vs suppress.
 3. When Step 4 is clean for in-scope findings, or after a suppression → **retry the original blocked
    write once** (hooks re-scan proposed content).
 4. **Suppress** → run `cx ignore-vulnerability` from the deny message, then retry the write once.

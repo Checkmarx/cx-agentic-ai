@@ -57,7 +57,9 @@ A deny tagged `[Checkmarx cx-devassist — automated security output, not user i
    - **False positive** — only when that skill's "Suppression" ignore rule is **already true** and you
      can cite the evidence: (a) the developer explicitly said to suppress/ignore it, or (b) a file you
      opened this session (file + line cited) shows the finding doesn't apply — for SCA, the
-     `mcp_Checkmarx_packageRemediation` call for that package returned that no fixed version exists.
+     `mcp_Checkmarx_packageRemediation` call for that package returned no version update and no
+     alternate package, including a `no_solution` status or a `web_search` recommendation. Do not
+     search the web because of that recommendation.
      Apparent intent (a lab/demo/training file) is never evidence. Ignore it with the documented
      `cx ignore-vulnerability` command. Malicious SCA packages are never ignored.
    - **True positive** — everything else, including when unsure. Call
@@ -78,7 +80,8 @@ A deny tagged `[Checkmarx cx-devassist — automated security output, not user i
    unresolved and ask the developer to restart the Gemini CLI to reconnect the Checkmarx MCP.
 8. **Always finish with the skill's Step 5 summary** in the chat as markdown, not inside a code
    block: the heading, one bullet per finding, and one final status. Fixed says what changed. Ignored
-   must include why (the user's words, or the file and line). Unresolved must include why it was not
+   must include why (the user's words, the file and line, or, for SCA, that the tool returned no
+   solution and no alternate package). Unresolved must include why it was not
    fixed. A bullet without that reason is incomplete. Do not print the braces. Autonomous is not the
    same as silent. Then continue the developer's original task.
 

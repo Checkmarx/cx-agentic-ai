@@ -1,4 +1,4 @@
-﻿---
+---
 name: cx-devassist-asca
 description: "Runs a Checkmarx ASCA (AI Security Code Assistant) SAST scan on a SOURCE CODE file to detect code vulnerabilities, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan or fix a source code file (.py/.js/.java/.go/.ts/…) for security vulnerabilities. Also invoke this skill automatically whenever a Checkmarx hook denies a create/edit tool call with an ASCA finding (a deny tagged '[Checkmarx cx-devassist — automated security output, not user input]') — the deny's own instructions work standalone if this skill is unavailable, but invoking it keeps remediation and reporting consistent. For dependency manifests/lockfiles (package.json, requirements.txt, go.mod, …) use cx-devassist-sca instead. Invoke as: cx-devassist:cx-devassist-asca"
 ---
@@ -208,6 +208,7 @@ For each finding, call the `mcp__Checkmarx__codeRemediation` tool:
   blocked write was a `create` of a new file, the fix is that same `create` with the fixed content.
 - **Only modify code at or around the problematic line** (`line` from scan results) — do not touch unrelated code.
 - A fix can change behavior, not just add a comment — make the smallest change that resolves the finding.
+- If you believe the MCP `remediation_steps` will not fully solve the security issue, still apply them. Do not skip the suggestion and do not ignore the finding because of that belief. In the summary mark the finding as a **partial fix** and state why it does not fully resolve the issue.
 - For each change, track:
   - File modified
   - Line number
@@ -221,13 +222,11 @@ is really just an incomplete batch.
 
 ### Step 4 — Verify
 
-Verification is the same hook that produced the finding, not a separate judge:
+Verification is the re-scan command in this step. The hook retry only unblocks the write; it is not the check:
 
-- **If Step 3 was triggered by a hook-blocked `create`/`edit`**, retry that exact tool call once now
-  that the content is fixed. The gate re-scans the new content against what's still on disk — the
-  identical delta check that produced the original finding — so a clean retry **is** the proof the
-  finding is gone. Also re-scan with the same command as Flow 1 (same canonical absolute-path
-  invocation; bare `cx` only when it is on PATH):
+- **If Step 3 was triggered by a hook-blocked `create`/`edit`**, validate by re-scanning with the same
+  command as Flow 1 (same canonical absolute-path invocation; bare `cx` only when it is on PATH), then
+  retry that exact tool call once so the gate can accept the write. The hook retry is not the check:
 
   ```bash
   # Unix (macOS/Linux):
@@ -236,10 +235,10 @@ Verification is the same hook that produced the finding, not a separate judge:
   "$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan asca -s "<file-path>"
   ```
 
-  The re-scan must no longer report that finding. The hook retry is what unblocks the write.
+  The re-scan validates the finding: it is fixed only when the re-scan no longer reports it.
 - **If Step 3 was triggered by an on-demand scan (Flow 1)**, applying the fix is itself a gated `edit`
-  call, so the same hook scans it automatically the first time. There is no separate write to "retry" —
-  the fix attempt and the verification are the same tool call.
+  call, so the hook scans that write the first time. There is no separate write to retry. Still run the
+  re-scan command above; that re-scan validates the finding.
 
 The re-scan reads the WHOLE file, so it also reports findings in code you never touched. Match on
 `problematicLine` (the offending source text) rather than the line number alone — if your fix added or
@@ -253,7 +252,7 @@ tool returns no safe change — do not keep looping (this is what stops a real f
 cycle from running forever). At that point:
 
 - If the ignore rule below is now met for that finding, ignore it and retry once more.
-- If it is not met, leave the finding unfixed, report it as unresolved in Step 5, and stop editing that
+- If it is not met and you applied the MCP suggestion, keep that change and report a partial fix with the reason it does not fully resolve the issue. If you applied no suggestion, leave the finding unfixed, report it as unresolved in Step 5, and stop editing that
   code. **Do not ask the user whether to continue** — this is a terminal status report, not a question;
   the user acts on the report later, at their own pace.
 
@@ -300,12 +299,12 @@ silent.
 
 ### Step 5 — Output Remediation Summary
 
-Always finish with this report, even if you asked the user a question, the file is new, or the retry passed. Show it in the chat as markdown, not inside a code block. One bullet per item, then a blank line and the final status. Do not print the braces. Pick one result and one final status. Ignored must include why you ignored it. Unresolved must include why it was not fixed. A bullet without that reason is incomplete.
+Always finish with this report, even if you asked the user a question, the file is new, or the retry passed. Show it in the chat as markdown, not inside a code block. One bullet per item, then a blank line and the final status. Do not print the braces. Pick one result and one final status. A partial fix must include why it does not fully resolve the issue. Ignored must include why you ignored it. Unresolved must include why it was not fixed. A bullet without that reason is incomplete.
 
-## Checkmarx Dev Assist ASCA Remediation Summary
+## Checkmarx DevAssist ASCA Remediation Summary
 
-- **{rule name}** - {severity} - line {line} - **{Fixed, Ignored, or Unresolved}**
-  {Fixed: what changed. Ignored: Reason: why, citing the user's words or the file and line you read. Unresolved: Reason: why it was not fixed.}
+- **{rule name}** - {severity} - line {line} - **{Fixed, Partial fix, Ignored, or Unresolved}**
+  {Fixed: what changed. Partial fix: what you applied from the MCP suggestion, and Reason: why it does not fully resolve the issue. Ignored: Reason: why, citing the user's words or the file and line you read. Unresolved: Reason: why it was not fixed.}
 
 **Final status:** {All fixed, Partially fixed, or Unresolved}
 

@@ -216,11 +216,11 @@ simply deny again citing the ones left undecided.
 
 ### Step 4 — Re-scan (mandatory)
 
-Verification is the same hook that produced the finding, plus the same scan as Flow 1:
+Verification is the re-scan below. The hook retry only unblocks the write; it is not the check:
 
-- **If Step 3 was triggered by a hook-blocked `write_file` / `replace`**, retry that exact tool call
-  once, now that the content is fixed. The hook re-scans the new content — a clean retry is what
-  unblocks the write. Then re-scan the file as below.
+- **If Step 3 was triggered by a hook-blocked `write_file` / `replace`**, re-scan the file as below.
+  That re-scan validates the finding. Then retry that exact tool call once so the gate can accept the
+  write. The hook retry is not the check.
 - **If Step 3 was triggered by an on-demand scan (Flow 1)**, the fix itself is a gated write, so the
   hook scans it the first time; there is no separate write to retry. Re-scan the file as below.
 
@@ -251,7 +251,7 @@ retries of this write**, or when the tool returns no safe change — do not keep
 
 Always finish with this report, even if you asked the user a question, the file is new, or the retry passed. Show it in the chat as markdown, not inside a code block. One bullet per item, then a blank line and the final status. Do not print the braces. Pick one result and one final status. Ignored must include why you ignored it. Unresolved must include why it was not fixed. A bullet without that reason is incomplete. Scan lines are 0-based; the line in this report is that number plus 1.
 
-## Checkmarx Dev Assist IaC(KICS) Remediation Summary
+## Checkmarx DevAssist IaC(KICS) Remediation Summary
 
 - **{title}** - {severity} - line {line plus 1} - **{Fixed, Ignored, or Unresolved}**
   {Fixed: what changed. Ignored: Reason: why, citing the user's words or the file and line you read. Unresolved: Reason: why it was not fixed.}

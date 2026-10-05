@@ -80,8 +80,9 @@ Findings are already in context, so **skip the initial scan** and go directly to
    not scanned). Smallest change, `remediation_steps` from MCP only — no manual or LLM-improvised
    patches. If the blocked write creates a new file, the fix is that same Write with the fixed content.
 4. **Decide every finding in the batch** before retrying the write.
-5. **Verify:** retry the blocked write **once** — the hook on the retry is the check. Do not run a
-   separate `cx scan`.
+5. **Verify:** run the scan command from the matching skill (`cx scan asca`, `cx scan iac-realtime`, or
+   `cx scan oss-realtime`) on the same file or manifest. That re-scan validates the finding. Then retry
+   the blocked write **once** so the gate can accept the write.
 6. **Retry cap:** a still-present or newly introduced finding gets one more MCP call. Stop after
    **3 denied retries** (or when the MCP returns no safe change); then ignore only findings that meet
    (a)/(b) and report the rest as **unresolved** — stop editing, and do not ask the developer whether
