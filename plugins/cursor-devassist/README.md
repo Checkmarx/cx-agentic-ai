@@ -1,7 +1,7 @@
 # Checkmarx DevAssist for Cursor (`cx-devassist-cursor`)
 
 A **fail-closed security gate** for **Cursor**, backed by
-[Checkmarx CxOne](https://checkmarx.com/). Plugin id `cx-devassist` · version `1.0.1` · Apache-2.0.
+[Checkmarx CxOne](https://checkmarx.com/). Plugin id `cx-devassist` · version `1.0.2` · Apache-2.0.
 
 Before Cursor writes or edits a file the Checkmarx engines can scan — source code, IaC, or a dependency
 manifest — the plugin asks the `cx` CLI to scan the proposed content **before the write lands**, and

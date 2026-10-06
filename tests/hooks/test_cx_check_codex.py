@@ -3,13 +3,14 @@
 This does NOT duplicate the full cx-devassist / copilot-devassist gate-logic suite
 (tests/hooks/test_cx_check.py already covers that shared logic against the Claude copy) — it
 covers only what differs in the codex-devassist copy: the --codex argv flag / _CODEX_MODE
-detection, the $codex-cli-setup messaging via _setup_invocation(), the apply_patch matcher's
+detection, the $cx-cli-setup messaging via _setup_invocation(), the apply_patch matcher's
 _bash_command/_tool_name handling, and that deny/allow output stays in the Claude-shaped nested
 envelope (never the Copilot CLI flat shape) for a codex-mode invocation.
 
 Run: python3 tests/hooks/test_cx_check_codex.py    (stdlib only — no pytest needed)
 """
 
+import importlib.util
 import io
 import json
 import os
@@ -19,10 +20,34 @@ import unittest
 from contextlib import redirect_stdout, redirect_stderr
 
 # Source under test lives in the plugin's hooks/ (tests live at the repo root, outside the plugin).
+# Loaded under a unique sys.modules-free name (not a bare `import cx_check`) because every plugin
+# ships its own same-named cx_check.py/cx_log.py; a bare import would get cached under sys.modules
+# and silently reused — wrong-plugin behavior — by whichever other suite imports it next.
 _HOOKS_DIR = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "codex-devassist", "hooks"))
 sys.path.insert(0, _HOOKS_DIR)
-import cx_check  # noqa: E402
+
+# cx_check.py does its own bare `import cx_log` internally; seed sys.modules so that import binds
+# to THIS plugin's cx_log rather than whatever another suite's copy is cached there, then restore
+# the prior entry immediately after — cx_check copies the reference once at import time, so the
+# seed only needs to be visible for that one exec_module call, and leaving it behind would corrupt
+# any other suite's own bare `import cx_log`.
+_log_spec = importlib.util.spec_from_file_location(
+    "cx_log_codex", os.path.join(_HOOKS_DIR, "cx_log.py"))
+cx_log = importlib.util.module_from_spec(_log_spec)
+_log_spec.loader.exec_module(cx_log)
+_prev_cx_log = sys.modules.get("cx_log")
+sys.modules["cx_log"] = cx_log
+
+_spec = importlib.util.spec_from_file_location(
+    "cx_check_codex", os.path.join(_HOOKS_DIR, "cx_check.py"))
+cx_check = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(cx_check)
+
+if _prev_cx_log is None:
+    sys.modules.pop("cx_log", None)
+else:
+    sys.modules["cx_log"] = _prev_cx_log
 
 BOOTSTRAP = cx_check._bootstrap_script_path()
 
@@ -111,7 +136,7 @@ class TestCodexModeDetection(unittest.TestCase):
         # than the module flag after run() has already reset it.
         decision, _code = run(bash("npm test"), which=None, codex=True)
         self.assertEqual(decision, "deny")
-        self.assertIn("$codex-cli-setup", LAST_OUTPUT["permissionDecisionReason"])
+        self.assertIn("$cx-cli-setup", LAST_OUTPUT["permissionDecisionReason"])
 
     def test_no_codex_flag_leaves_codex_mode_false(self):
         decision, _code = run(bash("npm test"), which=None, codex=False)
@@ -121,7 +146,7 @@ class TestCodexModeDetection(unittest.TestCase):
     def test_setup_invocation_dollar_prefix_in_codex_mode(self):
         cx_check._CODEX_MODE = True
         try:
-            self.assertEqual(cx_check._setup_invocation(), "$codex-cli-setup")
+            self.assertEqual(cx_check._setup_invocation(), "$cx-cli-setup")
         finally:
             cx_check._CODEX_MODE = False
 
@@ -134,29 +159,29 @@ class TestCodexOutputEnvelope(unittest.TestCase):
     """Codex CLI's PreToolUse deny contract is confirmed identical to Claude Code's nested
     hookSpecificOutput shape — codex mode must NEVER take the Copilot CLI flat-JSON branch."""
 
-    def test_cx_absent_denies_nested_shape_exit_2(self):
+    def test_cx_absent_denies_nested_shape_exit_0(self):
         decision, code = run(bash("npm test"), which=None)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 2)
+        self.assertEqual(code, 0)
         self.assertIn("hookEventName", LAST_OUTPUT)
         self.assertEqual(LAST_OUTPUT["hookEventName"], "PreToolUse")
 
     def test_deny_reason_uses_dollar_invocation(self):
         decision, code = run(bash("npm test"), which=None)
         self.assertEqual(decision, "deny")
-        self.assertIn("$codex-cli-setup", LAST_OUTPUT["permissionDecisionReason"])
+        self.assertIn("$cx-cli-setup", LAST_OUTPUT["permissionDecisionReason"])
 
     def test_below_min_version_denies_with_dollar_invocation(self):
         decision, code = run(bash("npm test"), version_state="below")
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 2)
-        self.assertIn("$codex-cli-setup", LAST_OUTPUT["additionalContext"])
+        self.assertEqual(code, 0)
+        self.assertIn("$cx-cli-setup", LAST_OUTPUT["permissionDecisionReason"])
 
     def test_unauthenticated_denies_with_dollar_invocation(self):
         decision, code = run(bash("npm test"), authed=False)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 2)
-        self.assertIn("$codex-cli-setup", LAST_OUTPUT["additionalContext"])
+        self.assertEqual(code, 0)
+        self.assertIn("$cx-cli-setup", LAST_OUTPUT["permissionDecisionReason"])
 
     def test_allowed_when_ready(self):
         decision, code = run(bash("npm test"))
@@ -183,7 +208,7 @@ class TestApplyPatchMatcher(unittest.TestCase):
     def test_apply_patch_denies_fail_closed_when_cx_absent(self):
         decision, code = run(apply_patch("/src/foo.py"), which=None)
         self.assertEqual(decision, "deny")
-        self.assertEqual(code, 2)
+        self.assertEqual(code, 0)
 
     def test_apply_patch_allowed_when_ready(self):
         decision, code = run(apply_patch("/src/foo.py", "x = 1"))

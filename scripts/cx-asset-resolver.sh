@@ -45,7 +45,18 @@ resolve_cx_asset() {
     fi
 }
 
-# Run directly → resolve for the current machine.
+# Run directly → resolve for the current machine. When scripts/cx-release-tag sits beside this
+# file, include that tag so the printed asset name matches the pinned download.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    resolve_cx_asset "$(uname -s)" "$(uname -m)"
+    _cx_tag=""
+    _cx_tag_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cx-release-tag"
+    if [[ -r "$_cx_tag_file" ]]; then
+        while IFS= read -r _cx_line || [[ -n "$_cx_line" ]]; do
+            _cx_line="${_cx_line#"${_cx_line%%[![:space:]]*}"}"
+            [[ -z "$_cx_line" || "${_cx_line:0:1}" == "#" ]] && continue
+            _cx_tag="$_cx_line"
+            break
+        done < "$_cx_tag_file"
+    fi
+    resolve_cx_asset "$(uname -s)" "$(uname -m)" "$_cx_tag"
 fi

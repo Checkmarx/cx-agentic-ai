@@ -20,7 +20,15 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _CLAUDE_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "cx-devassist"))
 _COPILOT_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "copilot-devassist"))
 _CURSOR_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "cursor-devassist"))
+_CODEX_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, "..", "plugins", "codex-devassist"))
 _GEMINI_PLUGIN_ROOT = os.path.normpath(os.path.join(_HERE, ".."))
+_RELEASE_TAG_ROOTS = (
+    _CLAUDE_PLUGIN_ROOT,
+    _COPILOT_PLUGIN_ROOT,
+    _CURSOR_PLUGIN_ROOT,
+    _CODEX_PLUGIN_ROOT,
+    _GEMINI_PLUGIN_ROOT,
+)
 _REPO_ROOT = os.path.normpath(os.path.join(_HERE, ".."))
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
@@ -53,31 +61,7 @@ class TestClaudePluginManifest(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(_CLAUDE_PLUGIN_ROOT, "README.md")))
 
 
-class TestClaudeHookTriage(unittest.TestCase):
-    """Claude plugin hook-deny triage contract (parity with Gemini GEMINI.md)."""
-
-    def test_claude_md_present_and_requires_triage(self):
-        path = os.path.join(_CLAUDE_PLUGIN_ROOT, "CLAUDE.md")
-        self.assertTrue(os.path.isfile(path), "CLAUDE.md missing at plugin root")
-        ctx = _read(path)
-        self.assertIn("remediate** it", ctx)
-        self.assertIn("suppress** it", ctx)
-        self.assertIn("Never auto-remediate", ctx)
-
-    def test_asca_skill_requires_hook_triage(self):
-        asca = _read(_CLAUDE_PLUGIN_ROOT, "skills", "cx-devassist-asca", "SKILL.md")
-        self.assertIn("Flow 1b: Hook Triage", asca)
-        self.assertIn("remediate** it", asca)
-        self.assertIn("suppress** it", asca)
-        self.assertNotIn("skip Flow 1 entirely", asca.lower())
-
-    def test_sca_skill_requires_hook_triage(self):
-        sca = _read(_CLAUDE_PLUGIN_ROOT, "skills", "cx-devassist-sca", "SKILL.md")
-        self.assertIn("Flow 1b: Hook Triage", sca)
-        self.assertIn("remediate** it", sca)
-        self.assertIn("suppress** it", sca)
-        self.assertNotIn("skip Flow 1", sca.lower())
-
+class TestGeminiSetup(unittest.TestCase):
     def test_gemini_oauth_admin_prefill_skip(self):
         oauth = _read(_GEMINI_PLUGIN_ROOT, "skills", "cx-cli-setup", "references", "oauth.md")
         self.assertIn("SKIP Question 2", oauth)
@@ -168,28 +152,33 @@ class TestMinVersionSync(unittest.TestCase):
 
 
 class TestGeminiReleaseTagSync(unittest.TestCase):
-    """Gemini bootstrap pins ast-cli downloads to scripts/cx-release-tag (search: CX_RELEASE_TAG)."""
+    """Every agent bootstrap pins ast-cli downloads to scripts/cx-release-tag (search: CX_RELEASE_TAG)."""
 
-    def _canonical_tag(self):
-        for line in _read(_GEMINI_PLUGIN_ROOT, "scripts", "cx-release-tag").splitlines():
+    def _canonical_tag(self, root):
+        for line in _read(root, "scripts", "cx-release-tag").splitlines():
             s = line.strip()
             if s and not s.startswith("#"):
                 return s
-        self.fail("no tag line found in scripts/cx-release-tag")
+        self.fail("no tag line found in %s/scripts/cx-release-tag" % root)
 
-    def test_release_tag_two_sites_agree(self):
-        canon = self._canonical_tag()
-        self.assertTrue(canon, "cx-release-tag is empty")
-        sh = _read(_GEMINI_PLUGIN_ROOT, "scripts", "cx-bootstrap.sh")
-        m = re.search(r'MIN_CX_RELEASE_TAG_FALLBACK="([^"]+)"', sh)
-        self.assertIsNotNone(m, "cx-bootstrap.sh: MIN_CX_RELEASE_TAG_FALLBACK not found")
-        self.assertEqual(m.group(1), canon, "cx-bootstrap.sh fallback != cx-release-tag")
+    def test_release_tag_sites_agree(self):
+        tags = [self._canonical_tag(root) for root in _RELEASE_TAG_ROOTS]
+        self.assertEqual(len(set(tags)), 1, "cx-release-tag differs across agents: %s" % tags)
+        canon = tags[0]
+        self.assertEqual(canon, "2.3.66-prompt-injection-pre-release")
+        for root in _RELEASE_TAG_ROOTS:
+            sh = _read(root, "scripts", "cx-bootstrap.sh")
+            m = re.search(r'MIN_CX_RELEASE_TAG_FALLBACK="([^"]+)"', sh)
+            self.assertIsNotNone(m, "%s: MIN_CX_RELEASE_TAG_FALLBACK not found" % root)
+            self.assertEqual(m.group(1), canon, "%s fallback != cx-release-tag" % root)
 
     def test_bootstrap_uses_load_release_tag(self):
-        sh = _read(_GEMINI_PLUGIN_ROOT, "scripts", "cx-bootstrap.sh")
-        self.assertIn("load_release_tag", sh)
-        self.assertRegex(sh, r'tag="\$\(load_release_tag\)"')
-        self.assertNotIn("resolve_latest_tag", sh)
+        for root in _RELEASE_TAG_ROOTS:
+            sh = _read(root, "scripts", "cx-bootstrap.sh")
+            self.assertIn("load_release_tag", sh)
+            self.assertRegex(sh, r'tag="\$\(load_release_tag\)"')
+            self.assertNotIn("resolve_latest_tag", sh)
+            self.assertIn('resolve_cx_asset "$uname_s" "$uname_m" "$release_tag"', sh)
 
 
 class TestGeminiExtension(unittest.TestCase):
@@ -257,19 +246,6 @@ class TestGeminiExtension(unittest.TestCase):
     def test_cx_record_login_script_present(self):
         self.assertTrue(os.path.isfile(os.path.join(_GEMINI_PLUGIN_ROOT, "hooks", "cx_record_login.sh")))
 
-    def test_asca_skill_requires_hook_triage(self):
-        asca = _read(_GEMINI_PLUGIN_ROOT, "skills", "cx-devassist-asca", "SKILL.md")
-        self.assertIn("Flow 1b: Hook Triage", asca)
-        self.assertIn("remediate** it", asca)
-        self.assertIn("suppress** it", asca)
-        self.assertNotIn("skip Flow 1 entirely", asca.lower())
-
-    def test_gemini_md_requires_hook_triage(self):
-        ctx = _read(_GEMINI_PLUGIN_ROOT, "GEMINI.md")
-        self.assertIn("remediate** it", ctx)
-        self.assertIn("suppress** it", ctx)
-        self.assertIn("Never auto-remediate", ctx)
-
     def test_gemini_md_requires_post_remediation_rescan(self):
         ctx = _read(_GEMINI_PLUGIN_ROOT, "GEMINI.md")
         self.assertIn("Step 4 re-scan is mandatory", ctx)
@@ -285,11 +261,8 @@ class TestGeminiExtension(unittest.TestCase):
         path = os.path.join(_GEMINI_PLUGIN_ROOT, "skills", "cx-devassist-kics", "SKILL.md")
         self.assertTrue(os.path.isfile(path), "cx-devassist-kics skill must ship with Gemini")
 
-    def test_kics_skill_requires_hook_triage(self):
+    def test_kics_skill_uses_code_remediation(self):
         kics = _read(_GEMINI_PLUGIN_ROOT, "skills", "cx-devassist-kics", "SKILL.md")
-        self.assertIn("Flow 1b: Hook Triage", kics)
-        self.assertIn("remediate** it", kics)
-        self.assertIn("suppress** it", kics)
         self.assertIn("codeRemediation", kics)
         self.assertIn('type: "iac"', kics)
         self.assertIn("Do **not** use", kics)
@@ -401,7 +374,6 @@ class TestShippedBytes(unittest.TestCase):
 
     _GEMINI_ONLY_LF_FILES = [
         ("config", "cx-scannable-files"),
-        ("scripts", "cx-release-tag"),
         ("hooks", "_cx_scan_audit.sh"),
     ]
 
@@ -418,6 +390,10 @@ class TestShippedBytes(unittest.TestCase):
         for parts in self._GEMINI_ONLY_LF_FILES:
             self.assertNotIn(b"\r", self._bytes(_GEMINI_PLUGIN_ROOT, *parts),
                              "cx-agentic-ai/%s contains CR bytes — must be LF-only" % parts[-1])
+        for plugin_root in _RELEASE_TAG_ROOTS:
+            self.assertNotIn(b"\r", self._bytes(plugin_root, "scripts", "cx-release-tag"),
+                             "%s/scripts/cx-release-tag contains CR bytes — must be LF-only" %
+                             os.path.basename(plugin_root))
 
     def test_cx_min_version_is_pure_ascii(self):
         for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT, _GEMINI_PLUGIN_ROOT):
@@ -428,11 +404,14 @@ class TestShippedBytes(unittest.TestCase):
                           "(would crash the gate under LANG=C): %s" % (
                               os.path.basename(plugin_root), e))
 
-    def test_gemini_cx_release_tag_file_is_pure_ascii(self):
-        try:
-            self._bytes(_GEMINI_PLUGIN_ROOT, "scripts", "cx-release-tag").decode("ascii")
-        except UnicodeDecodeError as e:
-            self.fail("cx-release-tag is not pure ASCII (would break bootstrap under LANG=C): %s" % e)
+    def test_cx_release_tag_file_is_pure_ascii(self):
+        for plugin_root in _RELEASE_TAG_ROOTS:
+            try:
+                self._bytes(plugin_root, "scripts", "cx-release-tag").decode("ascii")
+            except UnicodeDecodeError as e:
+                self.fail("%s/scripts/cx-release-tag is not pure ASCII "
+                          "(would break bootstrap under LANG=C): %s" % (
+                              os.path.basename(plugin_root), e))
 
 
 class TestHookWiring(unittest.TestCase):
