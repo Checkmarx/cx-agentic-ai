@@ -260,12 +260,11 @@ _READONLY_COMMANDS = frozenset({
     "df", "du", "ps", "grep", "rg", "cut", "uniq", "cmp", "cksum", "md5sum", "sha256sum",
 })
 
-# --- Scannable files: what the three Checkmarx engines can actually analyse ------------------------
+# --- Scannable files: what the Checkmarx engines can actually analyse -----------------------------
 # The readiness chain (cx present → recent → capable → authenticated → licensed → really scanning) is
-# only worth ENFORCING for a file one of the engines would look at. Blocking a README.md write because
-# cx is unauthenticated helps nobody: ASCA, KICS and SCA each self-skip an unsupported path, so that
-# write would have gone through UNSCANNED even on a perfectly healthy cx — the block was friction,
-# not protection.
+# only worth ENFORCING for a file one of the engines would look at. ASCA, KICS and SCA each self-skip
+# an unsupported path. The secret engine does not: it scans every file except node_modules, dependency
+# manifests (those are SCA's), and the Checkmarx ignore files. A README.md write is therefore gated.
 #
 # The set lives in config/cx-scannable-files so an administrator can adjust coverage without editing
 # code. THIS is its only reader — see that file's header for why a second, POSIX-shell implementation
@@ -285,6 +284,11 @@ _SCANNABLE_FILES_MAX_BYTES = 65536
 #   base        → exact basename         (KICS `Dockerfile`, SCA's manifest filename set)
 #   txtprefix   → a *.txt manifest       (SCA oss-realtime.go:238-244)
 #   swiftprefix → a *.swift manifest     (SCA oss-realtime.go:252-255)
+#   secretskip  → path substring the secret engine does not scan
+#                 (ast-vscode-extension SecretsScannerService.shouldScanFile /
+#                 BaseScannerService.shouldScanFile). Every path that does not
+#                 match one of these is gated, because secrets have no extension
+#                 allowlist.
 #
 # The two *prefix kinds exist because SCA treats a GENERIC extension as a manifest only when the
 # basename also starts with a known prefix: `requirements.txt` is one but `changelog.txt` is not,
@@ -293,7 +297,7 @@ _SCANNABLE_FILES_MAX_BYTES = 65536
 # _SCANNABLE_KINDS is derived from it rather than repeated, which is what let `swiftprefix:` ship
 # in the config and be silently dropped by the parser.
 _PREFIX_KINDS_BY_EXT = {".txt": "txtprefix", ".swift": "swiftprefix"}
-_SCANNABLE_KINDS = ("ext", "suffix", "base") + tuple(_PREFIX_KINDS_BY_EXT.values())
+_SCANNABLE_KINDS = ("ext", "suffix", "base", "secretskip") + tuple(_PREFIX_KINDS_BY_EXT.values())
 
 # The tool_input key holding the target path, in priority order. Copilot CLI create/edit typically
 # carry file_path; `path` is accepted as a fallback. Notebook-style payloads carry notebook_path.
@@ -407,7 +411,13 @@ def _is_scannable_file(hook_input):
     # semantics) while the agent types a native Windows path, where os.path.basename would not split
     # on backslashes. `""` from _effective_basename means "cannot determine the real target" (an NTFS
     # stream suffix, or a name that strips to nothing) — both gate.
-    base = _effective_basename(os.path.basename(path.replace("\\", "/").rstrip("/")).lower())
+    normalized = path.replace("\\", "/").rstrip("/").lower()
+    # Leading slash so a relative "node_modules/..." matches the same "/node_modules/"
+    # substring the VS Code base scanner applies to an absolute fsPath.
+    skipped = "/" + normalized.lstrip("/")
+    if any(skip in skipped for skip in table.get("secretskip", ())):
+        return False
+    base = _effective_basename(os.path.basename(normalized))
     if not base:
         return True
     if base in table["base"]:
@@ -420,7 +430,8 @@ def _is_scannable_file(hook_input):
     prefix_kind = _PREFIX_KINDS_BY_EXT.get(ext)
     if prefix_kind and any(base.startswith(prefix) for prefix in table[prefix_kind]):
         return True
-    return False
+    # Secrets scan every remaining file. ASCA, KICS and SCA would skip it; secrets would not.
+    return True
 
 
 def _normalize_path(p):

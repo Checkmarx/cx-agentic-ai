@@ -2,9 +2,9 @@
 # =============================================================================
 # The gate (hooks/cx_check.py) requires cx to be installed, current, authenticated,
 # licensed and actually scanning BEFORE a file write is allowed. That readiness check
-# is only worth enforcing for files one of the three engines can scan — blocking a
+# is only worth enforcing for files one of the engines can scan — blocking a
 # README.md write because cx is unauthenticated helps nobody, since no engine would
-# have looked at it.
+# have looked at it. Engines: ASCA (SAST), KICS (IaC), SCA (manifests), secrets.
 #
 # EXACTLY ONE piece of code reads this file: hooks/cx_check.py's _load_scannable_files, used by
 # _is_scannable_file. That is deliberate and worth preserving.
@@ -127,3 +127,21 @@ txtprefix:constraint
 
 # oss-realtime.go:252-255 — Swift PM multi-toolchain variant (Package@swift-5.9.swift, …).
 swiftprefix:package@swift-
+
+# --- Secrets (realtime) ------------------------------------------------------
+# Mirrors SecretsScannerService.shouldScanFile plus BaseScannerService.shouldScanFile
+# in ast-vscode-extension:
+#   packages/core/src/realtimeScanners/scanners/secrets/secretsScannerService.ts
+#   packages/core/src/realtimeScanners/common/baseScannerService.ts
+# There is no extension allowlist. Secrets scan every file-scheme path, and skip:
+#   - any path containing /node_modules/          (base scanner, every engine)
+#   - dependency manifests                        (supportedManifestFilePatterns;
+#                                                  those stay gated by the SCA block)
+#   - the Checkmarx ignore files under .vscode/   (secretsScannerService)
+# secretskip: a lowercased path substring. A match is not gated, unless CX_GATE_ALL_FILES=1.
+# Every other file is gated, because the secret engine would scan it.
+secretskip:/node_modules/
+secretskip:/.vscode/.checkmarxignored
+secretskip:/.vscode/.checkmarxignoredtemplist
+secretskip:/.vscode/.checkmarxdevassistignored
+secretskip:/.vscode/.checkmarxdevassistignoredtemplist
