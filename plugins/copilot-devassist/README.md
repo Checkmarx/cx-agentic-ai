@@ -3,11 +3,17 @@
 A **fail-closed security gate** for **GitHub Copilot CLI**, backed by
 [Checkmarx CxOne](https://checkmarx.com/).
 
-Before Copilot creates or edits a file the Checkmarx engines can scan — source code, IaC, or a
-dependency manifest — the plugin asks the Checkmarx `cx` CLI to scan the proposed content. If a real
-vulnerability or policy violation is found — **or if the scanner can't be trusted to run** — the
-action is **blocked**, not silently allowed. Found issues are remediated interactively through the
-bundled Checkmarx MCP server.
+Before Copilot creates or edits a file the Checkmarx engines can scan — source code, IaC, a
+dependency manifest, or any other file the secret engine covers — the plugin asks the Checkmarx
+`cx` CLI to scan the proposed content. If a real vulnerability, a hardcoded
+secret, or a policy violation is found — **or if the scanner can't be trusted to run** — the action
+is **blocked**, not silently allowed. Found issues are remediated interactively through the bundled
+Checkmarx MCP server. A secret value is never shown in the deny, the summary, or the audit log.
+
+> **Secrets engine caveat.** Unlike the readiness chain, the native secret scan itself fails **open** on a
+> scanner error, a license/feature-flag miss, or a crash — and it needs a `cx` build that includes
+> secret detection in `copilot-cli-pre-file-write` (ast-cli PR #1583). On an edit, only *new* secrets
+> block; secrets already in the file do not.
 
 Shell commands and file types no engine can scan are **not** gated: nothing would have been scanned
 there, so blocking them cost developers time without buying protection. See
@@ -27,7 +33,7 @@ there, so blocking them cost developers time without buying protection. See
 
 | Tool event | Gate | Native scanner | What it checks |
 |---|---|---|---|
-| `create` / `edit` — **scannable file** | `cx_check` | `cx hooks copilot-cli-pre-file-write` | Static analysis of the proposed content: ASCA (SAST), KICS (IaC), SCA (manifests) |
+| `create` / `edit` — **scannable file** | `cx_check` | `cx hooks copilot-cli-pre-file-write` | Static analysis of the proposed content: ASCA (SAST), KICS (IaC), SCA (manifests), secrets |
 | `create` / `edit` — any other file type | — | — | Nothing: no engine can scan it, so the write proceeds |
 | `bash` / `powershell` / `shell` | — | — | **Not gated.** One non-blocking observer runs (`cx_record_login`) — see below |
 | `Stop` (`agentStop`) — the agent finishes a turn | — | `cx hooks copilot-cli-stop` | Advisory, non-blocking lifecycle hook (e.g. session/usage bookkeeping); never blocks the agent |
@@ -82,7 +88,7 @@ which denies every write.
 
 ### Scannable file types
 
-The gate blocks a file write only when one of the three engines can analyse that file. The list is
+The gate blocks a file write only when one of the engines can analyse that file. The list is
 [`config/cx-scannable-files`](config/cx-scannable-files), and it mirrors the engines' own filters in
 [`ast-cli`](https://github.com/Checkmarx/ast-cli):
 
@@ -91,14 +97,12 @@ The gate blocks a file write only when one of the three engines can analyse that
 | **ASCA** (SAST) | `.java` `.js` `.jsx` `.ts` `.tsx` `.mjs` `.cjs` `.cs` `.go` `.py` `.pyw` |
 | **KICS** (IaC) | `.tf` `.yaml` `.yml` `.json` `.proto` `.dockerfile` `.auto.tfvars` `.terraform.tfvars`, and `Dockerfile` |
 | **SCA** (manifests) | `.csproj` `.sbt` `.podspec`; `pom.xml` `package.json` `bower.json` `yarn.lock` `Directory.Packages.props` `packages.config` `go.mod` `build.gradle` `build.gradle.kts` `libs.versions.toml` `setup.cfg` `setup.py` `pyproject.toml` `Podfile` `Cartfile` `Gemfile` `composer.json` `pubspec.yaml` `Package.swift`; and `*.txt` starting `requirement`/`packages`/`constraint` |
+| **Secrets** | Every other file. Same rule as the VS Code extension (`SecretsScannerService.shouldScanFile`): no extension allowlist. Skipped only for `node_modules` and the Checkmarx ignore files under `.vscode/` (`.checkmarxIgnored`, `.checkmarxIgnoredTempList`, `.checkmarxDevAssistIgnored`, `.checkmarxDevAssistIgnoredTempList`). Dependency manifests are not secret-scanned; the SCA row still gates them. |
 
-Everything else — `.md`, `.html`, `.css`, `.sql`, `.sh`, `.rb`, `.php`, `.c`, `.rs` — is not gated,
-because no engine would scan it. Two consequences worth knowing:
+A write the secret engine would scan is gated even when ASCA, KICS, and SCA would ignore it — including `.md`, `.html`, `.css`, `.sql`, and a plain `.tfvars`. Two paths are not gated:
 
-- `.json` and `.yaml` **are** gated, because KICS scans them. A `tsconfig.json` write still runs the
-  full readiness check even though it is not IaC.
-- A plain `.tfvars` is **not** gated: KICS lists only the compound `.auto.tfvars` /
-  `.terraform.tfvars` suffixes, so it would not be scanned either.
+- Anything under `node_modules` — the base scanner skips that directory for every engine.
+- The Checkmarx ignore files listed above — the secret scanner skips them, and no other engine reads them.
 
 The file has exactly one reader — `cx_check.py`'s `_is_scannable_file`. If the config file is
 unreadable or empty, every write is gated again: fail-closed, never fail-open. Editing it is how an
@@ -116,7 +120,7 @@ plugins/copilot-devassist/
 ├── README.md
 ├── config/
 │   ├── cx-onboarding.properties # OPTIONAL admin pre-fill of Checkmarx One URL + tenant (onboarding)
-│   └── cx-scannable-files       # the file types the gate blocks on — mirrors ASCA/KICS/SCA filters
+│   └── cx-scannable-files       # the file types the gate blocks on — mirrors ASCA/KICS/SCA/secrets filters
 ├── hooks/
 │   ├── hooks-copilot-cli.json   # GitHub Copilot CLI PreToolUse wiring
 │   ├── cx_check.sh              # POSIX launcher — resolves Git Bash + Python 3, then runs the gate
@@ -135,24 +139,29 @@ plugins/copilot-devassist/
     ├── cx-cli-setup/            # guided cx install + authentication (router + references/)
     ├── cx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
     ├── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
-    └── cx-devassist-kics/       # on-demand IaC (KICS) scan + remediation for Dockerfile/Terraform/K8s YAML
+    ├── cx-devassist-kics/       # on-demand IaC (KICS) scan + remediation for Dockerfile/Terraform/K8s YAML
+    └── cx-devassist-secrets/    # on-demand secret scan + remediation (every file except manifests, node_modules, ignore files)
 ```
 
 > Tests live at the **repo root** (`tests/`), outside the shipped plugin, so they aren't distributed.
 
 ### On-demand scanning (skills)
 
-Beyond the automatic PreToolUse gate, three skills scan on request and remediate via the Checkmarx MCP:
+Beyond the automatic PreToolUse gate, four skills scan on request and remediate via the Checkmarx MCP:
 
 | Ask | Skill | Engine |
 |---|---|---|
 | "scan this file" / "check app.py" (source code) | `cx-devassist-asca` | SAST (ASCA) → `mcp__Checkmarx__codeRemediation` |
 | "scan my dependencies" / "check package.json" (manifest/lockfile) | `cx-devassist-sca` | SCA / OSS → `mcp__Checkmarx__packageRemediation` |
 | "scan this Dockerfile" / "check main.tf" (IaC file) | `cx-devassist-kics` | IaC (KICS) → `mcp__Checkmarx__codeRemediation` |
+| "scan for secrets" / "check .env" (hardcoded credentials) | `cx-devassist-secrets` | Secrets → `mcp__Checkmarx__codeRemediation` (`type: secrets`) |
 | whole project / cloud-scale scan | Checkmarx MCP (Cx1 cloud) tools | — |
 
 A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA;
-an IaC file (Dockerfile, `.tf`, `.yaml`/`.yml`, …) → KICS.
+an IaC file (Dockerfile, `.tf`, `.yaml`/`.yml`, …) → KICS; a hardcoded secret in any other file →
+Secrets. Secret remediation never prints the secret value. Self-healing
+(the default) applies the MCP fix and re-scans; detect-only, when the scanner says so, reports the
+finding and does not edit.
 
 ### Admin onboarding pre-fill (optional)
 

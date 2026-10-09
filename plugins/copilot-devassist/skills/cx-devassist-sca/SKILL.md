@@ -1,6 +1,6 @@
 ﻿---
 name: cx-devassist-sca
-description: "Runs a Checkmarx SCA (Software Composition Analysis / OSS) scan on dependency manifests and lockfiles to detect vulnerable and malicious open-source packages, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan dependencies, check packages, audit a manifest/lockfile (package.json, requirements.txt, go.mod, pom.xml, build.gradle, …), or fix SCA/OSS findings. Invoke as: cx-devassist:cx-devassist-sca"
+description: "Runs a Checkmarx SCA (Software Composition Analysis / OSS) scan on dependency manifests and lockfiles to detect vulnerable and malicious open-source packages, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan dependencies, check packages, audit a manifest/lockfile (package.json, requirements.txt, go.mod, pom.xml, build.gradle, …), or fix SCA/OSS findings. For hardcoded secrets use cx-devassist-secrets instead. Invoke as: cx-devassist:cx-devassist-sca"
 ---
 
 # CX DevAssist SCA
@@ -22,16 +22,17 @@ This skill has two entry points:
 
 ### Routing — which Checkmarx capability to use
 
-The plugin exposes three scan surfaces; pick by the target, and ask if it is ambiguous:
+The plugin exposes four scan surfaces; pick by the target, and ask if it is ambiguous:
 
 | The user wants to scan… | Use |
 |---|---|
 | A **source code file** (`.py`, `.js`, `.java`, `.go`, …) for code vulnerabilities | `cx-devassist-asca` (SAST) |
 | A **dependency manifest / lockfile** (package.json, requirements.txt, go.mod, pom.xml, …) | **this skill** (SCA/OSS) |
+| A file for **hardcoded secrets**, credentials, tokens, or keys | `cx-devassist-secrets` |
 | An **entire project / repository** at cloud scale, or existing platform scan results | the Checkmarx MCP (Cx1 cloud) tools |
 
 A bare "scan this file" refers to whatever file is in context: a manifest/lockfile → this skill; source
-code → `cx-devassist-asca`. If it is unclear which, ask the user.
+code → `cx-devassist-asca`; secrets → `cx-devassist-secrets`. If it is unclear which, ask the user.
 
 ## Prerequisites
 

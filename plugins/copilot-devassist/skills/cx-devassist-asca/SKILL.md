@@ -1,6 +1,6 @@
 ﻿---
 name: cx-devassist-asca
-description: "Runs a Checkmarx ASCA (AI Security Code Assistant) SAST scan on a SOURCE CODE file to detect code vulnerabilities, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan or fix a source code file (.py/.js/.java/.go/.ts/…) for security vulnerabilities. For dependency manifests/lockfiles (package.json, requirements.txt, go.mod, …) use cx-devassist-sca instead. Invoke as: cx-devassist:cx-devassist-asca"
+description: "Runs a Checkmarx ASCA (AI Security Code Assistant) SAST scan on a SOURCE CODE file to detect code vulnerabilities, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan or fix a source code file (.py/.js/.java/.go/.ts/…) for security vulnerabilities. For dependency manifests/lockfiles (package.json, requirements.txt, go.mod, …) use cx-devassist-sca instead. For hardcoded secrets use cx-devassist-secrets instead. Invoke as: cx-devassist:cx-devassist-asca"
 ---
 
 # CX Security ASCA
@@ -13,7 +13,8 @@ This skill has two entry points:
 
 1. **On-demand scan** — User asks to scan a **source code file** for vulnerabilities (e.g., "scan this
    file", "check app.py for security issues"). If the target is a **dependency manifest/lockfile**
-   (package.json, requirements.txt, go.mod, …), use `cx-devassist-sca` instead.
+   (package.json, requirements.txt, go.mod, …), use `cx-devassist-sca` instead. For hardcoded
+   secrets, use `cx-devassist-secrets` instead.
 2. **Remediation** — User asks to fix ASCA findings, or GitHub Copilot CLI (copilot-agent) needs to fix SAST vulnerabilities detected by ASCA
 
 > **If ASCA findings are already present in context** (e.g., provided by a hook block or a prior scan result), **skip Flow 1 entirely** and proceed directly to Flow 2 using those findings. Do not re-run the scan.
@@ -26,10 +27,11 @@ Pick by the target, and ask if it is ambiguous:
 |---|---|
 | A **source code file** (`.py`, `.js`, `.java`, `.go`, `.ts`, …) for code vulnerabilities | **this skill** (SAST/ASCA) |
 | A **dependency manifest / lockfile** (package.json, requirements.txt, go.mod, pom.xml, …) | `cx-devassist-sca` (SCA/OSS) |
+| A file for **hardcoded secrets**, credentials, tokens, or keys | `cx-devassist-secrets` |
 | An **entire project / repository** at cloud scale, or existing platform scan results | the Checkmarx MCP (Cx1 cloud) tools |
 
 A bare "scan this file" refers to whatever file is in context: source code → this skill; a
-manifest/lockfile → `cx-devassist-sca`. If it is unclear which, ask the user.
+manifest/lockfile → `cx-devassist-sca`; secrets → `cx-devassist-secrets`. If it is unclear which, ask the user.
 
 ## Prerequisites
 
