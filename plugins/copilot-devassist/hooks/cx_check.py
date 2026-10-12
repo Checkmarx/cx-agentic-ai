@@ -304,7 +304,7 @@ _FILE_TOOL_PATH_KEYS = ("file_path", "notebook_path", "path")
 # names are kept so the same gate module still classifies those payloads in tests.
 # Kept in step with the file matchers in hooks/hooks-copilot-cli.json; a new file tool added there
 # but not here is gated (fail closed), which is the safe direction.
-_FILE_WRITE_TOOLS = frozenset({"create", "edit", "Write", "Edit", "MultiEdit", "NotebookEdit"})
+_FILE_WRITE_TOOLS = frozenset({"create", "edit", "Write", "Edit", "MultiEdit", "NotebookEdit","apply_patch"}) 
 
 
 def _scannable_files_path():
