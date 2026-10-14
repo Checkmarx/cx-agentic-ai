@@ -131,28 +131,6 @@ case "${1:-} ${2:-}" in
     *)            _CXRUN_MCP=0 ;;
 esac
 
-# True when ALL FOUR scanner switches in ~/.checkmarx/cx-onboarding.properties are explicitly off.
-# The parsing lives ONLY in cx_check.py (`all-scanners-disabled` exits 0 when all are off) — one
-# reader for every OS, no shell reimplementation to drift. Fail-safe: no working Python, a missing or
-# unreadable config, or any non-false value all mean "not disabled", so this can only narrow, never deny.
-_cxrun_all_scanners_disabled() {
-    for _cxrun_py in python3 python "py -3"; do
-        command -v "${_cxrun_py%% *}" >/dev/null 2>&1 || continue
-        # shellcheck disable=SC2086
-        $_cxrun_py "$_CXRUN_DIR/cx_check.py" all-scanners-disabled >/dev/null 2>&1
-        case $? in
-            0) return 0 ;;   # all off
-            1) return 1 ;;   # at least one on
-        esac                 # anything else = this python is broken (e.g. a Windows Store stub): try the next
-    done
-    return 1
-}
-
-# Every scanner disabled by the user → nothing for the native scan to do; never block.
-if [ "$_CXRUN_SCAN" = 1 ] && _cxrun_all_scanners_disabled; then
-    exit 0
-fi
-
 if [ -n "$CX_RESOLVED" ]; then
     if [ "$_CXRUN_SCAN" = 1 ]; then
         # Capture (rather than exec) ONLY for the blocking scan decision, so this wrapper can observe

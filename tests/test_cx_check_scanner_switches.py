@@ -110,12 +110,6 @@ class LoadScannerSwitches(_TempHome):
             f.write(b"\xff\xfe\x00\xd8garbage")
         self.assertEqual(cx_check._load_scanner_switches(), {k: True for k in _KEYS})
 
-    def test_all_disabled_requires_all_four(self):
-        self.write(_props(**{k: "false" for k in _KEYS[:3]}))
-        self.assertFalse(cx_check._all_scanners_disabled())
-        self.write(_props(**{k: "false" for k in _KEYS}))
-        self.assertTrue(cx_check._all_scanners_disabled())
-
 
 class SeedUserConfig(_TempHome):
     def test_copies_bundle_when_absent(self):
@@ -218,6 +212,80 @@ class MergeNewProperties(_TempHome):
         self.assertFalse(cx_check._merge_new_properties(BUNDLED, os.path.join(self.home, "nope")))
 
 
+class AdminConfigPrecedence(_TempHome):
+    """cx_base_auth_uri / cx_tenant: a valid value in the user's ~/.checkmarx copy wins over the bundled
+    file, per key; an invalid user value never reaches the login command."""
+
+    def setUp(self):
+        super().setUp()
+        self.bundle = os.path.join(self.home, "bundle.properties")
+        self._orig_admin = cx_check._admin_config_path
+        cx_check._admin_config_path = lambda: self.bundle
+
+    def tearDown(self):
+        cx_check._admin_config_path = self._orig_admin
+        super().tearDown()
+
+    def _bundle(self, body):
+        with open(self.bundle, "w", encoding="utf-8", newline="") as f:
+            f.write(body)
+
+    def test_user_value_overrides_bundle(self):
+        self._bundle("cx_base_auth_uri=https://eu.ast.checkmarx.net\ncx_tenant=bundle-t\n")
+        self.write("cx_base_auth_uri=https://us.ast.checkmarx.net\ncx_tenant=user-t\n")
+        self.assertEqual(cx_check._load_admin_config(), {
+            "cx_base_auth_uri": "https://us.ast.checkmarx.net", "cx_tenant": "user-t"})
+
+    def test_keys_resolve_independently(self):
+        self._bundle("cx_base_auth_uri=https://eu.ast.checkmarx.net\n")
+        self.write("cx_tenant=user-t\n")
+        self.assertEqual(cx_check._load_admin_config(), {
+            "cx_base_auth_uri": "https://eu.ast.checkmarx.net", "cx_tenant": "user-t"})
+
+    def test_user_only_when_bundle_has_none(self):
+        self._bundle("# nothing set\n")
+        self.write("cx_base_auth_uri=https://anz.ast.checkmarx.net\ncx_tenant=t1\n")
+        self.assertEqual(len(cx_check._load_admin_config()), 2)
+
+    def test_bundle_used_when_user_file_absent(self):
+        self._bundle("cx_tenant=bundle-t\n")
+        if os.path.exists(self.cfg):
+            os.remove(self.cfg)
+        self.assertEqual(cx_check._load_admin_config(), {"cx_tenant": "bundle-t"})
+
+    def test_invalid_user_value_falls_back_to_bundle(self):
+        self._bundle("cx_base_auth_uri=https://eu.ast.checkmarx.net\ncx_tenant=bundle-t\n")
+        self.write("cx_base_auth_uri=http://evil.example\ncx_tenant=-rf --proxy x\n")
+        self.assertEqual(cx_check._load_admin_config(), {
+            "cx_base_auth_uri": "https://eu.ast.checkmarx.net", "cx_tenant": "bundle-t"})
+
+    def test_invalid_user_value_with_no_bundle_is_dropped(self):
+        self._bundle("# nothing\n")
+        self.write("cx_base_auth_uri=https://host/path\ncx_tenant=a b\n")
+        self.assertEqual(cx_check._load_admin_config(), {})
+
+    def test_commented_user_example_does_not_override(self):
+        self._bundle("cx_tenant=bundle-t\n")
+        self.write("# cx_tenant=your-tenant\n")
+        self.assertEqual(cx_check._load_admin_config(), {"cx_tenant": "bundle-t"})
+
+    def test_shipped_bundle_has_no_active_url_or_tenant(self):
+        # The shipped defaults must not pre-fill anyone's environment.
+        self.assertEqual(cx_check._parse_admin_file(BUNDLED), {})
+
+    def test_explicit_path_reads_only_that_file(self):
+        self._bundle("cx_tenant=bundle-t\n")
+        self.write("cx_tenant=user-t\n")
+        self.assertEqual(cx_check._load_admin_config(self.bundle), {"cx_tenant": "bundle-t"})
+
+    def test_values_reach_the_login_command(self):
+        self._bundle("# nothing\n")
+        self.write("cx_base_auth_uri=https://eu.ast.checkmarx.net\ncx_tenant=acme\n")
+        bullet = cx_check._oauth_recovery_bullet(cx_check._load_admin_config(), history=[])
+        self.assertIn("--base-auth-uri https://eu.ast.checkmarx.net --tenant acme", bullet)
+        self.assertIn("PRECONFIGURED", bullet)
+
+
 class SecretsSwitchNarrowsGate(_TempHome):
     """With the secrets scanner off, a file only the secrets engine would scan (app.env) is not gated."""
 
@@ -241,11 +309,14 @@ class SecretsSwitchNarrowsGate(_TempHome):
         self.assertTrue(cx_check._is_scannable_file({"tool_name": "bash", "tool_input": {"command": "x"}}))
 
 
-class GateStandsDown(_TempHome):
-    """cx_check() with every scanner off allows with NO readiness requirement; otherwise unchanged."""
+class GateKeepsDenyingWhenSecretsOn(_TempHome):
+    """Switches other than secrets-off never relax the gate."""
 
     def _gate(self, hook_input, **run_kwargs):
         orig = (cx_check._read_hook_input, cx_check.shutil.which, sys.argv)
+        orig_exe = cx_check._cx_exe_with_tier
+        # Hermetic: pretend cx is not installed even on a machine that has it in the canonical store.
+        cx_check._cx_exe_with_tier = lambda: ("cx", "path")
         cx_check._read_hook_input = lambda: hook_input
         cx_check.shutil.which = lambda name: run_kwargs.get("which")
         sys.argv = ["cx_check.py", "--copilot-cli"]
@@ -259,17 +330,12 @@ class GateStandsDown(_TempHome):
                     code = e.code or 0
         finally:
             cx_check._read_hook_input, cx_check.shutil.which, sys.argv = orig
+            cx_check._cx_exe_with_tier = orig_exe
         out = buf.getvalue().strip()
         return (json.loads(out) if out else None), code
 
     _WRITE = {"toolName": "create", "toolArgs": json.dumps({"path": "app.py", "file_text": "x=1"})}
     _WRITE_UNIX = {"tool_name": "create", "tool_input": {"path": "app.py", "file_text": "x=1"}}
-
-    def test_all_disabled_allows_without_cx(self):
-        self.write(_props(**{k: "false" for k in _KEYS}))
-        out, code = self._gate(self._WRITE_UNIX, which=None)   # cx absent: would normally DENY
-        self.assertEqual(code, 0)
-        self.assertEqual(out, {"permissionDecision": "allow"})
 
     def test_one_scanner_still_on_keeps_the_gate(self):
         self.write(_props(**{k: "false" for k in _KEYS[:3]}))
@@ -289,39 +355,6 @@ def _home_env(home):
     env.update({"HOME": home, "USERPROFILE": home, "CX_LOG_DISABLE": "1"})
     env.pop("CX_BINARY", None)
     return env
-
-
-class AllScannersDisabledCli(unittest.TestCase):
-    """`cx_check.py all-scanners-disabled` — the single reader cx_run.sh shells out to."""
-
-    def setUp(self):
-        self.home = tempfile.mkdtemp(prefix="cx-switches-cli-")
-        os.makedirs(os.path.join(self.home, ".checkmarx"))
-
-    def tearDown(self):
-        shutil.rmtree(self.home, ignore_errors=True)
-
-    def _write(self, body):
-        with open(os.path.join(self.home, ".checkmarx", "cx-onboarding.properties"), "w",
-                  encoding="utf-8", newline="") as f:
-            f.write(body)
-
-    def _rc(self):
-        return subprocess.run([sys.executable, "-I", CX_CHECK_PY, "all-scanners-disabled"],
-                              env=_home_env(self.home), capture_output=True, timeout=60).returncode
-
-    def test_exit_0_when_all_off(self):
-        self._write(_props(**{k: "false" for k in _KEYS}))
-        self.assertEqual(self._rc(), 0)
-
-    def test_exit_1_when_any_on(self):
-        self._write(_props(**{k: "false" for k in _KEYS[1:]}))
-        self.assertEqual(self._rc(), 1)
-
-    def test_seeds_user_copy_on_first_run_and_stays_enabled(self):
-        # No user copy yet: the call seeds it from the bundle (all true) and reports "not disabled".
-        self.assertEqual(self._rc(), 1)
-        self.assertTrue(os.path.isfile(os.path.join(self.home, ".checkmarx", "cx-onboarding.properties")))
 
 
 class SeedOnlyCli(unittest.TestCase):
@@ -360,58 +393,10 @@ class CxRunShSeeds(unittest.TestCase):
 
 
 @unittest.skipUnless(_BASH, "bash not found on PATH")
-class CxRunShSkip(unittest.TestCase):
-    """hooks/cx_run.sh skips the native scan only when ALL four scanners are off. A stub `cx` that
-    prints a marker proves whether the native scanner was reached."""
-
-    def setUp(self):
-        self.home = tempfile.mkdtemp(prefix="cx-switches-sh-")
-        os.makedirs(os.path.join(self.home, ".checkmarx"))
-        self.stub = os.path.join(self.home, "cx-stub")
-        with open(self.stub, "w", newline="\n") as f:
-            f.write("#!/bin/sh\ncat >/dev/null\necho STUB_CX_RAN\n")
-        os.chmod(self.stub, os.stat(self.stub).st_mode | stat.S_IXUSR)
-
-    def tearDown(self):
-        shutil.rmtree(self.home, ignore_errors=True)
-
-    def _run(self, body, sub="copilot-cli-pre-file-write"):
-        with open(os.path.join(self.home, ".checkmarx", "cx-onboarding.properties"), "w",
-                  encoding="utf-8", newline="") as f:
-            f.write(body)
-        env = _home_env(self.home)
-        env["CX_BINARY"] = self.stub
-        return subprocess.run([_BASH, CX_RUN_SH, "hooks", sub], input=b"{}", env=env,
-                              capture_output=True, timeout=60)
-
+class CxRunShSyntax(unittest.TestCase):
     def test_script_still_parses(self):
         proc = subprocess.run([_BASH, "-n", CX_RUN_SH], capture_output=True, text=True, timeout=30)
         self.assertEqual(proc.returncode, 0, proc.stderr)
-
-    def test_all_off_skips_native_scan(self):
-        proc = self._run(_props(**{k: "false" for k in _KEYS}))
-        self.assertEqual(proc.returncode, 0)
-        self.assertNotIn(b"STUB_CX_RAN", proc.stdout)
-
-    def test_all_off_skips_pre_tool_use_too(self):
-        proc = self._run(_props(**{k: "false" for k in _KEYS}), sub="copilot-cli-pre-tool-use")
-        self.assertEqual(proc.returncode, 0)
-        self.assertNotIn(b"STUB_CX_RAN", proc.stdout)
-
-    def test_one_on_still_runs_native_scan(self):
-        proc = self._run(_props(**{k: "false" for k in _KEYS[:3]}))
-        self.assertIn(b"STUB_CX_RAN", proc.stdout)
-
-    def test_default_runs_native_scan(self):
-        self.assertIn(b"STUB_CX_RAN", self._run(_props()).stdout)
-
-    def test_garbled_value_runs_native_scan(self):
-        self.assertIn(b"STUB_CX_RAN", self._run(_props(**{k: "flase" for k in _KEYS})).stdout)
-
-    def test_non_scan_subcommand_is_unaffected(self):
-        # `stop` is not a blocking scan decision: it is exec'd as before even when all are off.
-        proc = self._run(_props(**{k: "false" for k in _KEYS}), sub="copilot-cli-stop")
-        self.assertIn(b"STUB_CX_RAN", proc.stdout)
 
 
 if __name__ == "__main__":

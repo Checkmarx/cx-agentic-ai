@@ -790,14 +790,11 @@ def _admin_config_path():
     return _plugin_path("config", "cx-onboarding.properties")
 
 
-def _load_admin_config(path=None):
-    """Read config/cx-onboarding.properties and return ONLY the known, VALIDATED keys as a dict
-    (possibly empty). FAIL SOFT: a missing/garbled/oversized/undecodable file, an invalid value, or
-    any unexpected error yields {} (no pre-fill). This must NEVER raise — an escaped exception would
-    trip _fail_closed_on_crash and brick every tool call — and NEVER block. `path` is a test hook."""
+def _parse_admin_file(path):
+    """The known, VALIDATED keys of ONE properties file as a dict (possibly empty). Fail soft: a
+    missing/garbled/oversized/undecodable file, an invalid value or any error yields what was parsed so
+    far / {}. NEVER raises."""
     try:
-        if path is None:
-            path = _admin_config_path()
         try:
             with open(path, "r", encoding="utf-8-sig") as f:
                 raw = f.read(_ADMIN_CONFIG_MAX_BYTES + 1)
@@ -822,6 +819,25 @@ def _load_admin_config(path=None):
             else:
                 _log("admin_config", result="invalid", key=key)
         return result
+    except Exception:
+        return {}
+
+
+def _load_admin_config(path=None):
+    """The URL / tenant pre-fill: ONLY the known, VALIDATED keys, as a dict (possibly empty).
+
+    Precedence per key: the user's ~/.checkmarx/cx-onboarding.properties (when the developer or admin
+    set a valid value there) over the bundled config/cx-onboarding.properties. The same strict
+    validators apply to both files, so a value from either is shell-inert before it is ever embedded in
+    the `cx auth login` command. FAIL SOFT: any problem yields fewer keys (the plugin then asks the
+    developer), never an exception — an escaped exception would trip _fail_closed_on_crash and brick
+    every tool call — and never a block. `path` is a test hook that reads that single file only."""
+    try:
+        if path is not None:
+            return _parse_admin_file(path)
+        merged = _parse_admin_file(_admin_config_path())
+        merged.update(_parse_admin_file(_user_config_path()))
+        return merged
     except Exception:
         return {}
 
@@ -945,10 +961,6 @@ def _load_scanner_switches(path=None):
     return result
 
 
-def _all_scanners_disabled(path=None):
-    return not any(_load_scanner_switches(path).values())
-
-
 # The shared opening of every _oauth_recovery_bullet branch — one copy, so a wording change cannot
 # silently miss a branch (there are three of them now).
 _OAUTH_BULLET_LEAD = (
@@ -979,8 +991,8 @@ def _oauth_recovery_bullet(cfg, history=None):
             "auth login --base-auth-uri {0} --tenant {1}".format(base, tenant))
         return _OAUTH_BULLET_LEAD + (
             "The --base-auth-uri and --tenant "
-            "below were PRECONFIGURED BY YOUR ADMINISTRATOR (the plugin's "
-            "config/cx-onboarding.properties) -- use them AS-IS and do NOT ask the developer for a URL "
+            "below were PRECONFIGURED (cx-onboarding.properties: the plugin's bundled "
+            "copy or the developer's ~/.checkmarx copy) -- use them AS-IS and do NOT ask the developer for a URL "
             "or tenant:\n    " + cmd
         )
     if history is None:
@@ -1690,15 +1702,6 @@ def cx_check():
             }))
         return
 
-    # 1b. Every scanner switched off in ~/.checkmarx/cx-onboarding.properties → the plugin stands down:
-    #     nothing to scan, so no readiness requirement and nothing to block. Narrowing only — a missing
-    #     or unreadable config leaves all scanners enabled.
-    if _all_scanners_disabled():
-        _log("gate_decision", decision="allow", reason_code="scanners_disabled", tool_name=tool)
-        if _COPILOT_CLI_MODE:
-            print(json.dumps({"permissionDecision": "allow"}))
-        return
-
     # 2. Read-only Bash commands (ls, cat, grep, …) can't write code to disk or run another program,
     #     so there is nothing to scan — allow them WITHOUT requiring cx to be installed/authed. Removes
     #     the friction of gating a plain `ls` during setup. Allowlisted + shape-guarded so it can't be
@@ -2109,14 +2112,6 @@ def main():
     # without waiting for the first shell/file-write hook. Prints nothing; never blocks.
     if len(sys.argv) > 1 and sys.argv[1] == "seed-user-config":
         sys.exit(0)
-
-    # QUERY mode for hooks/cx_run.sh: exit 0 iff every scanner is switched off. Prints nothing and can
-    # never block — any failure answers "not disabled" (exit 1), i.e. scanning stays on.
-    if len(sys.argv) > 1 and sys.argv[1] == "all-scanners-disabled":
-        try:
-            sys.exit(0 if _all_scanners_disabled() else 1)
-        except Exception:
-            sys.exit(1)
 
     # OBSERVER mode: record-login must NEVER block a tool call, whatever happens inside it.
     if len(sys.argv) > 1 and sys.argv[1] == "record-login":
