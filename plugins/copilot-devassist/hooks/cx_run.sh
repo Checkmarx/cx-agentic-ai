@@ -103,6 +103,20 @@ elif command -v cx >/dev/null 2>&1; then
     _CX_RESOLVED_TIER="path"
 fi
 
+# VS Code runs copilot-pre-file-write for every tool. Skip the cx spawn unless the payload
+# names a file-write tool. An unrecognised or missing tool_name still falls through to cx.
+# copilot-cli-pre-file-write is a different route and is not filtered here.
+_cxrun_vscode_write_tool() {
+    _name=$(printf '%s\n' "$1" | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+    [ -n "$_name" ] || return 0
+    case "$_name" in
+        createFile|editFiles|create_file|replace_string_in_file|multi_replace_string_in_file|edit_notebook_file|apply_patch|insert_edit_into_file)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 # Whether this invocation IS the blocking scan decision (pre-tool-use / pre-file-write) — the same
 # substring match used below in the cx-unresolved branch, kept in lockstep with it. Advisory
 # lifecycle hooks (stop/idle/prompt) are not security decisions and stay on the plain exec fast path.
@@ -126,6 +140,11 @@ if [ -n "$CX_RESOLVED" ]; then
         # stderr still streams straight through (command substitution only captures stdout); stdin is
         # read once here and replayed to cx unchanged.
         _CXRUN_INPUT=$(cat)
+        case "${1:-} ${2:-}" in
+            "hooks copilot-pre-file-write")
+                _cxrun_vscode_write_tool "$_CXRUN_INPUT" || exit 0
+                ;;
+        esac
         _CXRUN_OUTPUT=$(printf '%s' "$_CXRUN_INPUT" | "$CX_RESOLVED" "$@")
         _CXRUN_STATUS=$?
 

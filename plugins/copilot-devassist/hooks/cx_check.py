@@ -297,14 +297,24 @@ _SCANNABLE_KINDS = ("ext", "suffix", "base") + tuple(_PREFIX_KINDS_BY_EXT.values
 
 # The tool_input key holding the target path, in priority order. Copilot CLI create/edit typically
 # carry file_path; `path` is accepted as a fallback. Notebook-style payloads carry notebook_path.
-_FILE_TOOL_PATH_KEYS = ("file_path", "notebook_path", "path")
+# VS Code Copilot sends camelCase filePath / notebookPath.
+_FILE_TOOL_PATH_KEYS = ("file_path", "filePath", "notebook_path", "notebookPath", "path")
 
 # The tools whose payloads the file-type rule may narrow. Anything NOT listed here is gated
 # unconditionally — see _is_scannable_file. Copilot CLI uses lowercase create/edit; Claude-style
 # names are kept so the same gate module still classifies those payloads in tests.
 # Kept in step with the file matchers in hooks/hooks-copilot-cli.json; a new file tool added there
 # but not here is gated (fail closed), which is the safe direction.
-_FILE_WRITE_TOOLS = frozenset({"create", "edit", "Write", "Edit", "MultiEdit", "NotebookEdit","apply_patch"}) 
+_FILE_WRITE_TOOLS = frozenset({"create", "edit", "Write", "Edit", "MultiEdit", "NotebookEdit","apply_patch"})
+
+# VS Code Copilot runs every PreToolUse command for every tool (matchers are ignored). Only these
+# names are file writes worth gating. Anything else exits 0 so a shell install of cx can still run.
+# Kept in step with CopilotTools.WriteTools in ast-cx-hooks.
+_VSCODE_WRITE_TOOLS = frozenset({
+    "createFile", "editFiles",
+    "create_file", "replace_string_in_file", "multi_replace_string_in_file",
+    "edit_notebook_file", "apply_patch", "insert_edit_into_file",
+}) 
 
 
 def _scannable_files_path():
@@ -387,7 +397,9 @@ def _is_scannable_file(hook_input):
     by a hair, which is the fail-closed direction."""
     if os.environ.get("CX_GATE_ALL_FILES") == "1":
         return True
-    if _tool_name(hook_input) not in _FILE_WRITE_TOOLS:
+    tool = _tool_name(hook_input)
+    known_write = tool in _FILE_WRITE_TOOLS or (_COPILOT_VSCODE_MODE and tool in _VSCODE_WRITE_TOOLS)
+    if not known_write:
         return True
     tool_input = _tool_input(hook_input)
     if not isinstance(tool_input, dict):
@@ -570,13 +582,25 @@ _CAPABILITY_PROBES = (
 )
 
 
+def _capability_probes():
+    """CLI keeps the historical probe list. VS Code mode probes only the routes that file calls,
+    so an older cx that is valid for Copilot CLI is not failed by the CLI gate."""
+    if _COPILOT_VSCODE_MODE:
+        return (
+            ("mcp", "bridge", "--help"),
+            ("hooks", "copilot-pre-file-write", "--help"),
+            ("hooks", "copilot-stop", "--help"),
+        )
+    return _CAPABILITY_PROBES
+
+
 def _capabilities_present():
     """True iff every required cx subcommand responds to --help with exit 0. Any non-zero
     exit, missing subcommand, timeout, or spawn error → False (fail-closed). Each probe is
     `--help` only — purely local, no network — so a tight 3s timeout is ample; keeping it
     tight bounds the gate's worst-case latency under the hooks.json hook timeout."""
     exe = _cx_exe()
-    for probe in _CAPABILITY_PROBES:
+    for probe in _capability_probes():
         try:
             result = subprocess.run(
                 [exe, *probe], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3
@@ -1221,7 +1245,7 @@ def _deny(reason: str, context: str, *, reason_code=None, tool_name=None, versio
     # Deny exit code differs by client: Claude Code uses exit 2 for deny (exit 1 = error =
     # fail-open, exit 0 = allow). Copilot CLI uses exit 0 for everything — non-zero exits are
     # treated as hook errors (fail-open), not denials.
-    _deny_exit = 0 if _COPILOT_CLI_MODE else 2
+    _deny_exit = 0 if (_COPILOT_CLI_MODE or _COPILOT_VSCODE_MODE) else 2
     _log("gate_decision", decision="deny", reason_code=reason_code, tool_name=tool_name,
          version_state=version_state, exit_code=_deny_exit)
     if _COPILOT_CLI_MODE:
@@ -1305,9 +1329,38 @@ def _is_copilot_cli_input(hook_input):
     )
 
 
+def _is_vscode_copilot_input(hook_input):
+    """True for the VS Code Copilot extension payload (hookEventName, tool_name, tool_input)."""
+    return isinstance(hook_input, dict) and "hookEventName" in hook_input and not _is_copilot_cli_input(hook_input)
+
+
+def _argv_flag(flag):
+    """True when flag is its own argv token. '--copilot' must not match '--copilot-cli'."""
+    return flag in sys.argv[1:]
+
+
+def _set_client_mode(hook_input):
+    """Pick the response shape. CLI stdin or --copilot-cli wins over --copilot."""
+    global _COPILOT_CLI_MODE, _COPILOT_VSCODE_MODE
+    if _is_copilot_cli_input(hook_input) or _argv_flag("--copilot-cli"):
+        _COPILOT_CLI_MODE = True
+        _COPILOT_VSCODE_MODE = False
+    elif _argv_flag("--copilot") or _is_vscode_copilot_input(hook_input):
+        _COPILOT_CLI_MODE = False
+        _COPILOT_VSCODE_MODE = True
+    else:
+        _COPILOT_CLI_MODE = False
+        _COPILOT_VSCODE_MODE = False
+
+
 # Set once at the start of cx_check() after parsing the hook input. Read by _deny() and
 # _fail_closed_on_crash() to choose the correct deny exit code per client.
+# CLI mode emits flat permissionDecision. VS Code mode emits nested hookSpecificOutput
+# and still exits 0, matching the extension. A CLI-shaped stdin forces CLI mode even
+# when --copilot was passed, so a root hooks.json loaded by Copilot CLI cannot change
+# the CLI deny shape.
 _COPILOT_CLI_MODE = False
+_COPILOT_VSCODE_MODE = False
 
 
 def _tool_name(hook_input):
@@ -1373,7 +1426,7 @@ def _bash_command(hook_input):
       Copilot CLI:    toolCalls[0].name='powershell' (Windows) or 'bash' (Unix)
       Assumed/legacy: tool_name='command'
     All share the same carve-out guards: bootstrap, auth-recovery, read-only allowlist."""
-    _SHELL_TOOLS = ("Bash", "command", "powershell", "bash", "shell")
+    _SHELL_TOOLS = ("Bash", "command", "powershell", "bash", "shell", "runTerminalCommand")
     if _tool_name(hook_input) not in _SHELL_TOOLS:
         return ""
     command = _tool_input(hook_input).get("command", "")
@@ -1542,8 +1595,19 @@ def cx_check():
     # include a `toolCalls` key in every hook payload, causing _is_copilot_cli_input() to return
     # False and _deny() to fall back to exit 0 — which Copilot CLI ignores (it only blocks on
     # a non-zero exit). The argv flag makes Copilot CLI mode explicit and format-independent.
-    global _COPILOT_CLI_MODE
-    _COPILOT_CLI_MODE = ("--copilot-cli" in sys.argv[1:]) or _is_copilot_cli_input(hook_input)
+    _set_client_mode(hook_input)
+
+    # VS Code fires this hook for every tool. Non-writes must not enter the readiness
+    # gate: that would block the shell command the agent uses to install cx.
+    if _COPILOT_VSCODE_MODE and tool not in _VSCODE_WRITE_TOOLS:
+        _log("gate_decision", decision="allow", reason_code="not_a_write", tool_name=tool)
+        print(json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+            }
+        }))
+        return
 
     # 1. The bootstrap is the ONLY way out of the block — must be checked first.
     #
@@ -1884,8 +1948,8 @@ def _fail_closed_on_crash():
     _is_bootstrap_command() or any pre-mode-set code path means _COPILOT_CLI_MODE may still
     be False even for a Copilot CLI invocation — sys.argv is always reliable."""
     try:
-        is_copilot = _COPILOT_CLI_MODE or "--copilot-cli" in sys.argv
-        if is_copilot:
+        is_cli = _COPILOT_CLI_MODE or _argv_flag("--copilot-cli")
+        if is_cli:
             print(json.dumps({
                 "permissionDecision": "deny",
                 "permissionDecisionReason": (
@@ -1989,8 +2053,9 @@ def main():
         raise
     except BaseException:
         _fail_closed_on_crash()
-        is_copilot = _COPILOT_CLI_MODE or "--copilot-cli" in sys.argv
-        sys.exit(0 if is_copilot else 2)
+        is_cli = _COPILOT_CLI_MODE or _argv_flag("--copilot-cli")
+        is_vscode = (not is_cli) and (_COPILOT_VSCODE_MODE or _argv_flag("--copilot"))
+        sys.exit(0 if (is_cli or is_vscode) else 2)
 
 
 if __name__ == "__main__":

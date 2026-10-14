@@ -466,13 +466,15 @@ class TestHookWiring(unittest.TestCase):
             ["git", "ls-files"], cwd=_REPO_ROOT, capture_output=True, text=True, check=True,
         ).stdout.splitlines())
         hook_configs = [
-            (_CLAUDE_PLUGIN_ROOT, "hooks.json"),
-            (_COPILOT_PLUGIN_ROOT, "hooks-copilot-cli.json"),
+            (_CLAUDE_PLUGIN_ROOT, ("hooks", "hooks.json")),
+            (_COPILOT_PLUGIN_ROOT, ("hooks", "hooks-copilot-cli.json")),
+            (_COPILOT_PLUGIN_ROOT, ("hooks.json",)),
         ]
-        for plugin_root, cfg in hook_configs:
+        for plugin_root, parts in hook_configs:
             name = os.path.basename(plugin_root)
+            cfg = "/".join(parts)
             required = set(re.findall(r"[\w./-]*?(?:hooks|scripts)/([\w.-]+\.(?:sh|py))",
-                                      _read(plugin_root, "hooks", cfg)))
+                                      _read(plugin_root, *parts)))
             self.assertTrue(required, "%s/%s references no hook scripts" % (name, cfg))
             required.add("config/cx-scannable-files")
             for rel in sorted(required):
@@ -488,12 +490,14 @@ class TestHookWiring(unittest.TestCase):
         # resolution). A bare `cx …` fails on a locked-down / first-install machine and (for the
         # scanners) fails OPEN. Regression guard for the clean-flow contract.
         hook_configs = [
-            (_CLAUDE_PLUGIN_ROOT, "hooks.json"),
-            (_COPILOT_PLUGIN_ROOT, "hooks-copilot-cli.json"),
-            (_GEMINI_PLUGIN_ROOT, "hooks.json"),
+            (_CLAUDE_PLUGIN_ROOT, ("hooks", "hooks.json")),
+            (_COPILOT_PLUGIN_ROOT, ("hooks", "hooks-copilot-cli.json")),
+            (_COPILOT_PLUGIN_ROOT, ("hooks.json",)),
+            (_GEMINI_PLUGIN_ROOT, ("hooks", "hooks.json")),
         ]
-        for plugin_root, cfg in hook_configs:
-            data = json.loads(_read(plugin_root, "hooks", cfg))
+        for plugin_root, parts in hook_configs:
+            cfg = "/".join(parts)
+            data = json.loads(_read(plugin_root, *parts))
             cmds = []
 
             def _walk(o):

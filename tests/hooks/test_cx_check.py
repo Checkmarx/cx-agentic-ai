@@ -46,7 +46,7 @@ def _fake_proc(stderr=b"", stdout=b"", returncode=0):
 
 
 def run(hook_input, *, which="cx", version_state="ok", authed=True,
-        scanner_state=cx_check._SCANNER_SCAN, env=None, copilot_cli=False):
+        scanner_state=cx_check._SCANNER_SCAN, env=None, copilot_cli=False, copilot=False):
     """Invoke cx_check() with stubs. Returns (decision_or_None, exit_code).
 
     decision is the parsed permissionDecision ('allow'/'deny'), or None when cx_check
@@ -63,6 +63,7 @@ def run(hook_input, *, which="cx", version_state="ok", authed=True,
         "read": cx_check._read_hook_input,
         "environ": cx_check.os.environ,
         "copilot_cli_mode": cx_check._COPILOT_CLI_MODE,
+        "vscode_mode": cx_check._COPILOT_VSCODE_MODE,
         "argv": sys.argv,
     }
     cx_check.shutil.which = lambda name: which
@@ -72,6 +73,8 @@ def run(hook_input, *, which="cx", version_state="ok", authed=True,
     cx_check._read_hook_input = lambda: hook_input
     if copilot_cli:
         sys.argv = ["cx_check.py", "--copilot-cli"]
+    elif copilot:
+        sys.argv = ["cx_check.py", "--copilot"]
     # Disable structured logging during gate tests so they never write to the user's real
     # ~/.checkmarx log — unless a test opts in by providing CX_LOG_DIR (a temp dir).
     e = dict(env) if env is not None else {}
@@ -94,6 +97,7 @@ def run(hook_input, *, which="cx", version_state="ok", authed=True,
         cx_check._read_hook_input = orig["read"]
         cx_check.os.environ = orig["environ"]
         cx_check._COPILOT_CLI_MODE = orig["copilot_cli_mode"]
+        cx_check._COPILOT_VSCODE_MODE = orig["vscode_mode"]
         sys.argv = orig["argv"]
 
     global LAST_OUTPUT
@@ -1917,6 +1921,46 @@ class TestCopilotCLIInputs(unittest.TestCase):
         self.assertIn("https://eu.ast.checkmarx.net", bullet)
         self.assertNotIn("<url>", bullet)
         self.assertIn("EARLIER", bullet)
+
+
+class TestVSCodeCopilotGate(unittest.TestCase):
+    """VS Code Copilot uses nested hookSpecificOutput and exit 0. Non-writes stay allowed
+    so the agent can still run the cx install. CLI-shaped stdin keeps the flat deny."""
+
+    def test_write_without_cx_denies_nested_exit_0(self):
+        payload = {
+            "hookEventName": "PreToolUse",
+            "tool_name": "create_file",
+            "tool_input": {"filePath": "/proj/app.py", "content": "x"},
+        }
+        decision, code = run(payload, which=None, copilot=True)
+        self.assertEqual((decision, code), ("deny", 0))
+        self.assertEqual(LAST_OUTPUT.get("hookEventName"), "PreToolUse")
+        self.assertTrue(LAST_OUTPUT.get("additionalContext"))
+
+    def test_non_write_is_allowed_without_cx(self):
+        payload = {
+            "hookEventName": "PreToolUse",
+            "tool_name": "read_file",
+            "tool_input": {"filePath": "/proj/app.py"},
+        }
+        decision, code = run(payload, which=None, copilot=True)
+        self.assertEqual((decision, code), ("allow", 0))
+
+    def test_unscannable_write_is_allowed(self):
+        payload = {
+            "hookEventName": "PreToolUse",
+            "tool_name": "create_file",
+            "tool_input": {"filePath": "/proj/README.md", "content": "x"},
+        }
+        decision, code = run(payload, which=None, copilot=True)
+        self.assertEqual((decision, code), (None, 0))
+
+    def test_cli_stdin_stays_flat_even_with_vscode_flag(self):
+        payload = {"toolName": "create", "toolArgs": json.dumps({"file_path": "/proj/app.py", "content": "x"})}
+        decision, code = run(payload, which=None, copilot=True)
+        self.assertEqual((decision, code), ("deny", 0))
+        self.assertNotIn("hookEventName", LAST_OUTPUT)
 
 
 if __name__ == "__main__":

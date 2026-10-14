@@ -121,6 +121,12 @@ if [ -z "$PYTHON_BIN" ]; then
             printf '{"permissionDecision":"deny","permissionDecisionReason":"%s %s"}\n' "$_NO_PY_REASON" "$_NO_PY_CONTEXT"
             exit 0
             ;;
+        *--copilot*)
+            # VS Code Copilot reads the nested envelope and treats a non-zero exit as a hook
+            # error. Deny with exit 0, same as the working sample plugin.
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s","additionalContext":"%s"}}\n' "$_NO_PY_REASON" "$_NO_PY_CONTEXT"
+            exit 0
+            ;;
         *)
             printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s","additionalContext":"%s"}}\n' "$_NO_PY_REASON" "$_NO_PY_CONTEXT"
             exit 2
