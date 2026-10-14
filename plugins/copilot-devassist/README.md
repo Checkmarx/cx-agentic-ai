@@ -171,8 +171,21 @@ the gate's `cx auth login` recovery command and the `cx-cli-setup` skill skips t
 question. Edit the file in your **forked / internal marketplace copy** (the reviewed, versioned
 artifact) — not in an end-user's live install, which is overwritten on plugin update. Values are
 strictly validated (https-only host for the URL; a shell-inert charset for the tenant); an invalid value
-is ignored and the developer is asked as usual. There is deliberately no out-of-tree (`~/.checkmarx` /
-env) override.
+is ignored and the developer is asked as usual. There is deliberately no out-of-tree override for the
+URL/tenant.
+
+### Scanner switches (user-editable)
+
+Copilot CLI has no install hook, so the first time a hook runs after install the plugin copies
+`config/cx-onboarding.properties` to `~/.checkmarx/cx-onboarding.properties` (Windows:
+`%USERPROFILE%\.checkmarx\`). It is never overwritten afterwards, so edits survive plugin updates
+(delete it to re-seed). Every scanner is **enabled by default**; set `cx_asca_scanner_enabled`,
+`cx_sca_scanner_enabled`, `cx_kics_scanner_enabled` or `cx_secret_scanner_enabled` to `false` to skip
+that scanner's skill. `cx_severity_threshold` (`low`…`critical`) limits what the skills report. Switches
+only narrow behaviour and never cause a hook to deny; a typo leaves the scanner enabled. If **all four**
+are off, the readiness gate and the native pre-write scan stand down. A cx CLI build that reads this file
+(ast-cli `agenthooks/scannerconfig`) also skips each disabled engine in the native pre-write scan; older
+builds ignore the switches and scan every engine unless all four are off.
 
 ### Remembered login environments (automatic)
 

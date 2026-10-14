@@ -103,6 +103,19 @@ elif command -v cx >/dev/null 2>&1; then
     _CX_RESOLVED_TIER="path"
 fi
 
+# First-run seeding of ~/.checkmarx/cx-onboarding.properties. Every cx_run.sh call (including the MCP
+# bridge spawn at session start, which fires before any shell/file-write hook) is a chance to create
+# the user copy after an install. The cheap file test below keeps the Python spawn off the hot path
+# once the file exists; cx_check.py owns the real path and NEVER overwrites, so a false "missing" (e.g.
+# HOME and USERPROFILE disagreeing) only costs one harmless no-op spawn. Best-effort, never blocks.
+if [ ! -f "${HOME:-/nonexistent}/.checkmarx/cx-onboarding.properties" ]    && [ ! -f "${USERPROFILE:-/nonexistent}/.checkmarx/cx-onboarding.properties" ]; then
+    for _cxrun_py in python3 python "py -3"; do
+        command -v "${_cxrun_py%% *}" >/dev/null 2>&1 || continue
+        # shellcheck disable=SC2086
+        $_cxrun_py "$_CXRUN_DIR/cx_check.py" seed-user-config >/dev/null 2>&1 </dev/null && break
+    done
+fi
+
 # Whether this invocation IS the blocking scan decision (pre-tool-use / pre-file-write) — the same
 # substring match used below in the cx-unresolved branch, kept in lockstep with it. Advisory
 # lifecycle hooks (stop/idle/prompt) are not security decisions and stay on the plain exec fast path.
@@ -117,6 +130,28 @@ case "${1:-} ${2:-}" in
     "mcp bridge") _CXRUN_MCP=1 ;;
     *)            _CXRUN_MCP=0 ;;
 esac
+
+# True when ALL FOUR scanner switches in ~/.checkmarx/cx-onboarding.properties are explicitly off.
+# The parsing lives ONLY in cx_check.py (`all-scanners-disabled` exits 0 when all are off) — one
+# reader for every OS, no shell reimplementation to drift. Fail-safe: no working Python, a missing or
+# unreadable config, or any non-false value all mean "not disabled", so this can only narrow, never deny.
+_cxrun_all_scanners_disabled() {
+    for _cxrun_py in python3 python "py -3"; do
+        command -v "${_cxrun_py%% *}" >/dev/null 2>&1 || continue
+        # shellcheck disable=SC2086
+        $_cxrun_py "$_CXRUN_DIR/cx_check.py" all-scanners-disabled >/dev/null 2>&1
+        case $? in
+            0) return 0 ;;   # all off
+            1) return 1 ;;   # at least one on
+        esac                 # anything else = this python is broken (e.g. a Windows Store stub): try the next
+    done
+    return 1
+}
+
+# Every scanner disabled by the user → nothing for the native scan to do; never block.
+if [ "$_CXRUN_SCAN" = 1 ] && _cxrun_all_scanners_disabled; then
+    exit 0
+fi
 
 if [ -n "$CX_RESOLVED" ]; then
     if [ "$_CXRUN_SCAN" = 1 ]; then

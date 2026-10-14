@@ -418,8 +418,9 @@ def _is_scannable_file(hook_input):
     prefix_kind = _PREFIX_KINDS_BY_EXT.get(ext)
     if prefix_kind and any(base.startswith(prefix) for prefix in table[prefix_kind]):
         return True
-    # Secrets scan every remaining file. ASCA, KICS and SCA would skip it; secrets would not.
-    return True
+    # Secrets scan every remaining file. ASCA, KICS and SCA would skip it; secrets would not — so such a
+    # file is only worth gating while the secrets scanner is switched on. (Default: on.)
+    return _load_scanner_switches()["cx_secret_scanner_enabled"]
 
 
 def _normalize_path(p):
@@ -823,6 +824,129 @@ def _load_admin_config(path=None):
         return result
     except Exception:
         return {}
+
+
+# --- User copy of the onboarding config (~/.checkmarx/cx-onboarding.properties) ---------------------
+# Copilot CLI has no plugin-install hook, so the bundled config is copied to the user's ~/.checkmarx
+# the first time any hook runs after install. The copy is NEVER overwritten (the developer's edits
+# survive plugin updates). Scanner on/off switches are read from it; they can only NARROW what the
+# plugin does and never cause a deny. URL/tenant pre-fill stays bundle-only (see the file header).
+_USER_CONFIG_NAME = "cx-onboarding.properties"
+_SCANNER_SWITCH_KEYS = (
+    "cx_asca_scanner_enabled",
+    "cx_sca_scanner_enabled",
+    "cx_kics_scanner_enabled",
+    "cx_secret_scanner_enabled",
+)
+_FALSE_VALUES = frozenset({"false", "0", "no", "off", "disabled"})
+
+
+def _user_config_path():
+    return os.path.join(os.path.expanduser("~"), ".checkmarx", _USER_CONFIG_NAME)
+
+
+def _property_key(line):
+    """The key of a `key=value` line, treating a `#`-commented line as the SAME key (so a developer who
+    commented a setting out deliberately is not nagged with it again). None for blanks/plain comments."""
+    line = line.strip().lstrip("#").strip()
+    key, sep, _value = line.partition("=")
+    key = key.strip()
+    return key if sep and key and " " not in key else None
+
+
+def _merge_new_properties(src, dest):
+    """Append to the user's copy every ACTIVE key the bundled file defines that the user's file does not
+    mention at all (active or commented), each with the comment block above it. Existing lines are never
+    modified, reordered or removed, so a plugin update brings new settings without touching the
+    developer's choices. Admin-only keys are not copied: they are commented examples in the bundle, and
+    only active bundle lines count. Written via temp-file + os.replace so a crash cannot truncate the
+    user's file, and two racing hooks compute identical content instead of appending twice.
+    Returns True when something was added. Never raises."""
+    try:
+        with open(src, "r", encoding="utf-8-sig", newline="") as f:
+            bundled = f.read(_ADMIN_CONFIG_MAX_BYTES + 1).splitlines()
+        with open(dest, "r", encoding="utf-8", newline="") as f:
+            current = f.read(_ADMIN_CONFIG_MAX_BYTES + 1)
+        if len(current) > _ADMIN_CONFIG_MAX_BYTES:
+            return False
+        present = {_property_key(line) for line in current.splitlines()}
+        eol = "\r\n" if "\r\n" in current else "\n"
+        additions = []
+        for i, line in enumerate(bundled):
+            key = _property_key(line)
+            if not key or line.strip().startswith("#") or key in present:
+                continue
+            start = i
+            while start > 0 and bundled[start - 1].strip().startswith("#"):
+                start -= 1
+            additions.append(bundled[start:i + 1])
+            present.add(key)
+        if not additions:
+            return False
+        out = current if (not current or current.endswith(("\n", "\r"))) else current + eol
+        out += eol + "# --- added by a plugin update ---" + eol
+        for block in additions:
+            out += eol.join(block) + eol
+        tmp = dest + ".tmp-{0}".format(os.getpid())
+        with open(tmp, "w", encoding="utf-8", newline="") as f:
+            f.write(out)
+        os.replace(tmp, dest)
+        _log("admin_config", result="merged_user_copy")
+        return True
+    except Exception:
+        return False
+
+
+def _seed_user_config(src=None, dest=None):
+    """Keep ~/.checkmarx/cx-onboarding.properties in step with the bundle. Missing -> copy it.
+    Present -> leave every existing line alone and only ADD settings a plugin update introduced
+    (_merge_new_properties). Best-effort: never raises, never blocks. `src`/`dest` are test hooks.
+    Returns True only when the file was freshly copied."""
+    try:
+        src = src or _admin_config_path()
+        dest = dest or _user_config_path()
+        if not os.path.isfile(src):
+            return False
+        if os.path.exists(dest):
+            _merge_new_properties(src, dest)
+            return False
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(src, "rb") as fin, open(dest, "xb") as fout:   # "x": never clobber a racing writer
+            fout.write(fin.read())
+        _log("admin_config", result="seeded_user_copy")
+        return True
+    except Exception:
+        return False
+
+
+def _load_scanner_switches(path=None):
+    """{switch_key: bool} for the four scanner switches. Every scanner defaults to ENABLED; only an
+    explicit false/0/no/off/disabled turns one off, so a typo or unreadable file can never silently
+    disable scanning. Reads the user copy, falling back to the bundled file. NEVER raises."""
+    result = {key: True for key in _SCANNER_SWITCH_KEYS}
+    try:
+        raw = None
+        for candidate in ([path] if path else [_user_config_path(), _admin_config_path()]):
+            raw = _read_capped(candidate, _ADMIN_CONFIG_MAX_BYTES)
+            if raw is not None:
+                break
+        if raw is None:
+            return result
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _sep, value = line.partition("=")
+            key = key.strip()
+            if key in result and value.strip().lower() in _FALSE_VALUES:
+                result[key] = False
+    except Exception:
+        pass
+    return result
+
+
+def _all_scanners_disabled(path=None):
+    return not any(_load_scanner_switches(path).values())
 
 
 # The shared opening of every _oauth_recovery_bullet branch — one copy, so a wording change cannot
@@ -1566,6 +1690,14 @@ def cx_check():
             }))
         return
 
+    # 1b. Every scanner switched off in ~/.checkmarx/cx-onboarding.properties → the plugin stands down:
+    #     nothing to scan, so no readiness requirement and nothing to block. Narrowing only — a missing
+    #     or unreadable config leaves all scanners enabled.
+    if _all_scanners_disabled():
+        _log("gate_decision", decision="allow", reason_code="scanners_disabled", tool_name=tool)
+        if _COPILOT_CLI_MODE:
+            print(json.dumps({"permissionDecision": "allow"}))
+        return
 
     # 2. Read-only Bash commands (ls, cat, grep, …) can't write code to disk or run another program,
     #     so there is nothing to scan — allow them WITHOUT requiring cx to be installed/authed. Removes
@@ -1970,6 +2102,22 @@ def cx_record_login():
 
 
 def main():
+    _seed_user_config()   # best-effort first-run copy to ~/.checkmarx; never raises
+
+    # SEED-ONLY mode for hooks/cx_run.sh: the seeding above is the whole job. Lets the MCP bridge spawn
+    # (session start — the nearest thing Copilot CLI has to an install event) create the user copy
+    # without waiting for the first shell/file-write hook. Prints nothing; never blocks.
+    if len(sys.argv) > 1 and sys.argv[1] == "seed-user-config":
+        sys.exit(0)
+
+    # QUERY mode for hooks/cx_run.sh: exit 0 iff every scanner is switched off. Prints nothing and can
+    # never block — any failure answers "not disabled" (exit 1), i.e. scanning stays on.
+    if len(sys.argv) > 1 and sys.argv[1] == "all-scanners-disabled":
+        try:
+            sys.exit(0 if _all_scanners_disabled() else 1)
+        except Exception:
+            sys.exit(1)
+
     # OBSERVER mode: record-login must NEVER block a tool call, whatever happens inside it.
     if len(sys.argv) > 1 and sys.argv[1] == "record-login":
         try:
