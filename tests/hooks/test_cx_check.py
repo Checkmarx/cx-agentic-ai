@@ -1888,14 +1888,26 @@ class TestCopilotCLIInputs(unittest.TestCase):
 
     # --- scannable-file carve-out (config/cx-scannable-files) ---
 
-    def test_unscannable_md_allowed_when_cx_absent(self):
-        decision, code = run(copilot_create("/src/README.md", "# hi"), which=None)
-        self.assertIsNone(decision)
+    def test_node_modules_gated_when_cx_absent(self):
+        """The cx secret scan has no path filter, so node_modules writes are gated like any other."""
+        decision, code = run(copilot_create("/src/node_modules/left-pad/index.js", "x"), which=None)
+        self.assertEqual(decision, "deny")
         self.assertEqual(code, 0)
 
-    def test_unscannable_css_allowed_when_unauthenticated(self):
-        decision, code = run(copilot_edit("/src/app.css"), authed=False)
-        self.assertIsNone(decision)
+    def test_checkmarx_ignore_file_gated_when_unauthenticated(self):
+        decision, code = run(copilot_edit("/src/.vscode/.checkmarxIgnored"), authed=False)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 0)
+
+    def test_traversal_into_node_modules_still_gated(self):
+        decision, code = run(copilot_create("/p/node_modules/../src/app.py", "x"), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 0)
+
+    def test_readme_is_secret_scannable_when_cx_absent(self):
+        """Secrets have no extension allowlist, so a markdown write is gated."""
+        decision, code = run(copilot_create("/src/README.md", "# hi"), which=None)
+        self.assertEqual(decision, "deny")
         self.assertEqual(code, 0)
 
     def test_scannable_py_still_gated_when_cx_absent(self):
@@ -1903,18 +1915,36 @@ class TestCopilotCLIInputs(unittest.TestCase):
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 0)
 
-    def test_gate_all_files_overrides_unscannable(self):
-        decision, code = run(
-            copilot_create("/src/README.md", "# hi"), which=None,
-            env={"CX_GATE_ALL_FILES": "1"})
-        self.assertEqual(decision, "deny")
-        self.assertEqual(code, 0)
-
     def test_json_is_scannable_kics(self):
         self.assertTrue(cx_check._is_scannable_file(copilot_create("/src/tsconfig.json", "{}")))
         self.assertTrue(cx_check._is_scannable_file(copilot_create("/src/app.py", "x")))
-        self.assertFalse(cx_check._is_scannable_file(copilot_create("/src/README.md", "#")))
-        self.assertFalse(cx_check._is_scannable_file(copilot_create("/src/notes.txt", "x")))
+        self.assertTrue(cx_check._is_scannable_file(copilot_create("/src/README.md", "#")))
+        self.assertTrue(cx_check._is_scannable_file(copilot_create("/src/notes.txt", "x")))
+
+    def test_secret_files_are_scannable(self):
+        """The secret engine has no path or extension filter, so every write is gated."""
+        for path in (
+            "/src/.env",
+            "/src/.env.example",
+            "/src/README.md",
+            "/src/notes.txt",
+            "/src/app.css",
+            "/src/deploy.sh",
+            "/src/vars.tfvars",
+            "/src/package.json",
+            r"C:\src\App.CSS",
+            "node_modules_backup/app.py",
+            "/src/node_modules/left-pad/index.js",
+            "node_modules/pkg/index.js",
+            r"C:\src\node_modules\app.py",
+            "/src/.vscode/.checkmarxIgnored",
+        ):
+            self.assertTrue(cx_check._is_scannable_file(copilot_create(path, "x")), path)
+
+    def test_secret_sh_still_gated_when_cx_absent(self):
+        decision, code = run(copilot_create("/src/deploy.sh", "echo hi"), which=None)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 0)
 
     def test_record_login_observes_powershell_flags(self):
         fd, path = tempfile.mkstemp(suffix=".json")

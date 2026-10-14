@@ -277,12 +277,10 @@ _READONLY_COMMANDS = frozenset({
     "df", "du", "ps", "grep", "rg", "cut", "uniq", "cmp", "cksum", "md5sum", "sha256sum",
 })
 
-# --- Scannable files: what the three Checkmarx engines can actually analyse ------------------------
+# --- Scannable files: what the Checkmarx engines can actually analyse -----------------------------
 # The readiness chain (cx present → recent → capable → authenticated → licensed → really scanning) is
-# only worth ENFORCING for a file one of the engines would look at. Blocking a README.md write because
-# cx is unauthenticated helps nobody: ASCA, KICS and SCA each self-skip an unsupported path, so that
-# write would have gone through UNSCANNED even on a perfectly healthy cx — the block was friction,
-# not protection.
+# only worth ENFORCING for a file one of the engines would look at. ASCA, KICS and SCA each self-skip
+# an unsupported path. The secret engine does not: it scans every file the hook sees. A README.md write is therefore gated.
 #
 # The set lives in config/cx-scannable-files so an administrator can adjust coverage without editing
 # code. THIS is its only reader — see that file's header for why a second, POSIX-shell implementation
@@ -424,7 +422,7 @@ def _is_scannable_file(hook_input):
     # semantics) while the agent types a native Windows path, where os.path.basename would not split
     # on backslashes. `""` from _effective_basename means "cannot determine the real target" (an NTFS
     # stream suffix, or a name that strips to nothing) — both gate.
-    base = _effective_basename(os.path.basename(path.replace("\\", "/").rstrip("/")).lower())
+    base = _effective_basename(os.path.basename(path.replace("\\", "/").rstrip("/").lower()))
     if not base:
         return True
     if base in table["base"]:
@@ -437,7 +435,8 @@ def _is_scannable_file(hook_input):
     prefix_kind = _PREFIX_KINDS_BY_EXT.get(ext)
     if prefix_kind and any(base.startswith(prefix) for prefix in table[prefix_kind]):
         return True
-    return False
+    # Secrets scan every remaining file. ASCA, KICS and SCA would skip it; secrets would not.
+    return True
 
 
 def _normalize_path(p):
