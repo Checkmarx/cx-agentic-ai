@@ -4,6 +4,7 @@ Dependency-free (stdlib only). Not named test_*, so unittest discovery skips it;
 it via the tests directory that discovery puts on sys.path.
 """
 
+import importlib.util
 import json
 import os
 import sys
@@ -11,11 +12,35 @@ import tempfile
 import unittest
 
 # Import the shipped gate modules from the plugin's hooks/ directory (repo root is one level up).
+# Loaded under unique sys.modules-free names (not bare `import cx_check`/`import cx_log`) because
+# every plugin ships its own same-named copies; a bare import would get cached under sys.modules
+# and silently reused — wrong-plugin behavior — by whichever other suite imports it next.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _HOOKS_DIR = os.path.join(_REPO_ROOT, "plugins", "cx-devassist", "hooks")
 sys.path.insert(0, _HOOKS_DIR)
-import cx_check  # noqa: E402
-import cx_log  # noqa: E402
+
+_log_spec = importlib.util.spec_from_file_location(
+    "cx_log_cxdevassist", os.path.join(_HOOKS_DIR, "cx_log.py"))
+cx_log = importlib.util.module_from_spec(_log_spec)
+_log_spec.loader.exec_module(cx_log)
+
+# cx_check.py does its own bare `import cx_log` internally; seed sys.modules so that import binds
+# to THIS plugin's cx_log rather than whatever another suite's copy is cached there, then restore
+# the prior entry immediately after — cx_check copies the reference once at import time, so the
+# seed only needs to be visible for that one exec_module call, and leaving it behind would corrupt
+# any other suite's own bare `import cx_log`. The local `cx_log` name above is unaffected — this
+# suite's tests use that binding directly, not sys.modules.
+_prev_cx_log = sys.modules.get("cx_log")
+sys.modules["cx_log"] = cx_log
+_check_spec = importlib.util.spec_from_file_location(
+    "cx_check_cxdevassist", os.path.join(_HOOKS_DIR, "cx_check.py"))
+cx_check = importlib.util.module_from_spec(_check_spec)
+_check_spec.loader.exec_module(cx_check)
+
+if _prev_cx_log is None:
+    sys.modules.pop("cx_log", None)
+else:
+    sys.modules["cx_log"] = _prev_cx_log
 
 # Keep unit-test _log calls out of the developer's real audit log. A test that needs a real write
 # re-enables logging itself.

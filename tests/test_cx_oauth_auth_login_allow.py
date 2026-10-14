@@ -1,4 +1,4 @@
-"""Regression: OAuth auth login must allow in cx_check and cx_run while cx is unauthenticated."""
+"""Regression: OAuth auth login must allow in cx_check while cx is unauthenticated."""
 import importlib.util
 import json
 import os
@@ -11,7 +11,6 @@ _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _HOOKS = os.path.join(_REPO, "plugins", "cursor-devassist", "hooks")
 _CX_CHECK = os.path.join(_HOOKS, "cx_check.py")
 _CX_CHECK_SH = os.path.join(_HOOKS, "cx_check.sh")
-_CX_RUN = os.path.join(_HOOKS, "cx_run.sh")
 _SH = shutil.which("sh") or shutil.which("bash")
 
 _spec = importlib.util.spec_from_file_location("cx_check_oauth", _CX_CHECK)
@@ -84,22 +83,20 @@ class TestOAuthAuthLoginAllow(unittest.TestCase):
         self.assertEqual(out["permission"], "allow")
 
     @unittest.skipUnless(_SH, "sh required")
-    def test_cx_check_sh_and_cx_run_both_allow_oauth(self):
-        hook = _hook(OAUTH_PS)
+    def test_cx_check_sh_allows_native_shell_oauth(self):
         env = os.environ.copy()
         env.pop("CX_BINARY", None)
-        for script, args in ((_CX_CHECK_SH, []), (_CX_RUN, ["hooks", "cursor-before-shell"])):
-            proc = subprocess.run(
-                [_SH, script] + args,
-                input=json.dumps(hook),
-                capture_output=True,
-                text=True,
-                env=env,
-                timeout=120,
-            )
-            self.assertEqual(proc.returncode, 0, proc.stderr + proc.stdout)
-            out = json.loads(proc.stdout.strip())
-            self.assertEqual(out["permission"], "allow")
+        proc = subprocess.run(
+            [_SH, _CX_CHECK_SH],
+            input=json.dumps(_hook(OAUTH_PS)),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr + proc.stdout)
+        out = json.loads(proc.stdout.strip())
+        self.assertEqual(out["permission"], "allow")
 
 
 if __name__ == "__main__":

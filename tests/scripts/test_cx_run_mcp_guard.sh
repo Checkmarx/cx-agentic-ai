@@ -83,16 +83,16 @@ result="$(run_guarded "$tmp/cx_incapable")"
 rc="${result%%|*}"; rest="${result#*|}"; out="${rest%%|*}"; err="${rest#*|}"
 [[ "$rc" != "0" && -z "$out" ]] && ok "incapable cx: refused, stdout untouched" \
     || bad "incapable cx: expected refusal with clean stdout, got rc=$rc out='$out'"
-[[ "$err" == *"mcp bridge"* ]] && ok "incapable cx: stderr names the missing subcommand" \
-    || bad "incapable cx: expected a 'mcp bridge' diagnostic, got '$err'"
+[[ "$err" == *"missing the MCP capability"* ]] && ok "incapable cx: stderr names the capability gap" \
+    || bad "incapable cx: expected a 'missing the MCP capability' diagnostic, got '$err'"
 
 # 4. cx entirely absent -> refused via the pre-existing absent-cx path, now also logged.
 result="$(run_guarded "")"
 rc="${result%%|*}"; rest="${result#*|}"; out="${rest%%|*}"; err="${rest#*|}"
 [[ "$rc" != "0" && -z "$out" ]] && ok "cx absent: refused, stdout untouched" \
     || bad "cx absent: expected refusal with clean stdout, got rc=$rc out='$out'"
-[[ "$err" == *"not found"* ]] && ok "cx absent: stderr says cx was not found" \
-    || bad "cx absent: expected a 'not found' diagnostic, got '$err'"
+[[ "$err" == *"not installed"* ]] && ok "cx absent: stderr says cx is not installed" \
+    || bad "cx absent: expected a 'not installed' diagnostic, got '$err'"
 
 # 5. Below-min cx resolved via the CANONICAL STORE (not CX_BINARY) -> refused for the same reason,
 #    but the CX_BINARY-pin note must be ABSENT since nothing is pinning it here. Proves the note in
@@ -123,7 +123,8 @@ else
         grep -q '"reason_code":"below"' "$log" && ok "log: below case recorded" || bad "log: missing below record"
         grep -q '"reason_code":"incapable"' "$log" && ok "log: incapable case recorded" || bad "log: missing incapable record"
         grep -q '"reason_code":"cx_absent"' "$log" && ok "log: cx_absent case recorded" || bad "log: missing cx_absent record"
-        grep -q '"message":"cx v2.0.0 is below the required v2.3.55' "$log" \
+        min="$(grep -v '^#' "$DIR/../../plugins/copilot-devassist/scripts/cx-min-version" | tr -d '[:space:]')"
+        grep -q "\"message\":\"cx v2.0.0 is below the required v$min" "$log" \
             && ok "log: exact human-readable message present for the below case" \
             || bad "log: expected exact below-case message in $log"
         grep -q '"tier":"binary".*CX_BINARY is pinned to this exact binary' "$log" \

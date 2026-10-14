@@ -7,6 +7,7 @@ stubbed) and asserts the printed permissionDecision and the process exit code. e
 blocking deny; exit 0 == allow / pass-through.
 """
 
+import importlib.util
 import io
 import json
 import os
@@ -20,10 +21,34 @@ from contextlib import redirect_stdout, redirect_stderr
 
 # Source under test: the Copilot CLI plugin (separate from the Gemini extension at repo root).
 # Gemini hook behaviour is covered by tests/test_gemini_cx_check_*.py.
+# Loaded under a unique sys.modules-free name (not a bare `import cx_check`) because every plugin
+# ships its own same-named cx_check.py/cx_log.py; a bare import would get cached under sys.modules
+# and silently reused — wrong-plugin behavior — by whichever other suite imports it next.
 _HOOKS_DIR = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "copilot-devassist", "hooks"))
 sys.path.insert(0, _HOOKS_DIR)
-import cx_check  # noqa: E402
+
+# cx_check.py does its own bare `import cx_log` internally; seed sys.modules so that import binds
+# to THIS plugin's cx_log rather than whatever another suite's copy is cached there, then restore
+# the prior entry immediately after — cx_check copies the reference once at import time, so the
+# seed only needs to be visible for that one exec_module call, and leaving it behind would corrupt
+# any other suite's own bare `import cx_log`.
+_log_spec = importlib.util.spec_from_file_location(
+    "cx_log_copilot", os.path.join(_HOOKS_DIR, "cx_log.py"))
+cx_log = importlib.util.module_from_spec(_log_spec)
+_log_spec.loader.exec_module(cx_log)
+_prev_cx_log = sys.modules.get("cx_log")
+sys.modules["cx_log"] = cx_log
+
+_spec = importlib.util.spec_from_file_location(
+    "cx_check_copilot", os.path.join(_HOOKS_DIR, "cx_check.py"))
+cx_check = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(cx_check)
+
+if _prev_cx_log is None:
+    sys.modules.pop("cx_log", None)
+else:
+    sys.modules["cx_log"] = _prev_cx_log
 
 BOOTSTRAP = cx_check._bootstrap_script_path()
 CX_CHECK_SH = os.path.join(_HOOKS_DIR, "cx_check.sh")

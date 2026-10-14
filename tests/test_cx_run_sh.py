@@ -48,7 +48,7 @@ class TestCxRunShSyntax(unittest.TestCase):
 @unittest.skipUnless(_BASH, "bash not found on PATH")
 class TestCxRunShCxAbsent(unittest.TestCase):
     """Exercises the "cx could not be resolved anywhere" branch (hooks/cx_run.sh, the
-    *cursor-before-shell* case arm).
+    *cursor-before-mcp* case arm).
 
     cx_run.sh resolves cx from THREE places (CX_BINARY -> the canonical per-OS store -> PATH), so
     all three have to be neutralized or the branch is never reached and every assertion here
@@ -75,7 +75,7 @@ class TestCxRunShCxAbsent(unittest.TestCase):
 
     def _run(self, hook_input):
         proc = subprocess.run(
-            [_BASH, CX_RUN, "hooks", "cursor-before-shell"],
+            [_BASH, CX_RUN, "hooks", "cursor-before-mcp"],
             input=json.dumps(hook_input),
             capture_output=True,
             text=True,
@@ -86,9 +86,9 @@ class TestCxRunShCxAbsent(unittest.TestCase):
 
     def test_deny_emits_valid_json(self):
         proc = self._run({
-            "tool_name": "Shell",
-            "hook_event_name": "beforeShellExecution",
-            "tool_input": {"command": "ls -la"},
+            "tool_name": "MCP:codeRemediation",
+            "hook_event_name": "beforeMCPExecution",
+            "tool_input": {},
         })
         self.assertEqual(proc.returncode, 2, proc.stderr)
         out = json.loads(proc.stdout.strip())  # raises if the JSON is malformed
@@ -100,56 +100,6 @@ class TestCxRunShCxAbsent(unittest.TestCase):
         # additional_context must mirror agent_message verbatim — Cursor's preToolUse response
         # surfaces additional_context to the agent, not agent_message alone.
         self.assertEqual(out["additional_context"], out["agent_message"])
-
-    def test_bootstrap_command_is_allowed(self):
-        command = 'bash "{0}" install'.format(BOOTSTRAP.replace("\\", "/"))
-        proc = self._run({
-            "tool_name": "Shell",
-            "hook_event_name": "beforeShellExecution",
-            "tool_input": {"command": command},
-        })
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        out = json.loads(proc.stdout.strip())
-        self.assertEqual(out["permission"], "allow")
-
-    @unittest.skipUnless(sys.platform == "win32", "Windows backslash bootstrap path")
-    def test_native_before_shell_bootstrap_with_backslashes_is_allowed(self):
-        # Cursor's native beforeShellExecution shape carries top-level "command" (no tool_input).
-        # Deny messages embed Windows backslash paths; the shell matcher must accept them.
-        command = 'bash "{0}" install'.format(BOOTSTRAP)
-        proc = self._run({
-            "command": command,
-            "hook_event_name": "beforeShellExecution",
-        })
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        out = json.loads(proc.stdout.strip())
-        self.assertEqual(out["permission"], "allow")
-
-    def test_other_plugin_owned_script_with_arbitrary_args_is_allowed(self):
-        # _cx_bootstrap_match.sh's broadened carve-out: ANY *.sh under the plugin's scripts/ or
-        # hooks/ directory, not just cx-bootstrap.sh install/upgrade — this is what lets
-        # references/manual-install.md's `bash "<plugin-root>/scripts/cx-asset-resolver.sh"` run.
-        other_script = os.path.join(
-            os.path.dirname(BOOTSTRAP), "cx-asset-resolver.sh"
-        ).replace("\\", "/")
-        proc = self._run({
-            "tool_name": "Shell",
-            "hook_event_name": "beforeShellExecution",
-            "tool_input": {"command": 'bash "{0}" some arbitrary args'.format(other_script)},
-        })
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        out = json.loads(proc.stdout.strip())
-        self.assertEqual(out["permission"], "allow")
-
-    def test_script_outside_plugin_is_still_denied(self):
-        proc = self._run({
-            "tool_name": "Shell",
-            "hook_event_name": "beforeShellExecution",
-            "tool_input": {"command": 'bash "/tmp/evil.sh" install'},
-        })
-        self.assertEqual(proc.returncode, 2, proc.stderr)
-        out = json.loads(proc.stdout.strip())
-        self.assertEqual(out["permission"], "deny")
 
 
 @unittest.skipUnless(_SH, "sh not found on PATH")

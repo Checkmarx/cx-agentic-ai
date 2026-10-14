@@ -84,8 +84,9 @@ esac
 # `${0%/*}` instead of `$(cd "$(dirname "$0")" && pwd)` — the latter is a subshell plus a `dirname`
 # exec (~100ms on Git-Bash) to produce a path hooks-copilot-cli.json already passes absolutely.
 case "$0" in
-    */*) SCRIPT_DIR=${0%/*} ;;
-    *)   SCRIPT_DIR=. ;;
+    */*)  SCRIPT_DIR=${0%/*} ;;
+    *\\*) SCRIPT_DIR=${0%\\*} ;;
+    *)    SCRIPT_DIR=. ;;
 esac
 PY_SCRIPT="$SCRIPT_DIR/cx_check.py"
 # On Windows/Git Bash, convert the POSIX path to a native Windows path for python.exe.
