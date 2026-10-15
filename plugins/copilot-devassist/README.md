@@ -180,7 +180,7 @@ Copilot CLI has no install hook, so the first time a hook runs after install the
 `%USERPROFILE%\.checkmarx\`). It is never overwritten afterwards, so edits survive plugin updates
 (delete it to re-seed). Every scanner is **enabled by default**; set `cx_asca_scanner_enabled`,
 `cx_sca_scanner_enabled`, `cx_kics_scanner_enabled` or `cx_secret_scanner_enabled` to `false` to skip
-that scanner's skill. `cx_severity_threshold` (`low`…`critical`; blank or invalid = `low`) limits what the skills report and, with a cx build that includes the ast-cli change, what ASCA/KICS/SCA block — secrets always block. Switches
+that scanner's skill. `cx_severity_threshold` (`low`…`critical`; blank or invalid = `low`) limits what the skills report and, with a cx build that includes the ast-cli change, what ASCA/KICS/SCA block; the secrets skill applies it too. Switches
 only narrow behaviour and never cause a hook to deny; a typo leaves the scanner enabled. With the secrets scanner off, a file only the secrets engine would scan (e.g. `app.env`) is no longer
 gated by the readiness check. A cx CLI build that reads this file (ast-cli `agenthooks/scannerconfig`) also
 skips each disabled engine in the native pre-write scan; older builds ignore the switches.
