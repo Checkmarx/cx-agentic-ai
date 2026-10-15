@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "command": "sh \"${PLUGIN_ROOT}/hooks/cx_record_login.sh\"",
+        "timeout": 60,
+        "env": {"CX_ASSISTANT": "copilot"}
+      },
+      {
+        "type": "command",
+        "command": "sh \"${PLUGIN_ROOT}/hooks/cx_check.sh\" --copilot",
+        "timeout": 45,
+        "env": {"CX_ASSISTANT": "copilot"}
+      },
+      {
+        "type": "command",
+        "command": "sh \"${PLUGIN_ROOT}/hooks/cx_run.sh\" hooks copilot-pre-file-write",
+        "timeout": 60,
+        "env": {"CX_ASSISTANT": "copilot"}
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "sh \"${PLUGIN_ROOT}/hooks/cx_run.sh\" hooks copilot-stop",
+        "timeout": 60,
+        "env": {"CX_ASSISTANT": "copilot"}
+      }
+    ]
+  }
+}

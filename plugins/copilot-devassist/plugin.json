@@ -7,6 +7,5 @@
   },
   "license": "MIT",
   "keywords": ["security", "checkmarx", "cxone", "sast", "sca"],
-  "hooks": "./hooks/hooks-copilot-cli.json",
   "skills": "./skills"
 }

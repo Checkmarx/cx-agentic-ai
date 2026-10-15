@@ -121,6 +121,10 @@ if [ -z "$PYTHON_BIN" ]; then
             printf '{"permissionDecision":"deny","permissionDecisionReason":"%s %s"}\n' "$_NO_PY_REASON" "$_NO_PY_CONTEXT"
             exit 0
             ;;
+        *--copilot*)
+            printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s","additionalContext":"%s"}}\n' "$_NO_PY_REASON" "$_NO_PY_CONTEXT"
+            exit 0
+            ;;
         *)
             printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s","additionalContext":"%s"}}\n' "$_NO_PY_REASON" "$_NO_PY_CONTEXT"
             exit 2
