@@ -146,6 +146,8 @@ when the user has already said to ignore a finding.
 Decide **every** finding before editing:
 
 - **Already ignored** by the scanner → leave it. Do not remediate it again.
+- **Below `cx_severity_threshold`** (see "Scanner switch") → leave it untouched, even when a hook
+  deny lists it. Do not call the MCP for it and do not report it as fixed.
 - **Detect-only** → do not edit. Report it unresolved with that reason.
 - **Otherwise** → true positive. Remediate it. Do not ask the user to choose between fixing and
   suppressing.
