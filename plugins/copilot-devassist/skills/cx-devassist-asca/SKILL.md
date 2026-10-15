@@ -33,6 +33,10 @@ Pick by the target, and ask if it is ambiguous:
 A bare "scan this file" refers to whatever file is in context: source code → this skill; a
 manifest/lockfile → `cx-devassist-sca`; secrets → `cx-devassist-secrets`. If it is unclear which, ask the user.
 
+## Scanner switch (check first)
+
+Read `~/.checkmarx/cx-onboarding.properties` (Windows: `%USERPROFILE%\.checkmarx\cx-onboarding.properties`). If it contains `cx_asca_scanner_enabled=false` (also `0`/`no`/`off`/`disabled`), the user has turned the ASCA scanner off: **do not run the scan or remediate**; reply with one line saying ASCA scanning is disabled in that file, then stop. A missing file, a missing key or any other value means enabled — continue. If `cx_severity_threshold` is set (`low`|`medium`|`high`|`critical`, default `low`), report and remediate only findings at or above that severity. This switch never blocks a hook.
+
 ## Prerequisites
 
 - Checkmarx `cx` CLI installed. On a first-install session `cx` is in the **canonical store** but not

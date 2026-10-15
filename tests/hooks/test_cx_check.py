@@ -50,6 +50,11 @@ if _prev_cx_log is None:
 else:
     sys.modules["cx_log"] = _prev_cx_log
 
+# Hermetic: never read the developer's real ~/.checkmarx/cx-onboarding.properties (scanner switches
+# they may have turned off would change gate verdicts). A missing user copy falls back to the bundled
+# file, where every scanner is enabled.
+cx_check._user_config_path = lambda: os.path.join(tempfile.gettempdir(), "cx-no-such-user-config.properties")
+
 BOOTSTRAP = cx_check._bootstrap_script_path()
 CX_CHECK_SH = os.path.join(_HOOKS_DIR, "cx_check.sh")
 SH = shutil.which("sh")

@@ -163,16 +163,27 @@ Secrets. Secret remediation never prints the secret value. Self-healing
 (the default) applies the MCP fix and re-scans; detect-only, when the scanner says so, reports the
 finding and does not edit.
 
-### Admin onboarding pre-fill (optional)
+### URL / tenant pre-fill (optional)
 
-An administrator can pre-seed the Checkmarx One **URL** and **tenant** for browser (OAuth) sign-in by
-editing `config/cx-onboarding.properties`. When set (and valid), the values are embedded straight into
-the gate's `cx auth login` recovery command and the `cx-cli-setup` skill skips the URL/tenant
-question. Edit the file in your **forked / internal marketplace copy** (the reviewed, versioned
-artifact) — not in an end-user's live install, which is overwritten on plugin update. Values are
-strictly validated (https-only host for the URL; a shell-inert charset for the tenant); an invalid value
-is ignored and the developer is asked as usual. There is deliberately no out-of-tree (`~/.checkmarx` /
-env) override.
+Set `cx_base_auth_uri` and `cx_tenant` in `~/.checkmarx/cx-onboarding.properties` (the developer's copy) or
+in the bundled `config/cx-onboarding.properties` (an administrator, in the **forked / internal marketplace
+copy**; a live install is overwritten on update). A valid value in the user copy wins over the bundled one,
+per key. When both resolve, they are embedded straight into the gate's `cx auth login` recovery command and
+the `cx-cli-setup` skill skips the URL/tenant question. Values are strictly validated for both files (https-only
+host for the URL; a shell-inert charset for the tenant); an invalid value is ignored and the developer is
+asked as usual.
+
+### Scanner switches (user-editable)
+
+Copilot CLI has no install hook, so the first time a hook runs after install the plugin copies
+`config/cx-onboarding.properties` to `~/.checkmarx/cx-onboarding.properties` (Windows:
+`%USERPROFILE%\.checkmarx\`). It is never overwritten afterwards, so edits survive plugin updates
+(delete it to re-seed). Every scanner is **enabled by default**; set `cx_asca_scanner_enabled`,
+`cx_sca_scanner_enabled`, `cx_kics_scanner_enabled` or `cx_secret_scanner_enabled` to `false` to skip
+that scanner's skill. `cx_severity_threshold` (`low`…`critical`; blank or invalid = `low`) limits what the skills report and, with a cx build that includes the ast-cli change, what ASCA/KICS/SCA block; the secrets skill applies it too. Switches
+only narrow behaviour and never cause a hook to deny; a typo leaves the scanner enabled. With the secrets scanner off, a file only the secrets engine would scan (e.g. `app.env`) is no longer
+gated by the readiness check. A cx CLI build that reads this file (ast-cli `agenthooks/scannerconfig`) also
+skips each disabled engine in the native pre-write scan; older builds ignore the switches.
 
 ### Remembered login environments (automatic)
 

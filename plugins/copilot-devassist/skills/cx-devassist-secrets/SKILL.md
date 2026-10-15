@@ -43,6 +43,10 @@ dependency manifests, anything under `node_modules`, and the Checkmarx ignore fi
 file, and line only. If a scan field contains the literal, omit that field from anything you show
 the user.
 
+## Scanner switch (check first)
+
+Read `~/.checkmarx/cx-onboarding.properties` (Windows: `%USERPROFILE%\.checkmarx\cx-onboarding.properties`). If it contains `cx_secret_scanner_enabled=false` (also `0`/`no`/`off`/`disabled`), the user has turned the secrets scanner off: **do not run the scan or remediate**; reply with one line saying secrets scanning is disabled in that file, then stop. A missing file, a missing key or any other value means enabled — continue. If `cx_severity_threshold` is set (`low`|`medium`|`high`|`critical`, default `low`), report and remediate only secret findings at or above that severity; leave findings below it untouched. This switch never blocks a hook.
+
 ## Prerequisites
 
 - Checkmarx `cx` CLI installed. On a first-install session `cx` is in the **canonical store** but not
@@ -142,6 +146,8 @@ when the user has already said to ignore a finding.
 Decide **every** finding before editing:
 
 - **Already ignored** by the scanner → leave it. Do not remediate it again.
+- **Below `cx_severity_threshold`** (see "Scanner switch") → leave it untouched, even when a hook
+  deny lists it. Do not call the MCP for it and do not report it as fixed.
 - **Detect-only** → do not edit. Report it unresolved with that reason.
 - **Otherwise** → true positive. Remediate it. Do not ask the user to choose between fixing and
   suppressing.
