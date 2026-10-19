@@ -20,12 +20,6 @@
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PY_SCRIPT="$SCRIPT_DIR/cx_check.py"
 
-# POC: record the host-injected PLUGIN_ROOT text. Append to a file only.
-# stdout stays the hook decision JSON, so this cannot change allow/deny.
-_POC_LOG="${HOME}/.checkmarx/agent-logs/copilot-cli/plugin_root_poc.log"
-mkdir -p "$(dirname "$_POC_LOG")" 2>/dev/null || true
-printf '%s PLUGIN_ROOT=[%s] CX_PLUGIN_ROOT=[%s]\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo ts)" "${PLUGIN_ROOT:-<empty>}" "${CX_PLUGIN_ROOT:-<empty>}" >> "$_POC_LOG" 2>/dev/null || true
-
 # Capture stdin once: we inspect it (carve-out below) and replay it to Python.
 INPUT=$(cat)
 

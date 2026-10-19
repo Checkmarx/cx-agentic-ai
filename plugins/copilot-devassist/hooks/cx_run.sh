@@ -34,12 +34,6 @@ case "$0" in
     *)    _CXRUN_DIR=. ;;
 esac
 
-# POC: record the host-injected PLUGIN_ROOT text. Append to a file only.
-# stdout stays the scanner decision, so this cannot change allow/deny.
-_POC_LOG="${HOME}/.checkmarx/agent-logs/copilot-cli/plugin_root_poc.log"
-mkdir -p "$(dirname "$_POC_LOG")" 2>/dev/null || true
-printf '%s script=cx_run arg=%s PLUGIN_ROOT=[%s] CX_PLUGIN_ROOT=[%s]\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo ts)" "${1:-}" "${PLUGIN_ROOT:-<empty>}" "${CX_PLUGIN_ROOT:-<empty>}" >> "$_POC_LOG" 2>/dev/null || true
-
 # Write ONE cx_log.py audit record using the first WORKING Python 3: python3 -> python -> py -3.
 # Best-effort by contract: every failure is swallowed and callers ignore the status.
 _cxrun_log() {
