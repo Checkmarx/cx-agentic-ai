@@ -17,7 +17,7 @@
         "command": "sh \"${PLUGIN_ROOT}/hooks/cx_check.sh\" --copilot-cli",
         "timeoutSec": 45,
         "statusMessage": "Checking cx CLI is available...",
-        "env": {"CX_ASSISTANT": "copilot-cli"}
+        "env": {"CX_ASSISTANT": "copilot-cli", "CX_PLUGIN_ROOT": "${PLUGIN_ROOT}"}
       },
       {
         "matcher": "create|edit",
@@ -25,7 +25,7 @@
         "command": "sh \"${PLUGIN_ROOT}/hooks/cx_run.sh\" hooks copilot-cli-pre-file-write",
         "timeoutSec": 60,
         "statusMessage": "Checking file write against security policy...",
-        "env": {"CX_ASSISTANT": "copilot-cli"}
+        "env": {"CX_ASSISTANT": "copilot-cli", "CX_PLUGIN_ROOT": "${PLUGIN_ROOT}"}
       }
     ],
     "Stop": [
@@ -33,7 +33,7 @@
         "type": "command",
         "command": "sh \"${PLUGIN_ROOT}/hooks/cx_run.sh\" hooks copilot-cli-stop",
         "timeoutSec": 60,
-        "env": {"CX_ASSISTANT": "copilot-cli"}
+        "env": {"CX_ASSISTANT": "copilot-cli", "CX_PLUGIN_ROOT": "${PLUGIN_ROOT}"}
       }
     ]
   }
