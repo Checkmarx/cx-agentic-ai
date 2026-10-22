@@ -1567,6 +1567,15 @@ def cx_check():
             }))
         return
 
+    # 1b. Hosts that ignore `matcher` (JetBrains Copilot reads the same hook file but fires it for
+    #     EVERY tool: ask_user, powershell, …) would otherwise gate tools that can never write a file,
+    #     including the ask_user prompt the login flow depends on. CX_GATE_FILE_TOOLS_ONLY=1 — set by
+    #     the user-level hooks template — makes the gate itself do the filtering the matcher was meant
+    #     to do. Opt-in so the plugin's own hooks (matcher-honouring CLI) keep gating MCP/unknown
+    #     tools exactly as before.
+    if os.environ.get("CX_GATE_FILE_TOOLS_ONLY") == "1" and tool not in _FILE_WRITE_TOOLS:
+        _log("gate_decision", decision="allow", reason_code="not_file_tool", tool_name=tool)
+        return
 
     # 2. Read-only Bash commands (ls, cat, grep, …) can't write code to disk or run another program,
     #     so there is nothing to scan — allow them WITHOUT requiring cx to be installed/authed. Removes

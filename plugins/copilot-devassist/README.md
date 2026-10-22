@@ -295,6 +295,31 @@ IntelliJ, Eclipse), then retry the update/uninstall.
 
 ---
 
+## JetBrains IDEs
+
+The Copilot plugin for JetBrains lists this plugin's hooks, skills and MCP server, but it does not run
+the plugin's own hooks, so file writes are not scanned. Install the user-level hooks file once and it
+applies to every repo (JetBrains also reads `.github/hooks/*.json` per repo, if you prefer that):
+
+```sh
+mkdir -p ~/.copilot/hooks
+cp ~/.copilot/installed-plugins/cx-devassist-marketplace/cx-devassist/hooks/hooks-copilot-cli.json \
+   ~/.copilot/hooks/cx-devassist.json
+```
+
+Restart the IDE afterwards. Notes:
+
+- JetBrains runs the hook for **every** tool (it ignores `matcher`). `hooks-copilot-cli.json` sets
+  `CX_GATE_FILE_TOOLS_ONLY=1` on the gate so `cx_check.py` allows non-file tools (`ask_user`, shell, ...)
+  itself; in the CLI the matcher already keeps those tools away, so the flag changes nothing there.
+- Business/Enterprise accounts need the **Editor preview features** policy enabled by an admin.
+- Install this file for JetBrains only. The Copilot CLI already runs the plugin's own hooks, so with
+  both present each file write is checked twice.
+- Verify with `~/.checkmarx/agent-logs/copilot-cli/cx-devassist.jsonl`: a `gate_decision` for tool
+  `create`/`edit` should appear after Copilot writes a file.
+
+---
+
 ## Configuration
 
 All optional — sensible defaults apply.

@@ -181,6 +181,30 @@ class TestMissingCx(unittest.TestCase):
         self.assertEqual(code, 0)
 
 
+class TestFileToolsOnly(unittest.TestCase):
+    """CX_GATE_FILE_TOOLS_ONLY=1 (JetBrains user-level hooks): the host ignores `matcher`, so the gate
+    must itself allow tools that cannot write a file — without weakening the gate for file writes."""
+
+    _ENV = {"CX_GATE_FILE_TOOLS_ONLY": "1"}
+
+    def test_ask_user_allowed_when_cx_absent(self):
+        payload = {"toolName": "ask_user", "toolArgs": "{}"}
+        decision, code = run(payload, which=None, env=self._ENV, copilot_cli=True)
+        self.assertNotEqual(decision, "deny")
+        self.assertEqual(code, 0)
+
+    def test_ask_user_denied_without_flag(self):
+        payload = {"toolName": "ask_user", "toolArgs": "{}"}
+        decision, code = run(payload, which=None, copilot_cli=True)
+        self.assertEqual(decision, "deny")  # Copilot CLI mode: deny rides in the JSON, exit 0
+
+    def test_file_write_still_gated_with_flag(self):
+        payload = {"toolName": "create",
+                   "toolArgs": json.dumps({"path": "app.py", "file_text": "x = 1"})}
+        decision, code = run(payload, which=None, env=self._ENV, copilot_cli=True)
+        self.assertEqual(decision, "deny")  # Copilot CLI mode: deny rides in the JSON, exit 0
+
+
 class TestVersionGate(unittest.TestCase):
     def test_below_min_denies(self):
         decision, code = run(bash("npm test"), version_state="below")
