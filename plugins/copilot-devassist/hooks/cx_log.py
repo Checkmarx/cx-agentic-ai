@@ -98,7 +98,7 @@ _EVENTS = {
         # (config/cx-onboarding.properties). NEVER carries the offending VALUE (which an admin -- or a
         # tamperer -- controls); only WHICH known key was accepted/rejected and the outcome, so a bad
         # config leaves an audit trail without echoing its payload into the log.
-        "result": _enum({"loaded", "invalid", "absent"}),
+        "result": _enum({"loaded", "invalid", "absent", "seeded_user_copy", "merged_user_copy"}),
         "key": _enum({"cx_base_auth_uri", "cx_tenant"}),
     },
     "capability_probe": {

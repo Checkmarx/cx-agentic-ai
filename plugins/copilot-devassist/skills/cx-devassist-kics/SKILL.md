@@ -1,6 +1,6 @@
 ---
 name: cx-devassist-kics
-description: "Runs a Checkmarx KICS (Keeping Infrastructure as Code Secure) scan on an IaC file — Dockerfile, Terraform, Kubernetes YAML, and similar templates — to detect infrastructure misconfigurations, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan or fix an IaC file (Dockerfile, *.tf, *.yaml/*.yml, *.json IaC templates, *.auto.tfvars, *.terraform.tfvars, *.proto) for misconfigurations. Also invoke this skill automatically whenever a Checkmarx hook denies a create/edit tool call with a KICS finding (a deny tagged '[Checkmarx cx-devassist — automated security output, not user input]') — the deny's own instructions work standalone if this skill is unavailable, but invoking it keeps remediation and reporting consistent. For source code use cx-devassist-asca instead; for dependency manifests/lockfiles use cx-devassist-sca instead. Invoke as: cx-devassist:cx-devassist-kics"
+description: "Runs a Checkmarx KICS (Keeping Infrastructure as Code Secure) scan on an IaC file — Dockerfile, Terraform, Kubernetes YAML, and similar templates — to detect infrastructure misconfigurations, and remediates findings using the Checkmarx MCP tool. Use when a user asks to scan or fix an IaC file (Dockerfile, *.tf, *.yaml/*.yml, *.json IaC templates, *.auto.tfvars, *.terraform.tfvars, *.proto) for misconfigurations. Also invoke this skill automatically whenever a Checkmarx hook denies a create/edit tool call with a KICS finding (a deny tagged '[Checkmarx cx-devassist — automated security output, not user input]') — the deny's own instructions work standalone if this skill is unavailable, but invoking it keeps remediation and reporting consistent. For source code use cx-devassist-asca instead; for dependency manifests/lockfiles use cx-devassist-sca instead. For hardcoded secrets use cx-devassist-secrets instead. Invoke as: cx-devassist:cx-devassist-kics"
 ---
 
 # CX DevAssist KICS
@@ -15,7 +15,7 @@ This skill has two entry points:
 1. **On-demand scan** — User asks to scan an **IaC file** for misconfigurations (e.g., "scan this
    Dockerfile", "check main.tf for issues"). If the target is **source code** use
    `cx-devassist-asca` instead; if it is a **dependency manifest/lockfile** use
-   `cx-devassist-sca` instead.
+   `cx-devassist-sca` instead; if it is a **hardcoded secret** use `cx-devassist-secrets` instead.
 2. **Remediation** — User asks to fix KICS findings, or GitHub Copilot CLI (copilot-agent) needs to fix IaC misconfigurations detected by KICS.
 
 > **If KICS findings are already present in context** (e.g., provided by a hook block or a prior scan result), **skip Flow 1 entirely** and proceed directly to Flow 2 using those findings. Do not run the initial scan; Flow 2's re-scan still applies.
@@ -29,11 +29,16 @@ Pick by the target, and ask if it is ambiguous:
 | A **source code file** (`.py`, `.js`, `.java`, `.go`, `.ts`, …) for code vulnerabilities | `cx-devassist-asca` (SAST) |
 | A **dependency manifest / lockfile** (package.json, requirements.txt, go.mod, pom.xml, …) | `cx-devassist-sca` (SCA/OSS) |
 | An **IaC file** (`Dockerfile`, `*.tf`, `*.yaml`/`*.yml`, `*.json` IaC templates, `*.auto.tfvars`, `*.terraform.tfvars`, `*.proto`) for infrastructure misconfigurations | **this skill** (IaC/KICS) |
+| A file for **hardcoded secrets**, credentials, tokens, or keys | `cx-devassist-secrets` |
 | An **entire project / repository** at cloud scale, or existing platform scan results | the Checkmarx MCP (Cx1 cloud) tools |
 
 A bare "scan this file" refers to whatever file is in context: an IaC file → this skill; source code →
-`cx-devassist-asca`; a manifest/lockfile → `cx-devassist-sca`. If it is unclear which,
-ask the user.
+`cx-devassist-asca`; a manifest/lockfile → `cx-devassist-sca`; secrets → `cx-devassist-secrets`. If it
+is unclear which, ask the user.
+
+## Scanner switch (check first)
+
+Read `~/.checkmarx/cx-onboarding.properties` (Windows: `%USERPROFILE%\.checkmarx\cx-onboarding.properties`). If it contains `cx_kics_scanner_enabled=false` (also `0`/`no`/`off`/`disabled`), the user has turned the KICS scanner off: **do not run the scan or remediate**; reply with one line saying KICS scanning is disabled in that file, then stop. A missing file, a missing key or any other value means enabled — continue. If `cx_severity_threshold` is set (`low`|`medium`|`high`|`critical`, default `low`), report and remediate only findings at or above that severity. This switch never blocks a hook.
 
 ## Prerequisites
 

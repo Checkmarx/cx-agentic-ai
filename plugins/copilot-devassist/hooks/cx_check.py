@@ -53,7 +53,7 @@ def _tag(text):
 # is a fast pre-filter: capability is decided by the probe below (_capabilities_present), not by
 # this number. Keep IDENTICAL to scripts/cx-min-version and scripts/cx-bootstrap.sh.
 # (search marker: CX_MIN_VERSION)
-_MIN_VERSION_FALLBACK = (2, 3, 67)
+_MIN_VERSION_FALLBACK = (2, 3, 68)
 
 # The cx executable the GATE invokes for its own probes, resolved by ABSOLUTE path where possible so
 # the gate works the instant cx is installed — even before it is on PATH. A freshly-installed cx in
@@ -277,12 +277,10 @@ _READONLY_COMMANDS = frozenset({
     "df", "du", "ps", "grep", "rg", "cut", "uniq", "cmp", "cksum", "md5sum", "sha256sum",
 })
 
-# --- Scannable files: what the three Checkmarx engines can actually analyse ------------------------
+# --- Scannable files: what the Checkmarx engines can actually analyse -----------------------------
 # The readiness chain (cx present → recent → capable → authenticated → licensed → really scanning) is
-# only worth ENFORCING for a file one of the engines would look at. Blocking a README.md write because
-# cx is unauthenticated helps nobody: ASCA, KICS and SCA each self-skip an unsupported path, so that
-# write would have gone through UNSCANNED even on a perfectly healthy cx — the block was friction,
-# not protection.
+# only worth ENFORCING for a file one of the engines would look at. ASCA, KICS and SCA each self-skip
+# an unsupported path. The secret engine does not: it scans every file the hook sees. A README.md write is therefore gated.
 #
 # The set lives in config/cx-scannable-files so an administrator can adjust coverage without editing
 # code. THIS is its only reader — see that file's header for why a second, POSIX-shell implementation
@@ -424,7 +422,7 @@ def _is_scannable_file(hook_input):
     # semantics) while the agent types a native Windows path, where os.path.basename would not split
     # on backslashes. `""` from _effective_basename means "cannot determine the real target" (an NTFS
     # stream suffix, or a name that strips to nothing) — both gate.
-    base = _effective_basename(os.path.basename(path.replace("\\", "/").rstrip("/")).lower())
+    base = _effective_basename(os.path.basename(path.replace("\\", "/").rstrip("/").lower()))
     if not base:
         return True
     if base in table["base"]:
@@ -437,7 +435,9 @@ def _is_scannable_file(hook_input):
     prefix_kind = _PREFIX_KINDS_BY_EXT.get(ext)
     if prefix_kind and any(base.startswith(prefix) for prefix in table[prefix_kind]):
         return True
-    return False
+    # Secrets scan every remaining file. ASCA, KICS and SCA would skip it; secrets would not — so such a
+    # file is only worth gating while the secrets scanner is switched on. (Default: on.)
+    return _load_scanner_switches()["cx_secret_scanner_enabled"]
 
 
 def _normalize_path(p):
@@ -807,14 +807,11 @@ def _admin_config_path():
     return _plugin_path("config", "cx-onboarding.properties")
 
 
-def _load_admin_config(path=None):
-    """Read config/cx-onboarding.properties and return ONLY the known, VALIDATED keys as a dict
-    (possibly empty). FAIL SOFT: a missing/garbled/oversized/undecodable file, an invalid value, or
-    any unexpected error yields {} (no pre-fill). This must NEVER raise — an escaped exception would
-    trip _fail_closed_on_crash and brick every tool call — and NEVER block. `path` is a test hook."""
+def _parse_admin_file(path):
+    """The known, VALIDATED keys of ONE properties file as a dict (possibly empty). Fail soft: a
+    missing/garbled/oversized/undecodable file, an invalid value or any error yields what was parsed so
+    far / {}. NEVER raises."""
     try:
-        if path is None:
-            path = _admin_config_path()
         try:
             with open(path, "r", encoding="utf-8-sig") as f:
                 raw = f.read(_ADMIN_CONFIG_MAX_BYTES + 1)
@@ -841,6 +838,144 @@ def _load_admin_config(path=None):
         return result
     except Exception:
         return {}
+
+
+def _load_admin_config(path=None):
+    """The URL / tenant pre-fill: ONLY the known, VALIDATED keys, as a dict (possibly empty).
+
+    Precedence per key: the user's ~/.checkmarx/cx-onboarding.properties (when the developer or admin
+    set a valid value there) over the bundled config/cx-onboarding.properties. The same strict
+    validators apply to both files, so a value from either is shell-inert before it is ever embedded in
+    the `cx auth login` command. FAIL SOFT: any problem yields fewer keys (the plugin then asks the
+    developer), never an exception — an escaped exception would trip _fail_closed_on_crash and brick
+    every tool call — and never a block. `path` is a test hook that reads that single file only."""
+    try:
+        if path is not None:
+            return _parse_admin_file(path)
+        merged = _parse_admin_file(_admin_config_path())
+        merged.update(_parse_admin_file(_user_config_path()))
+        return merged
+    except Exception:
+        return {}
+
+
+# --- User copy of the onboarding config (~/.checkmarx/cx-onboarding.properties) ---------------------
+# Copilot CLI has no plugin-install hook, so the bundled config is copied to the user's ~/.checkmarx
+# the first time any hook runs after install. The copy is NEVER overwritten (the developer's edits
+# survive plugin updates). Scanner on/off switches are read from it; they can only NARROW what the
+# plugin does and never cause a deny. URL/tenant pre-fill stays bundle-only (see the file header).
+_USER_CONFIG_NAME = "cx-onboarding.properties"
+_SCANNER_SWITCH_KEYS = (
+    "cx_asca_scanner_enabled",
+    "cx_sca_scanner_enabled",
+    "cx_kics_scanner_enabled",
+    "cx_secret_scanner_enabled",
+)
+_FALSE_VALUES = frozenset({"false", "0", "no", "off", "disabled"})
+
+
+def _user_config_path():
+    return os.path.join(os.path.expanduser("~"), ".checkmarx", _USER_CONFIG_NAME)
+
+
+def _property_key(line):
+    """The key of a `key=value` line, treating a `#`-commented line as the SAME key (so a developer who
+    commented a setting out deliberately is not nagged with it again). None for blanks/plain comments."""
+    line = line.strip().lstrip("#").strip()
+    key, sep, _value = line.partition("=")
+    key = key.strip()
+    return key if sep and key and " " not in key else None
+
+
+def _merge_new_properties(src, dest):
+    """Append to the user's copy every ACTIVE key the bundled file defines that the user's file does not
+    mention at all (active or commented), each with the comment block above it. Existing lines are never
+    modified, reordered or removed, so a plugin update brings new settings without touching the
+    developer's choices. Admin-only keys are not copied: they are commented examples in the bundle, and
+    only active bundle lines count. Written via temp-file + os.replace so a crash cannot truncate the
+    user's file, and two racing hooks compute identical content instead of appending twice.
+    Returns True when something was added. Never raises."""
+    try:
+        with open(src, "r", encoding="utf-8-sig", newline="") as f:
+            bundled = f.read(_ADMIN_CONFIG_MAX_BYTES + 1).splitlines()
+        with open(dest, "r", encoding="utf-8", newline="") as f:
+            current = f.read(_ADMIN_CONFIG_MAX_BYTES + 1)
+        if len(current) > _ADMIN_CONFIG_MAX_BYTES:
+            return False
+        present = {_property_key(line) for line in current.splitlines()}
+        eol = "\r\n" if "\r\n" in current else "\n"
+        additions = []
+        for i, line in enumerate(bundled):
+            key = _property_key(line)
+            if not key or line.strip().startswith("#") or key in present:
+                continue
+            start = i
+            while start > 0 and bundled[start - 1].strip().startswith("#"):
+                start -= 1
+            additions.append(bundled[start:i + 1])
+            present.add(key)
+        if not additions:
+            return False
+        out = current if (not current or current.endswith(("\n", "\r"))) else current + eol
+        out += eol + "# --- added by a plugin update ---" + eol
+        for block in additions:
+            out += eol.join(block) + eol
+        tmp = dest + ".tmp-{0}".format(os.getpid())
+        with open(tmp, "w", encoding="utf-8", newline="") as f:
+            f.write(out)
+        os.replace(tmp, dest)
+        _log("admin_config", result="merged_user_copy")
+        return True
+    except Exception:
+        return False
+
+
+def _seed_user_config(src=None, dest=None):
+    """Keep ~/.checkmarx/cx-onboarding.properties in step with the bundle. Missing -> copy it.
+    Present -> leave every existing line alone and only ADD settings a plugin update introduced
+    (_merge_new_properties). Best-effort: never raises, never blocks. `src`/`dest` are test hooks.
+    Returns True only when the file was freshly copied."""
+    try:
+        src = src or _admin_config_path()
+        dest = dest or _user_config_path()
+        if not os.path.isfile(src):
+            return False
+        if os.path.exists(dest):
+            _merge_new_properties(src, dest)
+            return False
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(src, "rb") as fin, open(dest, "xb") as fout:   # "x": never clobber a racing writer
+            fout.write(fin.read())
+        _log("admin_config", result="seeded_user_copy")
+        return True
+    except Exception:
+        return False
+
+
+def _load_scanner_switches(path=None):
+    """{switch_key: bool} for the four scanner switches. Every scanner defaults to ENABLED; only an
+    explicit false/0/no/off/disabled turns one off, so a typo or unreadable file can never silently
+    disable scanning. Reads the user copy, falling back to the bundled file. NEVER raises."""
+    result = {key: True for key in _SCANNER_SWITCH_KEYS}
+    try:
+        raw = None
+        for candidate in ([path] if path else [_user_config_path(), _admin_config_path()]):
+            raw = _read_capped(candidate, _ADMIN_CONFIG_MAX_BYTES)
+            if raw is not None:
+                break
+        if raw is None:
+            return result
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _sep, value = line.partition("=")
+            key = key.strip()
+            if key in result and value.strip().lower() in _FALSE_VALUES:
+                result[key] = False
+    except Exception:
+        pass
+    return result
 
 
 # The shared opening of every _oauth_recovery_bullet branch — one copy, so a wording change cannot
@@ -873,8 +1008,8 @@ def _oauth_recovery_bullet(cfg, history=None):
             "auth login --base-auth-uri {0} --tenant {1}".format(base, tenant))
         return _OAUTH_BULLET_LEAD + (
             "The --base-auth-uri and --tenant "
-            "below were PRECONFIGURED BY YOUR ADMINISTRATOR (the plugin's "
-            "config/cx-onboarding.properties) -- use them AS-IS and do NOT ask the developer for a URL "
+            "below were PRECONFIGURED (cx-onboarding.properties: the plugin's bundled "
+            "copy or the developer's ~/.checkmarx copy) -- use them AS-IS and do NOT ask the developer for a URL "
             "or tenant:\n    " + cmd
         )
     if history is None:
@@ -1585,7 +1720,6 @@ def cx_check():
             }))
         return
 
-
     # 2. Read-only Bash commands (ls, cat, grep, …) can't write code to disk or run another program,
     #     so there is nothing to scan — allow them WITHOUT requiring cx to be installed/authed. Removes
     #     the friction of gating a plain `ls` during setup. Allowlisted + shape-guarded so it can't be
@@ -1989,6 +2123,14 @@ def cx_record_login():
 
 
 def main():
+    _seed_user_config()   # best-effort first-run copy to ~/.checkmarx; never raises
+
+    # SEED-ONLY mode for hooks/cx_run.sh: the seeding above is the whole job. Lets the MCP bridge spawn
+    # (session start — the nearest thing Copilot CLI has to an install event) create the user copy
+    # without waiting for the first shell/file-write hook. Prints nothing; never blocks.
+    if len(sys.argv) > 1 and sys.argv[1] == "seed-user-config":
+        sys.exit(0)
+
     # OBSERVER mode: record-login must NEVER block a tool call, whatever happens inside it.
     if len(sys.argv) > 1 and sys.argv[1] == "record-login":
         try:

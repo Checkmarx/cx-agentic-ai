@@ -104,6 +104,19 @@ elif command -v cx >/dev/null 2>&1; then
     _CX_RESOLVED_TIER="path"
 fi
 
+# First-run seeding of ~/.checkmarx/cx-onboarding.properties. Every cx_run.sh call (including the MCP
+# bridge spawn at session start, which fires before any shell/file-write hook) is a chance to create
+# the user copy after an install. The cheap file test below keeps the Python spawn off the hot path
+# once the file exists; cx_check.py owns the real path and NEVER overwrites, so a false "missing" (e.g.
+# HOME and USERPROFILE disagreeing) only costs one harmless no-op spawn. Best-effort, never blocks.
+if [ ! -f "${HOME:-/nonexistent}/.checkmarx/cx-onboarding.properties" ]    && [ ! -f "${USERPROFILE:-/nonexistent}/.checkmarx/cx-onboarding.properties" ]; then
+    for _cxrun_py in python3 python "py -3"; do
+        command -v "${_cxrun_py%% *}" >/dev/null 2>&1 || continue
+        # shellcheck disable=SC2086
+        $_cxrun_py "$_CXRUN_DIR/cx_check.py" seed-user-config >/dev/null 2>&1 </dev/null && break
+    done
+fi
+
 # Whether this invocation IS the blocking scan decision (pre-tool-use / pre-file-write) — the same
 # substring match used below in the cx-unresolved branch, kept in lockstep with it. Advisory
 # lifecycle hooks (stop/idle/prompt) are not security decisions and stay on the plain exec fast path.
