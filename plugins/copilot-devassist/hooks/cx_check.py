@@ -435,6 +435,9 @@ def _is_scannable_file(hook_input):
     prefix_kind = _PREFIX_KINDS_BY_EXT.get(ext)
     if prefix_kind and any(base.startswith(prefix) for prefix in table[prefix_kind]):
         return True
+    # Secrets scan every remaining file. ASCA, KICS and SCA would skip it; secrets would not — so such a
+    # file is only worth gating while the secrets scanner is switched on. (Default: on.)
+    return _load_scanner_switches()["cx_secret_scanner_enabled"]
 
 
 def _normalize_path(p):
