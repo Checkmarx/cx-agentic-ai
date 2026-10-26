@@ -436,7 +436,12 @@ def _is_scannable_file(hook_input):
     if prefix_kind and any(base.startswith(prefix) for prefix in table[prefix_kind]):
         return True
     # Secrets scan every remaining file. ASCA, KICS and SCA would skip it; secrets would not — so such a
-    # file is only worth gating while the secrets scanner is switched on. (Default: on.)
+    # file is only worth gating while the secrets scanner is switched on. (Default: on.) Inside VS Code a
+    # valid IDE state file is the source of the switch, as it is for ast-cli's native scan.
+    if _COPILOT_CLI_MODE and _in_vscode(hook_input):
+        ide = _load_ide_config()
+        if ide is not None:
+            return ide.get("cx_secret_scanner_enabled", "").strip().lower() not in _FALSE_VALUES
     return _load_scanner_switches()["cx_secret_scanner_enabled"]
 
 
@@ -978,6 +983,53 @@ def _load_scanner_switches(path=None):
     return result
 
 
+# --- VS Code IDE state file (~/.checkmarx/cx-onboarding-ide.properties) ----------------------------
+# Written ONLY by the Checkmarx VS Code extension, from its "Checkmarx Self-Healing" setting. GitHub
+# Copilot in VS Code loads this same plugin and runs these same hooks, so the file is how the user's
+# VS Code choice reaches them. Read only when the host is VS Code (_in_vscode) — the terminal Copilot
+# CLI never reads it, so the CLI stays exactly as it was. "Missing file = ON": an absent, unreadable,
+# oversized or unknown-schema file, a missing key or any value outside _FALSE_VALUES all mean enabled.
+_IDE_CONFIG_NAME = "cx-onboarding-ide.properties"
+_IDE_CONFIG_MAX_BYTES = 8192
+_IDE_SCHEMA_VERSION = "1"
+
+
+def _ide_config_path():
+    return os.path.join(os.path.expanduser("~"), ".checkmarx", _IDE_CONFIG_NAME)
+
+
+def _load_ide_config(path=None):
+    """{key: value} from the IDE state file (last occurrence wins, `#` lines skipped, BOM stripped),
+    or None when it is not VALID: missing, unreadable, undecodable, over 8 KB, or carrying a
+    cx_schema_version other than 1. `path` is a test hook. NEVER raises."""
+    try:
+        path = path or _ide_config_path()
+        # The cap is in BYTES (as the shell reader's `wc -c` measures it); _read_capped counts chars.
+        if os.path.getsize(path) > _IDE_CONFIG_MAX_BYTES:
+            return None
+        raw = _read_capped(path, _IDE_CONFIG_MAX_BYTES)
+        if raw is None:
+            return None
+        values = {}
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _sep, value = line.partition("=")
+            values[key.strip()] = value.strip()
+        if values.get("cx_schema_version", _IDE_SCHEMA_VERSION) != _IDE_SCHEMA_VERSION:
+            return None
+        return values
+    except Exception:
+        return None
+
+
+def _ide_self_healing_disabled():
+    """True only when the IDE state file is valid AND cx_self_healing_enabled is explicitly false."""
+    ide = _load_ide_config()
+    return ide is not None and ide.get("cx_self_healing_enabled", "").strip().lower() in _FALSE_VALUES
+
+
 # The shared opening of every _oauth_recovery_bullet branch — one copy, so a wording change cannot
 # silently miss a branch (there are three of them now).
 _OAUTH_BULLET_LEAD = (
@@ -1462,6 +1514,43 @@ def _is_copilot_cli_input(hook_input):
 # _fail_closed_on_crash() to choose the correct deny exit code per client.
 _COPILOT_CLI_MODE = False
 
+# How a hook knows it runs inside VS Code rather than the terminal Copilot CLI. First match wins:
+#   1. PLUGIN_ROOT, which the host sets to the plugin folder it runs (verified by the AST-186850 PoC).
+#      VS Code always runs its own copy under <VS Code user data>/agentPlugins/ (Windows
+#      %APPDATA%/Code/agentPlugins, macOS ~/Library/Application Support/Code/agentPlugins, Linux
+#      ~/.config/Code/agentPlugins, Insiders likewise) — for a plugin installed by the Copilot CLI and for
+#      one installed from VS Code's marketplace. The terminal Copilot CLI (including one started in VS
+#      Code's integrated terminal) runs it from ~/.copilot/installed-plugins/.
+#   2. Only when PLUGIN_ROOT says neither: GITHUB_COPILOT_INTEGRATION_ID=vscode-chat (VS Code sets it on
+#      the Copilot CLI engine it bundles), then VS Code-shaped input (snake_case tool_name / tool_input).
+# Deliberately NOT keyed off TERM_PROGRAM / VSCODE_*: the integrated terminal inherits those.
+_VSCODE_INTEGRATION_ID = "vscode-chat"
+_VSCODE_INPUT_KEYS = ("tool_name", "tool_input", "hook_event_name", "session_id")
+
+
+def _plugin_root_host():
+    """"vscode", "cli" or None (unset / unrecognised) from the PLUGIN_ROOT the host injected."""
+    root = os.environ.get("PLUGIN_ROOT", "").strip().replace("\\", "/").lower()
+    # Terminal marker first: VS Code's folder names encode the source path with dashes
+    # (...-copilot-installed-plugins-...), so they never contain it, while a terminal path could
+    # contain "agentPlugins" by chance (a user or folder name).
+    if "/.copilot/installed-plugins/" in root:
+        return "cli"
+    if "/agentplugins/" in root:
+        return "vscode"
+    return None
+
+
+def _in_vscode(hook_input):
+    """True when this Copilot hook runs inside VS Code (see the rules above)."""
+    host = _plugin_root_host()
+    if host is not None:
+        return host == "vscode"
+    if os.environ.get("GITHUB_COPILOT_INTEGRATION_ID", "").strip() == _VSCODE_INTEGRATION_ID:
+        return True
+    return isinstance(hook_input, dict) and any(k in hook_input for k in _VSCODE_INPUT_KEYS)
+
+
 
 def _tool_name(hook_input):
     """Extract tool name supporting all client formats:
@@ -1697,6 +1786,14 @@ def cx_check():
     # a non-zero exit). The argv flag makes Copilot CLI mode explicit and format-independent.
     global _COPILOT_CLI_MODE
     _COPILOT_CLI_MODE = ("--copilot-cli" in sys.argv[1:]) or _is_copilot_cli_input(hook_input)
+
+    # 0. VS Code "Checkmarx Self-Healing" unticked → the plugin does NOTHING in VS Code: allow at
+    #    once, before the bootstrap, CX_BINARY, version, auth and licence checks. Emits no JSON — an
+    #    explicit allow would also skip VS Code's own tool-confirmation prompt. A missing/invalid IDE
+    #    state file means ON (today's behaviour). The terminal Copilot CLI never reaches this read.
+    if _COPILOT_CLI_MODE and _in_vscode(hook_input) and _ide_self_healing_disabled():
+        _log("gate_decision", decision="allow", reason_code="self_healing_disabled", tool_name=tool)
+        return
 
     # 1. The bootstrap is the ONLY way out of the block — must be checked first.
     #

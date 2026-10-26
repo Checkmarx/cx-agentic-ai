@@ -116,8 +116,14 @@ if [ -z "$PYTHON_BIN" ]; then
     # JSON shape also differs by client.
     _NO_PY_REASON="The Checkmarx security gate could not run: no working Python 3 interpreter was found, so the scanner is inactive. This operation is BLOCKED fail-closed."
     _NO_PY_CONTEXT="Install Python 3, then retry. Windows: install from https://python.org (NOT the Microsoft Store stub). macOS: \`xcode-select --install\` or \`brew install python3\`. Linux: \`apt install python3\` / \`dnf install python3\` / \`apk add python3\`. The plugin's bundled bootstrap (scripts/cx-bootstrap.sh) installs the cx CLI and itself needs NO Python, but this version/auth gate does. Without Python 3 the gate cannot tell which files Checkmarx can scan, so ALL file writes are blocked. Shell commands are never blocked, so you can install Python 3 and cx from here."
+    # VS Code with its "Checkmarx Self-Healing" setting unticked: the plugin does nothing there, so
+    # allow instead of denying (same rules as cx_check.py's _in_vscode / _ide_self_healing_disabled).
     case "$*" in
         *--copilot-cli*)
+            if [ -f "$SCRIPT_DIR/_cx_ide_host.sh" ]; then
+                . "$SCRIPT_DIR/_cx_ide_host.sh"
+                cx_ide_self_healing_off && cx_in_vscode "$INPUT" && exit 0
+            fi
             printf '{"permissionDecision":"deny","permissionDecisionReason":"%s %s"}\n' "$_NO_PY_REASON" "$_NO_PY_CONTEXT"
             exit 0
             ;;

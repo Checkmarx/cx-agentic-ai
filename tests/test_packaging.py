@@ -378,6 +378,9 @@ class TestShippedBytes(unittest.TestCase):
         for parts in self._GEMINI_ONLY_LF_FILES:
             self.assertNotIn(b"\r", self._bytes(_GEMINI_PLUGIN_ROOT, *parts),
                              "cx-agentic-ai/%s contains CR bytes — must be LF-only" % parts[-1])
+        # Sourced by copilot-devassist's cx_run.sh / cx_check.sh (VS Code Self-Healing switch).
+        self.assertNotIn(b"\r", self._bytes(_COPILOT_PLUGIN_ROOT, "hooks", "_cx_ide_host.sh"),
+                         "copilot-devassist/_cx_ide_host.sh contains CR bytes — must be LF-only")
 
     def test_cx_min_version_is_pure_ascii(self):
         for plugin_root in (_CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT, _GEMINI_PLUGIN_ROOT):
