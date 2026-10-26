@@ -55,9 +55,15 @@ class _TempHome(unittest.TestCase):
         self.cfg = os.path.join(self.cfg_dir, "cx-onboarding.properties")
         self._orig = cx_check._user_config_path
         cx_check._user_config_path = lambda: self.cfg
+        # The VS Code IDE state file lives in the same throwaway ~/.checkmarx (absent unless a test
+        # writes it), so the developer's real VS Code Self-Healing setting never leaks in.
+        self.ide_cfg = os.path.join(self.cfg_dir, "cx-onboarding-ide.properties")
+        self._orig_ide = cx_check._ide_config_path
+        cx_check._ide_config_path = lambda: self.ide_cfg
 
     def tearDown(self):
         cx_check._user_config_path = self._orig
+        cx_check._ide_config_path = self._orig_ide
         shutil.rmtree(self.home, ignore_errors=True)
 
     def write(self, body, newline="\n", encoding="utf-8"):

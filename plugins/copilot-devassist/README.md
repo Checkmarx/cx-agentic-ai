@@ -126,6 +126,7 @@ plugins/copilot-devassist/
 │   ├── cx_check.sh              # POSIX launcher — resolves Git Bash + Python 3, then runs the gate
 │   ├── cx_check.py              # the fail-closed gate (present → recent → capable → authenticated)
 │   ├── _cx_bootstrap_match.sh   # shared bootstrap-command matcher for the shell stages
+│   ├── _cx_ide_host.sh          # VS Code host detection + Self-Healing switch for the shell stages
 │   ├── cx_record_login.sh       # non-blocking observer: remembers OAuth URL + tenant
 │   ├── cx_run.sh                # resolves cx by absolute path; runs the native scanner + MCP bridge
 │   └── cx_log.py                # structured, redacted JSONL logging
@@ -184,6 +185,26 @@ that scanner's skill. `cx_severity_threshold` (`low`…`critical`; blank or inva
 only narrow behaviour and never cause a hook to deny; a typo leaves the scanner enabled. With the secrets scanner off, a file only the secrets engine would scan (e.g. `app.env`) is no longer
 gated by the readiness check. A cx CLI build that reads this file (ast-cli `agenthooks/scannerconfig`) also
 skips each disabled engine in the native pre-write scan; older builds ignore the switches.
+
+### VS Code: Checkmarx Self-Healing setting
+
+GitHub Copilot in VS Code loads this same plugin and runs the same hooks. The Checkmarx VS Code
+extension's setting **Checkmarx Self-Healing → Enable automatically fix and self-heal newly generated
+code** (default on) controls it there, through `~/.checkmarx/cx-onboarding-ide.properties` (Windows:
+`%USERPROFILE%\.checkmarx\`), which only the extension writes. When that file is valid (at most 8 KB,
+`cx_schema_version` absent or `1`) and has `cx_self_healing_enabled=false`, the plugin does nothing in
+VS Code: the file-write gate allows at once (logged as `gate_decision` / `self_healing_disabled`)
+without the cx, version, auth or licence checks, the native scan and the Stop hook do not run, and the
+skills stop with a one-line notice. A missing or invalid file means **on**. While the file is valid, its
+`cx_*_scanner_enabled` keys replace the scanner switches above in VS Code (for the native scan this needs a
+cx CLI build that reads the IDE file).
+
+The hooks know they run in VS Code from `PLUGIN_ROOT`: VS Code runs its own copy of the plugin under its
+`agentPlugins` folder (also when the plugin was installed from VS Code's marketplace), while the terminal
+runs it from `~/.copilot/installed-plugins/`. Fallbacks: `GITHUB_COPILOT_INTEGRATION_ID=vscode-chat` (set by VS Code on
+the Copilot CLI engine it runs models through) or from VS Code-shaped hook input. They never use
+`TERM_PROGRAM` / `VSCODE_*`, so the **terminal Copilot CLI never reads this file and is unchanged** —
+including a Copilot CLI started in VS Code's integrated terminal.
 
 ### Remembered login environments (automatic)
 

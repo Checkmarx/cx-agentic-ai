@@ -36,6 +36,10 @@ A bare "scan this file" refers to whatever file is in context: an IaC file → t
 `cx-devassist-asca`; a manifest/lockfile → `cx-devassist-sca`; secrets → `cx-devassist-secrets`. If it
 is unclear which, ask the user.
 
+## VS Code Self-Healing (check first)
+
+Only when you are running in **VS Code** (GitHub Copilot Chat in VS Code: the environment variable `PLUGIN_ROOT` points into VS Code's `agentPlugins` folder — not the terminal Copilot CLI, including a Copilot CLI started in VS Code's integrated terminal): read `~/.checkmarx/cx-onboarding-ide.properties` (Windows: `%USERPROFILE%\.checkmarx\cx-onboarding-ide.properties`), which the Checkmarx VS Code extension writes. If it contains `cx_self_healing_enabled=false` (also `0`/`no`/`off`/`disabled`) and its `cx_schema_version` is absent or `1`, the user has turned Checkmarx Self-Healing off in VS Code settings: **do not run the scan or remediate**; reply with one line saying Checkmarx Self-Healing is disabled in VS Code settings, then stop. A missing file, a missing key, another `cx_schema_version` or any other value means enabled — continue. While that file is valid, its `cx_kics_scanner_enabled` value (missing = enabled) replaces the one in `cx-onboarding.properties` for the scanner switch below. In the terminal Copilot CLI skip this step: it never reads that file.
+
 ## Scanner switch (check first)
 
 Read `~/.checkmarx/cx-onboarding.properties` (Windows: `%USERPROFILE%\.checkmarx\cx-onboarding.properties`). If it contains `cx_kics_scanner_enabled=false` (also `0`/`no`/`off`/`disabled`), the user has turned the KICS scanner off: **do not run the scan or remediate**; reply with one line saying KICS scanning is disabled in that file, then stop. A missing file, a missing key or any other value means enabled — continue. If `cx_severity_threshold` is set (`low`|`medium`|`high`|`critical`, default `low`), report and remediate only findings at or above that severity. This switch never blocks a hook.

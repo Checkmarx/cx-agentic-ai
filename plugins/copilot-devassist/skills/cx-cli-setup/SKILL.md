@@ -17,6 +17,10 @@ Resources); this router is the spine.
 - The developer explicitly runs `/cx-cli-setup` to reconfigure or reauthenticate
 - The plugin detected expired credentials and needs a re-auth step
 
+## VS Code Self-Healing (check first)
+
+Only when you are running in **VS Code** (GitHub Copilot Chat in VS Code: the environment variable `PLUGIN_ROOT` points into VS Code's `agentPlugins` folder — not the terminal Copilot CLI, including a Copilot CLI started in VS Code's integrated terminal): read `~/.checkmarx/cx-onboarding-ide.properties` (Windows: `%USERPROFILE%\.checkmarx\cx-onboarding-ide.properties`), which the Checkmarx VS Code extension writes. If it contains `cx_self_healing_enabled=false` (also `0`/`no`/`off`/`disabled`) and its `cx_schema_version` is absent or `1`, the user has turned Checkmarx Self-Healing off in VS Code settings: **do not install, upgrade or authenticate cx**; reply with one line saying Checkmarx Self-Healing is disabled in VS Code settings, then stop. A missing file, a missing key, another `cx_schema_version` or any other value means enabled — continue. In the terminal Copilot CLI skip this step: it never reads that file.
+
 ## Phase 0 — Assess Current State
 
 Run both checks to decide where to enter:
