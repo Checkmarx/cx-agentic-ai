@@ -1521,7 +1521,8 @@ _COPILOT_CLI_MODE = False
 #      ~/.config/Code/agentPlugins, Insiders likewise) — for a plugin installed by the Copilot CLI and for
 #      one installed from VS Code's marketplace. The terminal Copilot CLI (including one started in VS
 #      Code's integrated terminal) runs it from ~/.copilot/installed-plugins/.
-#   2. Only when PLUGIN_ROOT says neither: GITHUB_COPILOT_INTEGRATION_ID=vscode-chat (VS Code sets it on
+#   2. Any other PLUGIN_ROOT (a VS Code fork, JetBrains, Visual Studio, ...) is not VS Code.
+#   3. Only when PLUGIN_ROOT is not set: GITHUB_COPILOT_INTEGRATION_ID=vscode-chat (VS Code sets it on
 #      the Copilot CLI engine it bundles), then VS Code-shaped input (snake_case tool_name / tool_input).
 # Deliberately NOT keyed off TERM_PROGRAM / VSCODE_*: the integrated terminal inherits those.
 _VSCODE_INTEGRATION_ID = "vscode-chat"
@@ -1529,15 +1530,22 @@ _VSCODE_INPUT_KEYS = ("tool_name", "tool_input", "hook_event_name", "session_id"
 
 
 def _plugin_root_host():
-    """"vscode", "cli" or None (unset / unrecognised) from the PLUGIN_ROOT the host injected."""
+    """"vscode", "cli", "other" (any other host's plugin folder) or None (PLUGIN_ROOT not set) from
+    the PLUGIN_ROOT the host injected."""
     root = os.environ.get("PLUGIN_ROOT", "").strip().replace("\\", "/").lower()
     # Terminal marker first: VS Code's folder names encode the source path with dashes
     # (...-copilot-installed-plugins-...), so they never contain it, while a terminal path could
     # contain "agentPlugins" by chance (a user or folder name).
     if "/.copilot/installed-plugins/" in root:
         return "cli"
-    if "/agentplugins/" in root:
+    # Only VS Code's own user-data folder ("Code", "Code - Insiders") counts: VS Code forks (Cursor,
+    # Windsurf, Kiro, Devin, ...) keep their agentPlugins copies under their own folder and are not VS Code.
+    if "/code/agentplugins/" in root or "/code - insiders/agentplugins/" in root:
         return "vscode"
+    if root:
+        # Any other plugin folder (a VS Code fork's agentPlugins, JetBrains, Visual Studio, ...) is not
+        # VS Code, and the fallbacks must not override that.
+        return "other"
     return None
 
 

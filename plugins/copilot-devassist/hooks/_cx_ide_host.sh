@@ -9,7 +9,8 @@
 #      .../agentPlugins/... → VS Code (VS Code always runs its own copy there, whether the plugin was
 #      installed by the Copilot CLI or from VS Code's marketplace); .../.copilot/installed-plugins/... →
 #      the terminal Copilot CLI (also when started in VS Code's integrated terminal).
-#   2. Only when PLUGIN_ROOT says neither: GITHUB_COPILOT_INTEGRATION_ID=vscode-chat (set by VS Code on
+#   2. Any other PLUGIN_ROOT (a VS Code fork, JetBrains, Visual Studio, ...) is not VS Code.
+#   3. Only when PLUGIN_ROOT is not set: GITHUB_COPILOT_INTEGRATION_ID=vscode-chat (set by VS Code on
 #      the Copilot CLI engine it bundles), then VS Code-shaped stdin (tool_name / tool_input /
 #      hook_event_name / session_id). The terminal sends camelCase toolName / toolArgs, and its toolArgs
 #      is a JSON STRING (any key inside is escaped as \"key\"), so a raw `"tool_name"` cannot come from it.
@@ -20,9 +21,12 @@ cx_in_vscode() {
     _cxide_root=$(printf '%s' "${PLUGIN_ROOT:-}" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')
     # Terminal marker first: VS Code's folder names encode the source path with dashes, so they never
     # contain it, while a terminal path could contain "agentPlugins" by chance.
+    # Only VS Code's own user-data folder ("Code", "Code - Insiders") counts; a VS Code fork's
+    # agentPlugins folder (Cursor, Windsurf, Kiro, Devin, ...) is never VS Code.
     case "$_cxide_root" in
-        */.copilot/installed-plugins/*) return 1 ;;
-        */agentplugins/*)               return 0 ;;
+        */.copilot/installed-plugins/*)                         return 1 ;;
+        */code/agentplugins/* | */code\ -\ insiders/agentplugins/*) return 0 ;;
+        ?*)                                                     return 1 ;;  # any other host's plugin folder
     esac
     [ "${GITHUB_COPILOT_INTEGRATION_ID:-}" = vscode-chat ] && return 0
     case "$1" in

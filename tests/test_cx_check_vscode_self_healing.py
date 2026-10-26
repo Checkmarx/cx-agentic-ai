@@ -157,17 +157,26 @@ class HostDetection(unittest.TestCase):
         cx_check.os.environ = {"PLUGIN_ROOT": "/home/u/.copilot/installed-plugins/m/cx-devassist"}
         self.assertFalse(cx_check._in_vscode(vscode("create_file", {"filePath": "/a.py"})))
 
+    def test_vscode_fork_copies_are_not_vscode(self):
+        for root in (r"C:\Users\u\AppData\Roaming\Windsurf\agentPlugins\x\1a",
+                     "/Users/u/Library/Application Support/Cursor/agentPlugins/x/1a",
+                     "/home/u/.config/Kiro/agentPlugins/x/1a"):
+            # Not VS Code, and the fallbacks must not override that.
+            cx_check.os.environ = dict(_VSCODE_ENV, PLUGIN_ROOT=root)
+            self.assertFalse(cx_check._in_vscode(vscode("create_file", {"filePath": "/a.py"})), root)
+
     def test_terminal_path_containing_agentplugins_is_cli(self):
         for root in (r"C:\Users\agentPlugins\.copilot\installed-plugins\m\cx-devassist",
                      "/home/u/agentPlugins/.copilot/installed-plugins/m/cx-devassist"):
             cx_check.os.environ = {"PLUGIN_ROOT": root}
             self.assertFalse(cx_check._in_vscode(cli("create", {"path": "/a.py"})), root)
 
-    def test_unrecognised_plugin_root_falls_back(self):
+    def test_other_host_plugin_root_is_not_vscode(self):
+        # JetBrains, Visual Studio, ... : their own PLUGIN_ROOT; neither env nor input shape may override it.
         cx_check.os.environ = {"PLUGIN_ROOT": r"D:\other\plugin"}
         self.assertFalse(cx_check._in_vscode(cli("create", {"path": "/a.py"})))
         cx_check.os.environ = dict(_VSCODE_ENV, PLUGIN_ROOT=r"D:\other\plugin")
-        self.assertTrue(cx_check._in_vscode(cli("create", {"path": "/a.py"})))
+        self.assertFalse(cx_check._in_vscode(vscode("create_file", {"filePath": "/a.py"})))
 
     def test_vscode_integration_id_env(self):
         # VS Code's Copilot CLI engine: CLI-shaped stdin, only the env says "VS Code".
@@ -394,6 +403,11 @@ class IdeHostHelper(_ShellHome):
         self.assertFalse(self._call("cx_in_vscode", cli_payload, PLUGIN_ROOT=r"D:\other\plugin"))
         self.assertFalse(self._call("cx_in_vscode", cli_payload,
                                     PLUGIN_ROOT=r"C:\Users\agentPlugins\.copilot\installed-plugins\m\cx-devassist"))
+        self.assertTrue(self._call("cx_in_vscode", cli_payload,
+                                   PLUGIN_ROOT="/Users/u/Library/Application Support/Code - Insiders/agentPlugins/x/1a"))
+        for fork in (r"C:\Users\u\AppData\Roaming\Windsurf\agentPlugins\x\1a", "/home/u/.config/Kiro/agentPlugins/x/1a"):
+            self.assertFalse(self._call("cx_in_vscode", json.dumps(vscode("create_file", {})),
+                                        PLUGIN_ROOT=fork, **_VSCODE_ENV), fork)
 
     def test_self_healing_matches_python(self):
         cases = [
