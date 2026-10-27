@@ -1,7 +1,7 @@
 """Tests for "Checkmarx Self-Healing in VS Code" in the Copilot plugin (copilot-devassist).
 
 GitHub Copilot in VS Code loads the same plugin as the terminal Copilot CLI and runs the same hooks.
-Covered here: VS Code host detection (GITHUB_COPILOT_INTEGRATION_ID=vscode-chat, or VS Code-shaped
+Covered here: VS Code host detection (PLUGIN_ROOT under VS Code's agentPlugins folder, or VS Code-shaped
 stdin), the IDE state file (~/.checkmarx/cx-onboarding-ide.properties) validity rules, Self-Healing
 OFF -> allow before any readiness check, the terminal Copilot CLI staying unchanged, and the shell
 stages (hooks/_cx_ide_host.sh, hooks/cx_run.sh, hooks/cx_check.sh).
@@ -52,7 +52,6 @@ _SH = shutil.which("sh")
 
 _IDE_ON = "cx_schema_version=1\ncx_self_healing_enabled=true\n"
 _IDE_OFF = "cx_schema_version=1\ncx_self_healing_enabled=false\n"
-_VSCODE_ENV = {"GITHUB_COPILOT_INTEGRATION_ID": "vscode-chat"}
 # PLUGIN_ROOT values as the hosts set them (AST-186850 PoC; Windows paths, any user name).
 _ROOT_VSCODE_FROM_CLI_INSTALL = (
     r"C:\Users\u\AppData\Roaming\Code\agentPlugins"
@@ -62,6 +61,8 @@ _ROOT_VSCODE_FROM_MARKETPLACE = (
     r"\file-c-3A-Users-u-vscode-agent-plugins-marketplace-repositories-github-com-Checkmarx-cx-agentic-ai"
     r"\1a1542d091b")
 _ROOT_CLI = r"C:\Users\u\.copilot\installed-plugins\cx-devassist-marketplace\cx-devassist"
+# The hook environment GitHub Copilot in VS Code gives the plugin.
+_VSCODE_ENV = {"PLUGIN_ROOT": _ROOT_VSCODE_FROM_CLI_INSTALL}
 
 
 def vscode(tool, tool_input):
@@ -152,7 +153,7 @@ class HostDetection(unittest.TestCase):
 
     def test_plugin_root_terminal_cli_wins_over_input_and_env(self):
         # The terminal's PascalCase Stop hook gets VS Code-shaped input: PLUGIN_ROOT still says CLI.
-        cx_check.os.environ = dict(_VSCODE_ENV, PLUGIN_ROOT=_ROOT_CLI)
+        cx_check.os.environ = {"PLUGIN_ROOT": _ROOT_CLI, "GITHUB_COPILOT_INTEGRATION_ID": "vscode-chat"}
         self.assertFalse(cx_check._in_vscode({"hook_event_name": "Stop", "session_id": "s"}))
         cx_check.os.environ = {"PLUGIN_ROOT": "/home/u/.copilot/installed-plugins/m/cx-devassist"}
         self.assertFalse(cx_check._in_vscode(vscode("create_file", {"filePath": "/a.py"})))
@@ -162,7 +163,7 @@ class HostDetection(unittest.TestCase):
                      "/Users/u/Library/Application Support/Cursor/agentPlugins/x/1a",
                      "/home/u/.config/Kiro/agentPlugins/x/1a"):
             # Not VS Code, and the fallbacks must not override that.
-            cx_check.os.environ = dict(_VSCODE_ENV, PLUGIN_ROOT=root)
+            cx_check.os.environ = {"PLUGIN_ROOT": root}
             self.assertFalse(cx_check._in_vscode(vscode("create_file", {"filePath": "/a.py"})), root)
 
     def test_terminal_path_containing_agentplugins_is_cli(self):
@@ -175,16 +176,12 @@ class HostDetection(unittest.TestCase):
         # JetBrains, Visual Studio, ... : their own PLUGIN_ROOT; neither env nor input shape may override it.
         cx_check.os.environ = {"PLUGIN_ROOT": r"D:\other\plugin"}
         self.assertFalse(cx_check._in_vscode(cli("create", {"path": "/a.py"})))
-        cx_check.os.environ = dict(_VSCODE_ENV, PLUGIN_ROOT=r"D:\other\plugin")
+        cx_check.os.environ = {"PLUGIN_ROOT": r"D:\other\plugin"}
         self.assertFalse(cx_check._in_vscode(vscode("create_file", {"filePath": "/a.py"})))
 
-    def test_vscode_integration_id_env(self):
-        # VS Code's Copilot CLI engine: CLI-shaped stdin, only the env says "VS Code".
-        cx_check.os.environ = dict(_VSCODE_ENV)
-        self.assertTrue(cx_check._in_vscode(cli("create", {"path": "/a.py"})))
-
-    def test_other_integration_ids_are_not_vscode(self):
-        for value in ("", "copilot-developer-cli", "VSCODE-CHAT", "vscode"):
+    def test_integration_id_is_not_a_host_signal(self):
+        # GITHUB_COPILOT_INTEGRATION_ID names the Copilot engine, not the plugin's host: never VS Code.
+        for value in ("vscode-chat", "", "copilot-developer-cli", "VSCODE-CHAT", "vscode"):
             cx_check.os.environ = {"GITHUB_COPILOT_INTEGRATION_ID": value}
             self.assertFalse(cx_check._in_vscode(cli("create", {"path": "/a.py"})), value)
 
@@ -386,7 +383,7 @@ class IdeHostHelper(_ShellHome):
 
     def test_in_vscode(self):
         cli_payload = json.dumps(cli("create", {"tool_name": "x"}))
-        self.assertTrue(self._call("cx_in_vscode", cli_payload, **_VSCODE_ENV))
+        self.assertFalse(self._call("cx_in_vscode", cli_payload, GITHUB_COPILOT_INTEGRATION_ID="vscode-chat"))
         self.assertTrue(self._call("cx_in_vscode", json.dumps(vscode("create_file", {}))))
         self.assertTrue(self._call("cx_in_vscode", '{"hook_event_name":"Stop","session_id":"s"}'))
         self.assertFalse(self._call("cx_in_vscode", cli_payload))
@@ -399,7 +396,7 @@ class IdeHostHelper(_ShellHome):
                      "/home/u/.config/Code/agentPlugins/x/1a"):
             self.assertTrue(self._call("cx_in_vscode", cli_payload, PLUGIN_ROOT=root), root)
         stop = '{"hook_event_name":"Stop","session_id":"s"}'
-        self.assertFalse(self._call("cx_in_vscode", stop, PLUGIN_ROOT=_ROOT_CLI, **_VSCODE_ENV))
+        self.assertFalse(self._call("cx_in_vscode", stop, PLUGIN_ROOT=_ROOT_CLI))
         self.assertFalse(self._call("cx_in_vscode", cli_payload, PLUGIN_ROOT=r"D:\other\plugin"))
         self.assertFalse(self._call("cx_in_vscode", cli_payload,
                                     PLUGIN_ROOT=r"C:\Users\agentPlugins\.copilot\installed-plugins\m\cx-devassist"))
@@ -407,7 +404,7 @@ class IdeHostHelper(_ShellHome):
                                    PLUGIN_ROOT="/Users/u/Library/Application Support/Code - Insiders/agentPlugins/x/1a"))
         for fork in (r"C:\Users\u\AppData\Roaming\Windsurf\agentPlugins\x\1a", "/home/u/.config/Kiro/agentPlugins/x/1a"):
             self.assertFalse(self._call("cx_in_vscode", json.dumps(vscode("create_file", {})),
-                                        PLUGIN_ROOT=fork, **_VSCODE_ENV), fork)
+                                        PLUGIN_ROOT=fork), fork)
 
     def test_self_healing_matches_python(self):
         cases = [
