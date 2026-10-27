@@ -35,6 +35,16 @@ cx_in_vscode() {
     return 1
 }
 
+# 0 when the folder "$1" is inside VS Code's own plugin copy (<VS Code user data>/agentPlugins/...), else 1.
+# The MCP bridge spawn may not get PLUGIN_ROOT in its environment, but it runs the scripts from there.
+cx_vscode_plugin_copy() {
+    _cxide_dir=$(printf '%s/' "${1:-}" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')
+    case "$_cxide_dir" in
+        */code/agentplugins/* | */code\ -\ insiders/agentplugins/*) return 0 ;;
+    esac
+    return 1
+}
+
 # 0 ONLY when ~/.checkmarx/cx-onboarding-ide.properties is VALID (exists, readable, <= 8 KB,
 # cx_schema_version absent or 1) AND cx_self_healing_enabled is false/0/no/off/disabled (trimmed,
 # case-insensitive). Anything else — missing file, unknown schema, missing key, any other value — is
