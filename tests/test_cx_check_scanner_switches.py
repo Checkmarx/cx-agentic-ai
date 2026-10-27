@@ -382,7 +382,7 @@ class SeedOnlyCli(unittest.TestCase):
 
     def test_vscode_never_seeds(self):
         # GitHub Copilot in VS Code uses cx-onboarding-ide.properties (from the VS Code extension) instead.
-        for extra in ({"PLUGIN_ROOT": _ROOT_VSCODE}, {"GITHUB_COPILOT_INTEGRATION_ID": "vscode-chat"}):
+        for extra in ({"PLUGIN_ROOT": _ROOT_VSCODE},):
             home = tempfile.mkdtemp(prefix="cx-switches-seed-vscode-")
             try:
                 env = _home_env(home)

@@ -1523,10 +1523,9 @@ _COPILOT_CLI_MODE = False
 #      one installed from VS Code's marketplace. The terminal Copilot CLI (including one started in VS
 #      Code's integrated terminal) runs it from ~/.copilot/installed-plugins/.
 #   2. Any other PLUGIN_ROOT (a VS Code fork, JetBrains, Visual Studio, ...) is not VS Code.
-#   3. Only when PLUGIN_ROOT is not set: GITHUB_COPILOT_INTEGRATION_ID=vscode-chat (VS Code sets it on
-#      the Copilot CLI engine it bundles), then VS Code-shaped input (snake_case tool_name / tool_input).
-# Deliberately NOT keyed off TERM_PROGRAM / VSCODE_*: the integrated terminal inherits those.
-_VSCODE_INTEGRATION_ID = "vscode-chat"
+#   3. Only when PLUGIN_ROOT is not set: VS Code-shaped input (snake_case tool_name / tool_input).
+# Deliberately NOT keyed off TERM_PROGRAM / VSCODE_* (the integrated terminal inherits those) or
+# GITHUB_COPILOT_INTEGRATION_ID (it names the Copilot engine, not the plugin's host).
 _VSCODE_INPUT_KEYS = ("tool_name", "tool_input", "hook_event_name", "session_id")
 
 
@@ -1555,8 +1554,6 @@ def _in_vscode(hook_input):
     host = _plugin_root_host()
     if host is not None:
         return host == "vscode"
-    if os.environ.get("GITHUB_COPILOT_INTEGRATION_ID", "").strip() == _VSCODE_INTEGRATION_ID:
-        return True
     return isinstance(hook_input, dict) and any(k in hook_input for k in _VSCODE_INPUT_KEYS)
 
 

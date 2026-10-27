@@ -201,9 +201,8 @@ cx CLI build that reads the IDE file).
 
 The hooks know they run in VS Code from `PLUGIN_ROOT`: VS Code runs its own copy of the plugin under its
 `agentPlugins` folder (also when the plugin was installed from VS Code's marketplace), while the terminal
-runs it from `~/.copilot/installed-plugins/`. Fallbacks: `GITHUB_COPILOT_INTEGRATION_ID=vscode-chat` (set by VS Code on
-the Copilot CLI engine it runs models through) or from VS Code-shaped hook input. They never use
-`TERM_PROGRAM` / `VSCODE_*`, so the **terminal Copilot CLI never reads this file and is unchanged** —
+runs it from `~/.copilot/installed-plugins/`. Fallback when `PLUGIN_ROOT` is not set: VS Code-shaped hook
+input. They never use `TERM_PROGRAM` / `VSCODE_*` or `GITHUB_COPILOT_INTEGRATION_ID`, so the **terminal Copilot CLI never reads this file and is unchanged** —
 including a Copilot CLI started in VS Code's integrated terminal.
 
 ### Remembered login environments (automatic)
