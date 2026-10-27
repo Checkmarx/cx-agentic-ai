@@ -227,7 +227,7 @@ class IdeConfigValidity(_IdeHome):
             self.assertFalse(cx_check._ide_self_healing_disabled(), repr(value))
 
     def test_missing_key_is_on(self):
-        self.write_ide("cx_schema_version=1\ncx_ide_extension=ast-results\n")
+        self.write_ide("cx_schema_version=1\ncx_asca_scanner_enabled=true\n")
         self.assertFalse(cx_check._ide_self_healing_disabled())
 
     def test_schema_absent_or_1_is_valid(self):
