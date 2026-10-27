@@ -869,6 +869,7 @@ def _load_admin_config(path=None):
 # the first time any hook runs after install. The copy is NEVER overwritten (the developer's edits
 # survive plugin updates). Scanner on/off switches are read from it; they can only NARROW what the
 # plugin does and never cause a deny. URL/tenant pre-fill stays bundle-only (see the file header).
+# Never seeded inside VS Code (_should_seed_user_config): VS Code uses cx-onboarding-ide.properties.
 _USER_CONFIG_NAME = "cx-onboarding.properties"
 _SCANNER_SWITCH_KEYS = (
     "cx_asca_scanner_enabled",
@@ -1559,6 +1560,23 @@ def _in_vscode(hook_input):
     return isinstance(hook_input, dict) and any(k in hook_input for k in _VSCODE_INPUT_KEYS)
 
 
+def _is_vscode_plugin_copy(path=None):
+    """True when `path` (default: this file) is inside VS Code's own plugin copy
+    (<VS Code user data>/agentPlugins/...). The MCP bridge spawn (`seed-user-config` from cx_run.sh) may not
+    get PLUGIN_ROOT in its environment, but it always runs the scripts from the folder its host runs."""
+    p = os.path.abspath(path or __file__).replace("\\", "/").lower()
+    return "/code/agentplugins/" in p or "/code - insiders/agentplugins/" in p
+
+
+def _should_seed_user_config():
+    """False inside VS Code: there the Checkmarx VS Code extension keeps the user's choices in
+    ~/.checkmarx/cx-onboarding-ide.properties, so GitHub Copilot in VS Code never creates or updates
+    ~/.checkmarx/cx-onboarding.properties (it still reads one the terminal Copilot CLI created, else the
+    bundled config). Stdin is not read yet when this runs, so only the environment and this file's own
+    location decide."""
+    return not (_in_vscode(None) or _is_vscode_plugin_copy())
+
+
 
 def _tool_name(hook_input):
     """Extract tool name supporting all client formats:
@@ -2228,7 +2246,8 @@ def cx_record_login():
 
 
 def main():
-    _seed_user_config()   # best-effort first-run copy to ~/.checkmarx; never raises
+    if _should_seed_user_config():
+        _seed_user_config()   # best-effort first-run copy to ~/.checkmarx; never raises
 
     # SEED-ONLY mode for hooks/cx_run.sh: the seeding above is the whole job. Lets the MCP bridge spawn
     # (session start — the nearest thing Copilot CLI has to an install event) create the user copy

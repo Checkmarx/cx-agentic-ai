@@ -129,7 +129,17 @@ fi
 # the user copy after an install. The cheap file test below keeps the Python spawn off the hot path
 # once the file exists; cx_check.py owns the real path and NEVER overwrites, so a false "missing" (e.g.
 # HOME and USERPROFILE disagreeing) only costs one harmless no-op spawn. Best-effort, never blocks.
-if [ ! -f "${HOME:-/nonexistent}/.checkmarx/cx-onboarding.properties" ]    && [ ! -f "${USERPROFILE:-/nonexistent}/.checkmarx/cx-onboarding.properties" ]; then
+# Never inside VS Code: there the Checkmarx VS Code extension's cx-onboarding-ide.properties is used, and
+# cx_check.py would decline anyway (same rule), so the spawn is skipped. Stdin is not read for this.
+_CXRUN_SEED=1
+if command -v cx_in_vscode >/dev/null 2>&1; then
+    if cx_in_vscode "" || cx_vscode_plugin_copy "$_CXRUN_DIR"; then
+        _CXRUN_SEED=0
+    fi
+fi
+if [ "$_CXRUN_SEED" = 1 ] \
+    && [ ! -f "${HOME:-/nonexistent}/.checkmarx/cx-onboarding.properties" ] \
+    && [ ! -f "${USERPROFILE:-/nonexistent}/.checkmarx/cx-onboarding.properties" ]; then
     for _cxrun_py in python3 python "py -3"; do
         command -v "${_cxrun_py%% *}" >/dev/null 2>&1 || continue
         # shellcheck disable=SC2086
