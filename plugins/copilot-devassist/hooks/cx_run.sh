@@ -131,15 +131,18 @@ fi
 # HOME and USERPROFILE disagreeing) only costs one harmless no-op spawn. Best-effort, never blocks.
 # Never inside VS Code: there the Checkmarx VS Code extension's cx-onboarding-ide.properties is used, and
 # cx_check.py would decline anyway (same rule), so the spawn is skipped. Stdin is not read for this.
-_CXRUN_SEED=1
-if command -v cx_in_vscode >/dev/null 2>&1; then
-    if cx_in_vscode "" || cx_vscode_plugin_copy "$_CXRUN_DIR"; then
-        _CXRUN_SEED=0
+# The file tests come first: cx_in_vscode may spawn Python to read the process tree.
+_CXRUN_SEED=0
+if [ ! -f "${HOME:-/nonexistent}/.checkmarx/cx-onboarding.properties" ] \
+    && [ ! -f "${USERPROFILE:-/nonexistent}/.checkmarx/cx-onboarding.properties" ]; then
+    _CXRUN_SEED=1
+    if command -v cx_in_vscode >/dev/null 2>&1; then
+        if cx_vscode_plugin_copy "$_CXRUN_DIR" || cx_in_vscode ""; then
+            _CXRUN_SEED=0
+        fi
     fi
 fi
-if [ "$_CXRUN_SEED" = 1 ] \
-    && [ ! -f "${HOME:-/nonexistent}/.checkmarx/cx-onboarding.properties" ] \
-    && [ ! -f "${USERPROFILE:-/nonexistent}/.checkmarx/cx-onboarding.properties" ]; then
+if [ "$_CXRUN_SEED" = 1 ]; then
     for _cxrun_py in python3 python "py -3"; do
         command -v "${_cxrun_py%% *}" >/dev/null 2>&1 || continue
         # shellcheck disable=SC2086

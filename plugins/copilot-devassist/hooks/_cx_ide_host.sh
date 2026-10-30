@@ -15,6 +15,11 @@
 #      (tool_name / tool_input / hook_event_name / session_id). The terminal sends camelCase toolName /
 #      toolArgs, and its toolArgs is a JSON STRING (any key inside is escaped as \"key\"), so a raw
 #      `"tool_name"` cannot come from it.
+#   4. PLUGIN_ROOT under .../.copilot/installed-plugins/... or not set: the nearest Copilot ancestor
+#      process is VS Code's bundled Copilot runtime (VS Code's Copilot CLI chat sessions). Asked of
+#      cx_check.py (`vscode-runtime-host`), the one place that reads the process tree; no working
+#      Python 3 means not VS Code. Callers check the IDE file first, so this Python spawn only happens
+#      while VS Code's Self-Healing is off.
 # Never keyed off TERM_PROGRAM / VSCODE_*: the integrated terminal inherits those.
 
 # 0 when this hook runs inside VS Code ("$1" is the raw hook stdin), else 1.
@@ -25,7 +30,7 @@ cx_in_vscode() {
     # Only VS Code's own user-data folder ("Code", "Code - Insiders") counts; a VS Code fork's
     # agentPlugins folder (Cursor, Windsurf, Kiro, Devin, ...) is never VS Code.
     case "$_cxide_root" in
-        */.copilot/installed-plugins/*)                         return 1 ;;
+        */.copilot/installed-plugins/*)                         cx_vscode_runtime_parent; return $? ;;
         */code/agentplugins/* | */code\ -\ insiders/agentplugins/*) return 0 ;;
         ?*)                                                     return 1 ;;  # any other host's plugin folder
     esac
@@ -33,6 +38,23 @@ cx_in_vscode() {
     case "$1" in
         *'"tool_name"'* | *'"tool_input"'* | *'"hook_event_name"'* | *'"session_id"'*) return 0 ;;
     esac
+    cx_vscode_runtime_parent
+}
+
+# 0 when the nearest Copilot ancestor process is VS Code's bundled Copilot runtime (rule 4), else 1.
+# The hooks folder comes from the caller: cx_run.sh's _CXRUN_DIR or cx_check.sh's SCRIPT_DIR.
+cx_vscode_runtime_parent() {
+    _cxide_hooks="${_CXRUN_DIR:-${SCRIPT_DIR:-}}"
+    [ -n "$_cxide_hooks" ] && [ -f "$_cxide_hooks/cx_check.py" ] || return 1
+    for _cxide_py in python3 python "py -3"; do
+        command -v "${_cxide_py%% *}" >/dev/null 2>&1 || continue
+        # shellcheck disable=SC2086
+        $_cxide_py "$_cxide_hooks/cx_check.py" vscode-runtime-host >/dev/null 2>&1 </dev/null
+        case $? in
+            0) return 0 ;;
+            1) return 1 ;;
+        esac
+    done
     return 1
 }
 

@@ -1526,9 +1526,155 @@ _COPILOT_CLI_MODE = False
 #   3. Only when PLUGIN_ROOT is not set: GITHUB_COPILOT_INTEGRATION_ID=vscode-chat (VS Code sets it on
 #      the Copilot CLI engine it bundles for its Copilot CLI chat sessions), then VS Code-shaped input
 #      (snake_case tool_name / tool_input).
+#   4. PLUGIN_ROOT under ~/.copilot/installed-plugins/ or not set: the nearest Copilot ancestor process
+#      is VS Code's bundled Copilot runtime (<VS Code install>/resources/app/node_modules.asar.unpacked/
+#      @github/copilot-sdk-<platform>/...). VS Code's Copilot CLI chat sessions run the plugin from
+#      ~/.copilot/installed-plugins/ without GITHUB_COPILOT_INTEGRATION_ID, so rules 1-3 call them the
+#      terminal. The terminal Copilot CLI is the `copilot` binary; in VS Code's integrated terminal it
+#      is still the nearest Copilot ancestor, so it stays the terminal.
 # Deliberately NOT keyed off TERM_PROGRAM / VSCODE_*: the integrated terminal inherits those.
 _VSCODE_INTEGRATION_ID = "vscode-chat"
 _VSCODE_INPUT_KEYS = ("tool_name", "tool_input", "hook_event_name", "session_id")
+_COPILOT_SDK_MARKER = "/node_modules.asar.unpacked/@github/copilot-sdk-"
+# VS Code's own install folders (stable and Insiders; Windows user/system, macOS, Linux deb/rpm/snap/AUR).
+# A VS Code fork bundling the same SDK lives elsewhere and is not VS Code.
+_VSCODE_INSTALL_MARKERS = (
+    "/microsoft vs code/", "/microsoft vs code insiders/",
+    "/visual studio code.app/", "/visual studio code - insiders.app/",
+    "/usr/share/code/", "/usr/share/code-insiders/", "/snap/code/", "/snap/code-insiders/",
+    "/opt/visual-studio-code/", "/opt/visual-studio-code-insiders/",
+)
+_TERMINAL_COPILOT_NAMES = ("copilot", "copilot.exe")
+_MAX_ANCESTORS = 12
+_PS_TIMEOUT_SEC = 3
+# Windows API constants (tlhelp32.h / winnt.h / minwindef.h).
+_TH32CS_SNAPPROCESS = 0x00000002
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x00001000
+_MAX_PATH = 260
+_MAX_LONG_PATH = 32768
+# Linux procfs: the only folder _posix_ancestor_exes reads.
+_PROC_ROOT = "/proc"
+
+
+def _copilot_parent_kind(exe_path):
+    """"vscode-runtime" for VS Code's bundled Copilot runtime, "copilot-cli" for the terminal `copilot`
+    binary, else None (not a Copilot process)."""
+    p = (exe_path or "").replace("\\", "/").lower()
+    if _COPILOT_SDK_MARKER in p and any(marker in p for marker in _VSCODE_INSTALL_MARKERS):
+        return "vscode-runtime"
+    if p.rsplit("/", 1)[-1] in _TERMINAL_COPILOT_NAMES:
+        return "copilot-cli"
+    return None
+
+
+def _windows_ancestor_exes():
+    import ctypes
+    from ctypes import wintypes
+
+    class _ProcessEntry(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                    ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+                    ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                    ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", ctypes.c_long),
+                    ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_wchar * _MAX_PATH)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    snapshot = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPPROCESS, 0)
+    if not snapshot or snapshot == wintypes.HANDLE(-1).value:
+        return []
+    parents = {}
+    try:
+        entry = _ProcessEntry()
+        entry.dwSize = ctypes.sizeof(_ProcessEntry)
+        ok = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        while ok:
+            parents[entry.th32ProcessID] = entry.th32ParentProcessID
+            ok = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+    finally:
+        kernel32.CloseHandle(snapshot)
+    exes = []
+    pid, seen = os.getpid(), set()
+    while len(seen) < _MAX_ANCESTORS:
+        pid = parents.get(pid)
+        if not pid or pid in seen:
+            break
+        seen.add(pid)
+        handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            continue
+        try:
+            buf = ctypes.create_unicode_buffer(_MAX_LONG_PATH)
+            size = wintypes.DWORD(len(buf))
+            if kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                exes.append(buf.value)
+        finally:
+            kernel32.CloseHandle(handle)
+    return exes
+
+
+def _proc_entry(pid, name):
+    """<_PROC_ROOT>/<pid>/<name>, normalised and checked to stay under _PROC_ROOT."""
+    path = os.path.normpath(os.path.join(_PROC_ROOT, str(int(pid)), name))
+    if os.path.dirname(os.path.dirname(path)) != _PROC_ROOT:
+        raise ValueError("unexpected procfs path: %s" % path)
+    return path
+
+
+def _posix_ancestor_exes():
+    exes = []
+    pid = os.getppid()
+    if os.path.isdir(_PROC_ROOT) and os.path.exists(_proc_entry(os.getpid(), "stat")):
+        for _ in range(_MAX_ANCESTORS):
+            if pid <= 1:
+                break
+            try:
+                exes.append(os.readlink(_proc_entry(pid, "exe")))
+            except OSError:
+                pass
+            try:
+                with open(_proc_entry(pid, "stat"), "r") as f:
+                    # Field 4 (ppid) follows the ")" that closes the command name.
+                    pid = int(f.read().rsplit(")", 1)[1].split()[1])
+            except (OSError, ValueError, IndexError):
+                break
+        return exes
+    # macOS: one `ps` call for the whole table; `comm` is the executable path there.
+    out = subprocess.run(["ps", "-axo", "pid=,ppid=,comm="], capture_output=True, text=True,
+                         timeout=_PS_TIMEOUT_SEC).stdout
+    table = {}
+    for line in out.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
+            table[int(parts[0])] = (int(parts[1]), parts[2])
+    for _ in range(_MAX_ANCESTORS):
+        if pid <= 1 or pid not in table:
+            break
+        pid, exe = table[pid]
+        exes.append(exe)
+    return exes
+
+
+_copilot_parent = None
+
+
+def _nearest_copilot_parent():
+    """"vscode-runtime", "copilot-cli" or "none": the nearest Copilot ancestor process (rule 4). Cached
+    for the process; any failure means "none" (the terminal behaviour). NEVER raises."""
+    global _copilot_parent
+    if _copilot_parent is None:
+        _copilot_parent = "none"
+        try:
+            exes = _windows_ancestor_exes() if os.name == "nt" else _posix_ancestor_exes()
+            for exe in exes:
+                kind = _copilot_parent_kind(exe)
+                if kind:
+                    _copilot_parent = kind
+                    break
+        except Exception:
+            _copilot_parent = "none"
+    return _copilot_parent
 
 
 def _plugin_root_host():
@@ -1554,11 +1700,16 @@ def _plugin_root_host():
 def _in_vscode(hook_input):
     """True when this Copilot hook runs inside VS Code (see the rules above)."""
     host = _plugin_root_host()
-    if host is not None:
-        return host == "vscode"
-    if os.environ.get("GITHUB_COPILOT_INTEGRATION_ID", "").strip() == _VSCODE_INTEGRATION_ID:
+    if host == "vscode":
         return True
-    return isinstance(hook_input, dict) and any(k in hook_input for k in _VSCODE_INPUT_KEYS)
+    if host == "other":
+        return False
+    if host is None:
+        if os.environ.get("GITHUB_COPILOT_INTEGRATION_ID", "").strip() == _VSCODE_INTEGRATION_ID:
+            return True
+        if isinstance(hook_input, dict) and any(k in hook_input for k in _VSCODE_INPUT_KEYS):
+            return True
+    return _nearest_copilot_parent() == "vscode-runtime"
 
 
 def _log_host_detect(hook_input, tool):
@@ -1568,6 +1719,7 @@ def _log_host_detect(hook_input, tool):
          plugin_root_host=_plugin_root_host() or "unset",
          integration_id=integration_id or "unset",
          input_shape="cli" if isinstance(hook_input, dict) and _is_copilot_cli_input(hook_input) else "vscode",
+         copilot_parent=_nearest_copilot_parent(),
          in_vscode=_in_vscode(hook_input),
          tool_name=tool)
 
@@ -2260,6 +2412,11 @@ def cx_record_login():
 
 
 def main():
+    # HOST-ONLY mode for hooks/_cx_ide_host.sh: exit 0 when the nearest Copilot ancestor is VS Code's
+    # bundled Copilot runtime (rule 4 above), else 1. The shell cannot read the Windows process tree.
+    if len(sys.argv) > 1 and sys.argv[1] == "vscode-runtime-host":
+        sys.exit(0 if _nearest_copilot_parent() == "vscode-runtime" else 1)
+
     if _should_seed_user_config():
         _seed_user_config()   # best-effort first-run copy to ~/.checkmarx; never raises
 

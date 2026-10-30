@@ -80,6 +80,7 @@ _EVENTS = {
         "plugin_root_host": _enum({"cli", "vscode", "other", "unset"}),
         "integration_id": _enum({"vscode-chat", "copilot-developer-cli", "unset"}),
         "input_shape": _enum({"vscode", "cli"}),
+        "copilot_parent": _enum({"vscode-runtime", "copilot-cli", "none"}),
         "in_vscode": _as_bool,
         "tool_name": _token,
     },
