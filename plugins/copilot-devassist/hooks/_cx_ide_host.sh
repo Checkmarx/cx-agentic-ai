@@ -10,11 +10,12 @@
 #      installed by the Copilot CLI or from VS Code's marketplace); .../.copilot/installed-plugins/... →
 #      the terminal Copilot CLI (also when started in VS Code's integrated terminal).
 #   2. Any other PLUGIN_ROOT (a VS Code fork, JetBrains, Visual Studio, ...) is not VS Code.
-#   3. Only when PLUGIN_ROOT is not set: VS Code-shaped stdin (tool_name / tool_input /
-#      hook_event_name / session_id). The terminal sends camelCase toolName / toolArgs, and its toolArgs
-#      is a JSON STRING (any key inside is escaped as \"key\"), so a raw `"tool_name"` cannot come from it.
-# Never keyed off TERM_PROGRAM / VSCODE_* (the integrated terminal inherits those) or
-# GITHUB_COPILOT_INTEGRATION_ID (it names the Copilot engine, not the plugin's host).
+#   3. Only when PLUGIN_ROOT is not set: GITHUB_COPILOT_INTEGRATION_ID=vscode-chat (set by VS Code on
+#      the Copilot CLI engine it bundles for its Copilot CLI chat sessions), then VS Code-shaped stdin
+#      (tool_name / tool_input / hook_event_name / session_id). The terminal sends camelCase toolName /
+#      toolArgs, and its toolArgs is a JSON STRING (any key inside is escaped as \"key\"), so a raw
+#      `"tool_name"` cannot come from it.
+# Never keyed off TERM_PROGRAM / VSCODE_*: the integrated terminal inherits those.
 
 # 0 when this hook runs inside VS Code ("$1" is the raw hook stdin), else 1.
 cx_in_vscode() {
@@ -28,6 +29,7 @@ cx_in_vscode() {
         */code/agentplugins/* | */code\ -\ insiders/agentplugins/*) return 0 ;;
         ?*)                                                     return 1 ;;  # any other host's plugin folder
     esac
+    [ "${GITHUB_COPILOT_INTEGRATION_ID:-}" = vscode-chat ] && return 0
     case "$1" in
         *'"tool_name"'* | *'"tool_input"'* | *'"hook_event_name"'* | *'"session_id"'*) return 0 ;;
     esac
