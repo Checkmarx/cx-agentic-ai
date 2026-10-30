@@ -179,9 +179,12 @@ class HostDetection(unittest.TestCase):
         cx_check.os.environ = {"PLUGIN_ROOT": r"D:\other\plugin"}
         self.assertFalse(cx_check._in_vscode(vscode("create_file", {"filePath": "/a.py"})))
 
-    def test_integration_id_is_not_a_host_signal(self):
-        # GITHUB_COPILOT_INTEGRATION_ID names the Copilot engine, not the plugin's host: never VS Code.
-        for value in ("vscode-chat", "", "copilot-developer-cli", "VSCODE-CHAT", "vscode"):
+    def test_integration_id_vscode_chat_without_plugin_root(self):
+        # VS Code's Copilot CLI chat sessions: camelCase input, no PLUGIN_ROOT, vscode-chat engine.
+        for value in ("vscode-chat", " vscode-chat "):
+            cx_check.os.environ = {"GITHUB_COPILOT_INTEGRATION_ID": value}
+            self.assertTrue(cx_check._in_vscode(cli("create", {"path": "/a.py"})), value)
+        for value in ("", "copilot-developer-cli", "VSCODE-CHAT", "vscode"):
             cx_check.os.environ = {"GITHUB_COPILOT_INTEGRATION_ID": value}
             self.assertFalse(cx_check._in_vscode(cli("create", {"path": "/a.py"})), value)
 
@@ -383,7 +386,9 @@ class IdeHostHelper(_ShellHome):
 
     def test_in_vscode(self):
         cli_payload = json.dumps(cli("create", {"tool_name": "x"}))
-        self.assertFalse(self._call("cx_in_vscode", cli_payload, GITHUB_COPILOT_INTEGRATION_ID="vscode-chat"))
+        self.assertTrue(self._call("cx_in_vscode", cli_payload, GITHUB_COPILOT_INTEGRATION_ID="vscode-chat"))
+        self.assertFalse(self._call("cx_in_vscode", cli_payload, GITHUB_COPILOT_INTEGRATION_ID="vscode-chat",
+                                    PLUGIN_ROOT=_ROOT_CLI))
         self.assertTrue(self._call("cx_in_vscode", json.dumps(vscode("create_file", {}))))
         self.assertTrue(self._call("cx_in_vscode", '{"hook_event_name":"Stop","session_id":"s"}'))
         self.assertFalse(self._call("cx_in_vscode", cli_payload))
