@@ -53,7 +53,7 @@ def _tag(text):
 # is a fast pre-filter: capability is decided by the probe below (_capabilities_present), not by
 # this number. Keep IDENTICAL to scripts/cx-min-version and scripts/cx-bootstrap.sh.
 # (search marker: CX_MIN_VERSION)
-_MIN_VERSION_FALLBACK = (2, 3, 68)
+_MIN_VERSION_FALLBACK = (2, 3, 69)
 
 # The cx executable the GATE invokes for its own probes, resolved by ABSOLUTE path where possible so
 # the gate works the instant cx is installed — even before it is on PATH. A freshly-installed cx in
@@ -436,7 +436,12 @@ def _is_scannable_file(hook_input):
     if prefix_kind and any(base.startswith(prefix) for prefix in table[prefix_kind]):
         return True
     # Secrets scan every remaining file. ASCA, KICS and SCA would skip it; secrets would not — so such a
-    # file is only worth gating while the secrets scanner is switched on. (Default: on.)
+    # file is only worth gating while the secrets scanner is switched on. (Default: on.) Inside VS Code a
+    # valid IDE state file is the source of the switch, as it is for ast-cli's native scan.
+    if _COPILOT_CLI_MODE and _in_vscode(hook_input):
+        ide = _load_ide_config()
+        if ide is not None:
+            return ide.get("cx_secret_scanner_enabled", "").strip().lower() not in _FALSE_VALUES
     return _load_scanner_switches()["cx_secret_scanner_enabled"]
 
 
@@ -864,6 +869,7 @@ def _load_admin_config(path=None):
 # the first time any hook runs after install. The copy is NEVER overwritten (the developer's edits
 # survive plugin updates). Scanner on/off switches are read from it; they can only NARROW what the
 # plugin does and never cause a deny. URL/tenant pre-fill stays bundle-only (see the file header).
+# Never seeded inside VS Code (_should_seed_user_config): VS Code uses cx-onboarding-ide.properties.
 _USER_CONFIG_NAME = "cx-onboarding.properties"
 _SCANNER_SWITCH_KEYS = (
     "cx_asca_scanner_enabled",
@@ -976,6 +982,53 @@ def _load_scanner_switches(path=None):
     except Exception:
         pass
     return result
+
+
+# --- VS Code IDE state file (~/.checkmarx/cx-onboarding-ide.properties) ----------------------------
+# Written ONLY by the Checkmarx VS Code extension, from its "Checkmarx Self-Healing" setting. GitHub
+# Copilot in VS Code loads this same plugin and runs these same hooks, so the file is how the user's
+# VS Code choice reaches them. Read only when the host is VS Code (_in_vscode) — the terminal Copilot
+# CLI never reads it, so the CLI stays exactly as it was. "Missing file = ON": an absent, unreadable,
+# oversized or unknown-schema file, a missing key or any value outside _FALSE_VALUES all mean enabled.
+_IDE_CONFIG_NAME = "cx-onboarding-ide.properties"
+_IDE_CONFIG_MAX_BYTES = 8192
+_IDE_SCHEMA_VERSION = "1"
+
+
+def _ide_config_path():
+    return os.path.join(os.path.expanduser("~"), ".checkmarx", _IDE_CONFIG_NAME)
+
+
+def _load_ide_config(path=None):
+    """{key: value} from the IDE state file (last occurrence wins, `#` lines skipped, BOM stripped),
+    or None when it is not VALID: missing, unreadable, undecodable, over 8 KB, or carrying a
+    cx_schema_version other than 1. `path` is a test hook. NEVER raises."""
+    try:
+        path = path or _ide_config_path()
+        # The cap is in BYTES (as the shell reader's `wc -c` measures it); _read_capped counts chars.
+        if os.path.getsize(path) > _IDE_CONFIG_MAX_BYTES:
+            return None
+        raw = _read_capped(path, _IDE_CONFIG_MAX_BYTES)
+        if raw is None:
+            return None
+        values = {}
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _sep, value = line.partition("=")
+            values[key.strip()] = value.strip()
+        if values.get("cx_schema_version", _IDE_SCHEMA_VERSION) != _IDE_SCHEMA_VERSION:
+            return None
+        return values
+    except Exception:
+        return None
+
+
+def _ide_self_healing_disabled():
+    """True only when the IDE state file is valid AND cx_self_healing_enabled is explicitly false."""
+    ide = _load_ide_config()
+    return ide is not None and ide.get("cx_self_healing_enabled", "").strip().lower() in _FALSE_VALUES
 
 
 # The shared opening of every _oauth_recovery_bullet branch — one copy, so a wording change cannot
@@ -1462,6 +1515,232 @@ def _is_copilot_cli_input(hook_input):
 # _fail_closed_on_crash() to choose the correct deny exit code per client.
 _COPILOT_CLI_MODE = False
 
+# How a hook knows it runs inside VS Code rather than the terminal Copilot CLI. First match wins:
+#   1. PLUGIN_ROOT, which the host sets to the plugin folder it runs (verified by the AST-186850 PoC).
+#      VS Code always runs its own copy under <VS Code user data>/agentPlugins/ (Windows
+#      %APPDATA%/Code/agentPlugins, macOS ~/Library/Application Support/Code/agentPlugins, Linux
+#      ~/.config/Code/agentPlugins, Insiders likewise) — for a plugin installed by the Copilot CLI and for
+#      one installed from VS Code's marketplace. The terminal Copilot CLI (including one started in VS
+#      Code's integrated terminal) runs it from ~/.copilot/installed-plugins/.
+#   2. Any other PLUGIN_ROOT (a VS Code fork, JetBrains, Visual Studio, ...) is not VS Code.
+#   3. Only when PLUGIN_ROOT is not set: GITHUB_COPILOT_INTEGRATION_ID=vscode-chat (VS Code sets it on
+#      the Copilot CLI engine it bundles for its Copilot CLI chat sessions), then VS Code-shaped input
+#      (snake_case tool_name / tool_input).
+#   4. PLUGIN_ROOT under ~/.copilot/installed-plugins/ or not set: the nearest Copilot ancestor process
+#      is VS Code's bundled Copilot runtime (<VS Code install>/resources/app/node_modules.asar.unpacked/
+#      @github/copilot-sdk-<platform>/...). VS Code's Copilot CLI chat sessions run the plugin from
+#      ~/.copilot/installed-plugins/ without GITHUB_COPILOT_INTEGRATION_ID, so rules 1-3 call them the
+#      terminal. The terminal Copilot CLI is the `copilot` binary; in VS Code's integrated terminal it
+#      is still the nearest Copilot ancestor, so it stays the terminal.
+# Deliberately NOT keyed off TERM_PROGRAM / VSCODE_*: the integrated terminal inherits those.
+_VSCODE_INTEGRATION_ID = "vscode-chat"
+_VSCODE_INPUT_KEYS = ("tool_name", "tool_input", "hook_event_name", "session_id")
+_COPILOT_SDK_MARKER = "/node_modules.asar.unpacked/@github/copilot-sdk-"
+# VS Code's own install folders (stable and Insiders; Windows user/system, macOS, Linux deb/rpm/snap/AUR).
+# A VS Code fork bundling the same SDK lives elsewhere and is not VS Code.
+_VSCODE_INSTALL_MARKERS = (
+    "/microsoft vs code/", "/microsoft vs code insiders/",
+    "/visual studio code.app/", "/visual studio code - insiders.app/",
+    "/usr/share/code/", "/usr/share/code-insiders/", "/snap/code/", "/snap/code-insiders/",
+    "/opt/visual-studio-code/", "/opt/visual-studio-code-insiders/",
+)
+_TERMINAL_COPILOT_NAMES = ("copilot", "copilot.exe")
+_MAX_ANCESTORS = 12
+_PS_TIMEOUT_SEC = 3
+# Windows API constants (tlhelp32.h / winnt.h / minwindef.h).
+_TH32CS_SNAPPROCESS = 0x00000002
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x00001000
+_MAX_PATH = 260
+_MAX_LONG_PATH = 32768
+# Linux procfs: the only folder _posix_ancestor_exes reads.
+_PROC_ROOT = "/proc"
+
+
+def _copilot_parent_kind(exe_path):
+    """"vscode-runtime" for VS Code's bundled Copilot runtime, "copilot-cli" for the terminal `copilot`
+    binary, else None (not a Copilot process)."""
+    p = (exe_path or "").replace("\\", "/").lower()
+    if _COPILOT_SDK_MARKER in p and any(marker in p for marker in _VSCODE_INSTALL_MARKERS):
+        return "vscode-runtime"
+    if p.rsplit("/", 1)[-1] in _TERMINAL_COPILOT_NAMES:
+        return "copilot-cli"
+    return None
+
+
+def _windows_ancestor_exes():
+    import ctypes
+    from ctypes import wintypes
+
+    class _ProcessEntry(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                    ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+                    ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                    ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", ctypes.c_long),
+                    ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_wchar * _MAX_PATH)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    snapshot = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPPROCESS, 0)
+    if not snapshot or snapshot == wintypes.HANDLE(-1).value:
+        return []
+    parents = {}
+    try:
+        entry = _ProcessEntry()
+        entry.dwSize = ctypes.sizeof(_ProcessEntry)
+        ok = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        while ok:
+            parents[entry.th32ProcessID] = entry.th32ParentProcessID
+            ok = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+    finally:
+        kernel32.CloseHandle(snapshot)
+    exes = []
+    pid, seen = os.getpid(), set()
+    while len(seen) < _MAX_ANCESTORS:
+        pid = parents.get(pid)
+        if not pid or pid in seen:
+            break
+        seen.add(pid)
+        handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            continue
+        try:
+            buf = ctypes.create_unicode_buffer(_MAX_LONG_PATH)
+            size = wintypes.DWORD(len(buf))
+            if kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                exes.append(buf.value)
+        finally:
+            kernel32.CloseHandle(handle)
+    return exes
+
+
+def _proc_entry(pid, name):
+    """<_PROC_ROOT>/<pid>/<name>, normalised and checked to stay under _PROC_ROOT."""
+    path = os.path.normpath(os.path.join(_PROC_ROOT, str(int(pid)), name))
+    if os.path.dirname(os.path.dirname(path)) != _PROC_ROOT:
+        raise ValueError("unexpected procfs path: %s" % path)
+    return path
+
+
+def _posix_ancestor_exes():
+    exes = []
+    pid = os.getppid()
+    if os.path.isdir(_PROC_ROOT) and os.path.exists(_proc_entry(os.getpid(), "stat")):
+        for _ in range(_MAX_ANCESTORS):
+            if pid <= 1:
+                break
+            try:
+                exes.append(os.readlink(_proc_entry(pid, "exe")))
+            except OSError:
+                pass
+            try:
+                with open(_proc_entry(pid, "stat"), "r") as f:
+                    # Field 4 (ppid) follows the ")" that closes the command name.
+                    pid = int(f.read().rsplit(")", 1)[1].split()[1])
+            except (OSError, ValueError, IndexError):
+                break
+        return exes
+    # macOS: one `ps` call for the whole table; `comm` is the executable path there.
+    out = subprocess.run(["ps", "-axo", "pid=,ppid=,comm="], capture_output=True, text=True,
+                         timeout=_PS_TIMEOUT_SEC).stdout
+    table = {}
+    for line in out.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
+            table[int(parts[0])] = (int(parts[1]), parts[2])
+    for _ in range(_MAX_ANCESTORS):
+        if pid <= 1 or pid not in table:
+            break
+        pid, exe = table[pid]
+        exes.append(exe)
+    return exes
+
+
+_copilot_parent = None
+
+
+def _nearest_copilot_parent():
+    """"vscode-runtime", "copilot-cli" or "none": the nearest Copilot ancestor process (rule 4). Cached
+    for the process; any failure means "none" (the terminal behaviour). NEVER raises."""
+    global _copilot_parent
+    if _copilot_parent is None:
+        _copilot_parent = "none"
+        try:
+            exes = _windows_ancestor_exes() if os.name == "nt" else _posix_ancestor_exes()
+            for exe in exes:
+                kind = _copilot_parent_kind(exe)
+                if kind:
+                    _copilot_parent = kind
+                    break
+        except Exception:
+            _copilot_parent = "none"
+    return _copilot_parent
+
+
+def _plugin_root_host():
+    """"vscode", "cli", "other" (any other host's plugin folder) or None (PLUGIN_ROOT not set) from
+    the PLUGIN_ROOT the host injected."""
+    root = os.environ.get("PLUGIN_ROOT", "").strip().replace("\\", "/").lower()
+    # Terminal marker first: VS Code's folder names encode the source path with dashes
+    # (...-copilot-installed-plugins-...), so they never contain it, while a terminal path could
+    # contain "agentPlugins" by chance (a user or folder name).
+    if "/.copilot/installed-plugins/" in root:
+        return "cli"
+    # Only VS Code's own user-data folder ("Code", "Code - Insiders") counts: VS Code forks (Cursor,
+    # Windsurf, Kiro, Devin, ...) keep their agentPlugins copies under their own folder and are not VS Code.
+    if "/code/agentplugins/" in root or "/code - insiders/agentplugins/" in root:
+        return "vscode"
+    if root:
+        # Any other plugin folder (a VS Code fork's agentPlugins, JetBrains, Visual Studio, ...) is not
+        # VS Code, and the fallbacks must not override that.
+        return "other"
+    return None
+
+
+def _in_vscode(hook_input):
+    """True when this Copilot hook runs inside VS Code (see the rules above)."""
+    host = _plugin_root_host()
+    if host == "vscode":
+        return True
+    if host == "other":
+        return False
+    if host is None:
+        if os.environ.get("GITHUB_COPILOT_INTEGRATION_ID", "").strip() == _VSCODE_INTEGRATION_ID:
+            return True
+        if isinstance(hook_input, dict) and any(k in hook_input for k in _VSCODE_INPUT_KEYS):
+            return True
+    return _nearest_copilot_parent() == "vscode-runtime"
+
+
+def _log_host_detect(hook_input, tool):
+    """Logs the signals _in_vscode decides from (constants only, never the PLUGIN_ROOT path)."""
+    integration_id = os.environ.get("GITHUB_COPILOT_INTEGRATION_ID", "").strip()
+    _log("host_detect",
+         plugin_root_host=_plugin_root_host() or "unset",
+         integration_id=integration_id or "unset",
+         input_shape="cli" if isinstance(hook_input, dict) and _is_copilot_cli_input(hook_input) else "vscode",
+         copilot_parent=_nearest_copilot_parent(),
+         in_vscode=_in_vscode(hook_input),
+         tool_name=tool)
+
+
+def _is_vscode_plugin_copy(path=None):
+    """True when `path` (default: this file) is inside VS Code's own plugin copy
+    (<VS Code user data>/agentPlugins/...). The MCP bridge spawn (`seed-user-config` from cx_run.sh) may not
+    get PLUGIN_ROOT in its environment, but it always runs the scripts from the folder its host runs."""
+    p = os.path.abspath(path or __file__).replace("\\", "/").lower()
+    return "/code/agentplugins/" in p or "/code - insiders/agentplugins/" in p
+
+
+def _should_seed_user_config():
+    """False inside VS Code: there the Checkmarx VS Code extension keeps the user's choices in
+    ~/.checkmarx/cx-onboarding-ide.properties, so GitHub Copilot in VS Code never creates or updates
+    ~/.checkmarx/cx-onboarding.properties (it still reads one the terminal Copilot CLI created, else the
+    bundled config). Stdin is not read yet when this runs, so only the environment and this file's own
+    location decide."""
+    return not (_in_vscode(None) or _is_vscode_plugin_copy())
+
+
 
 def _tool_name(hook_input):
     """Extract tool name supporting all client formats:
@@ -1697,6 +1976,16 @@ def cx_check():
     # a non-zero exit). The argv flag makes Copilot CLI mode explicit and format-independent.
     global _COPILOT_CLI_MODE
     _COPILOT_CLI_MODE = ("--copilot-cli" in sys.argv[1:]) or _is_copilot_cli_input(hook_input)
+
+    # 0. VS Code "Checkmarx Self-Healing" unticked → the plugin does NOTHING in VS Code: allow at
+    #    once, before the bootstrap, CX_BINARY, version, auth and licence checks. Emits no JSON — an
+    #    explicit allow would also skip VS Code's own tool-confirmation prompt. A missing/invalid IDE
+    #    state file means ON (today's behaviour). The terminal Copilot CLI never reaches this read.
+    if _COPILOT_CLI_MODE:
+        _log_host_detect(hook_input, tool)
+    if _COPILOT_CLI_MODE and _in_vscode(hook_input) and _ide_self_healing_disabled():
+        _log("gate_decision", decision="allow", reason_code="self_healing_disabled", tool_name=tool)
+        return
 
     # 1. The bootstrap is the ONLY way out of the block — must be checked first.
     #
@@ -2123,7 +2412,13 @@ def cx_record_login():
 
 
 def main():
-    _seed_user_config()   # best-effort first-run copy to ~/.checkmarx; never raises
+    # HOST-ONLY mode for hooks/_cx_ide_host.sh: exit 0 when the nearest Copilot ancestor is VS Code's
+    # bundled Copilot runtime (rule 4 above), else 1. The shell cannot read the Windows process tree.
+    if len(sys.argv) > 1 and sys.argv[1] == "vscode-runtime-host":
+        sys.exit(0 if _nearest_copilot_parent() == "vscode-runtime" else 1)
+
+    if _should_seed_user_config():
+        _seed_user_config()   # best-effort first-run copy to ~/.checkmarx; never raises
 
     # SEED-ONLY mode for hooks/cx_run.sh: the seeding above is the whole job. Lets the MCP bridge spawn
     # (session start — the nearest thing Copilot CLI has to an install event) create the user copy

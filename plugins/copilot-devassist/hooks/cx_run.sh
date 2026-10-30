@@ -53,6 +53,26 @@ case "$(uname -s 2>/dev/null)" in
     *)                        _CX_WINDOWS=0 ;;
 esac
 
+# VS Code "Checkmarx Self-Healing" unticked → this plugin does NOTHING inside VS Code Copilot: the
+# file-write scan and the Stop hook exit 0 without running cx (same rules as cx_check.py). The cheap
+# file test comes FIRST, so stdin is read here only when the IDE file says OFF; a terminal Copilot CLI
+# call then carries on exactly as before, with the already-read stdin replayed to cx below. A missing
+# helper (broken install) degrades to "self-healing ON" — today's behaviour.
+_CXRUN_INPUT_READ=0
+if [ -f "$_CXRUN_DIR/_cx_ide_host.sh" ]; then
+    # shellcheck source=_cx_ide_host.sh
+    . "$_CXRUN_DIR/_cx_ide_host.sh"
+    case "${1:-} ${2:-}" in
+        *pre-file-write* | *stop*)
+            if cx_ide_self_healing_off; then
+                _CXRUN_INPUT=$(cat)
+                _CXRUN_INPUT_READ=1
+                cx_in_vscode "$_CXRUN_INPUT" && exit 0
+            fi
+            ;;
+    esac
+fi
+
 # Absolute path of cx in the canonical per-OS store, if present and runnable — matching cx_check.py's
 # _canonical_cx EXACTLY. Windows: %LOCALAPPDATA%\Checkmarx\cx\cx.exe, falling back to
 # %USERPROFILE%\AppData\Local (what expanduser("~") resolves to) then $HOME\AppData\Local. Unix:
@@ -109,7 +129,20 @@ fi
 # the user copy after an install. The cheap file test below keeps the Python spawn off the hot path
 # once the file exists; cx_check.py owns the real path and NEVER overwrites, so a false "missing" (e.g.
 # HOME and USERPROFILE disagreeing) only costs one harmless no-op spawn. Best-effort, never blocks.
-if [ ! -f "${HOME:-/nonexistent}/.checkmarx/cx-onboarding.properties" ]    && [ ! -f "${USERPROFILE:-/nonexistent}/.checkmarx/cx-onboarding.properties" ]; then
+# Never inside VS Code: there the Checkmarx VS Code extension's cx-onboarding-ide.properties is used, and
+# cx_check.py would decline anyway (same rule), so the spawn is skipped. Stdin is not read for this.
+# The file tests come first: cx_in_vscode may spawn Python to read the process tree.
+_CXRUN_SEED=0
+if [ ! -f "${HOME:-/nonexistent}/.checkmarx/cx-onboarding.properties" ] \
+    && [ ! -f "${USERPROFILE:-/nonexistent}/.checkmarx/cx-onboarding.properties" ]; then
+    _CXRUN_SEED=1
+    if command -v cx_in_vscode >/dev/null 2>&1; then
+        if cx_vscode_plugin_copy "$_CXRUN_DIR" || cx_in_vscode ""; then
+            _CXRUN_SEED=0
+        fi
+    fi
+fi
+if [ "$_CXRUN_SEED" = 1 ]; then
     for _cxrun_py in python3 python "py -3"; do
         command -v "${_cxrun_py%% *}" >/dev/null 2>&1 || continue
         # shellcheck disable=SC2086
@@ -139,7 +172,7 @@ if [ -n "$CX_RESOLVED" ]; then
         # nothing downstream could ever see or log the actual vulnerability/policy block (AST-162014).
         # stderr still streams straight through (command substitution only captures stdout); stdin is
         # read once here and replayed to cx unchanged.
-        _CXRUN_INPUT=$(cat)
+        [ "$_CXRUN_INPUT_READ" = 1 ] || _CXRUN_INPUT=$(cat)
         _CXRUN_OUTPUT=$(printf '%s' "$_CXRUN_INPUT" | "$CX_RESOLVED" "$@")
         _CXRUN_STATUS=$?
 
@@ -258,6 +291,11 @@ if [ -n "$CX_RESOLVED" ]; then
         fi
         # ok / dev / guard-unavailable — fall through to the plain exec below.
     fi
+    # stdin was already consumed by the self-healing check above (terminal input) — replay it.
+    if [ "$_CXRUN_INPUT_READ" = 1 ]; then
+        printf '%s' "$_CXRUN_INPUT" | "$CX_RESOLVED" "$@"
+        exit $?
+    fi
     exec "$CX_RESOLVED" "$@"
 fi
 
@@ -271,7 +309,7 @@ case "${1:-} ${2:-}" in
         # never run through the Bash tool (the deadlock). Read stdin ONLY now — safe because cx was
         # never exec'd (resolution failed above), so nothing downstream consumes it. The shared matcher
         # (mirroring cx_check.sh / cx_check.py) keeps the two shell stages from drifting.
-        _CXRUN_INPUT=$(cat)
+        [ "$_CXRUN_INPUT_READ" = 1 ] || _CXRUN_INPUT=$(cat)
         _CXRUN_DIR=$(cd "$(dirname "$0")" && pwd)
         if [ -n "$_CXRUN_DIR" ] && [ -f "$_CXRUN_DIR/_cx_bootstrap_match.sh" ]; then
             . "$_CXRUN_DIR/_cx_bootstrap_match.sh"
