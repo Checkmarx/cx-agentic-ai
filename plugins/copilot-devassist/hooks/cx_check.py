@@ -1561,6 +1561,17 @@ def _in_vscode(hook_input):
     return isinstance(hook_input, dict) and any(k in hook_input for k in _VSCODE_INPUT_KEYS)
 
 
+def _log_host_detect(hook_input, tool):
+    """Logs the signals _in_vscode decides from (constants only, never the PLUGIN_ROOT path)."""
+    integration_id = os.environ.get("GITHUB_COPILOT_INTEGRATION_ID", "").strip()
+    _log("host_detect",
+         plugin_root_host=_plugin_root_host() or "unset",
+         integration_id=integration_id or "unset",
+         input_shape="cli" if isinstance(hook_input, dict) and _is_copilot_cli_input(hook_input) else "vscode",
+         in_vscode=_in_vscode(hook_input),
+         tool_name=tool)
+
+
 def _is_vscode_plugin_copy(path=None):
     """True when `path` (default: this file) is inside VS Code's own plugin copy
     (<VS Code user data>/agentPlugins/...). The MCP bridge spawn (`seed-user-config` from cx_run.sh) may not
@@ -1818,6 +1829,8 @@ def cx_check():
     #    once, before the bootstrap, CX_BINARY, version, auth and licence checks. Emits no JSON — an
     #    explicit allow would also skip VS Code's own tool-confirmation prompt. A missing/invalid IDE
     #    state file means ON (today's behaviour). The terminal Copilot CLI never reaches this read.
+    if _COPILOT_CLI_MODE:
+        _log_host_detect(hook_input, tool)
     if _COPILOT_CLI_MODE and _in_vscode(hook_input) and _ide_self_healing_disabled():
         _log("gate_decision", decision="allow", reason_code="self_healing_disabled", tool_name=tool)
         return
