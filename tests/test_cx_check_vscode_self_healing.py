@@ -42,6 +42,9 @@ if _prev_cx_log is None:
     sys.modules.pop("cx_log", None)
 else:
     sys.modules["cx_log"] = _prev_cx_log
+# Rule 4 (nearest Copilot ancestor process) reads the real process tree, which depends on where the
+# tests run. Pin its cached answer to "none"; CopilotParent sets it on purpose.
+cx_check._copilot_parent = "none"
 
 # Forward slashes: cx_run.sh derives its own directory from $0 by splitting on "/".
 CX_RUN_SH = os.path.join(_HOOKS_DIR, "cx_run.sh").replace("\\", "/")
@@ -210,6 +213,103 @@ class HostDetection(unittest.TestCase):
 
 
 # --- IDE state file ------------------------------------------------------------------------------
+
+class CopilotParent(_IdeHome):
+    """Rule 4: VS Code's Copilot CLI chat sessions run the plugin from ~/.copilot/installed-plugins/ under
+    VS Code's bundled Copilot runtime, without GITHUB_COPILOT_INTEGRATION_ID."""
+
+    _RUNTIMES = (
+        r"c:\Users\u\AppData\Local\Programs\Microsoft VS Code\2c33b50b16\resources\app"
+        r"\node_modules.asar.unpacked\@github\copilot-sdk-win32-x64\prebuilds\win32-x64\copilot-runtime.exe",
+        r"C:\Program Files\Microsoft VS Code Insiders\resources\app\node_modules.asar.unpacked"
+        r"\@github\copilot-sdk-win32-arm64\prebuilds\win32-arm64\copilot-runtime.exe",
+        "/Applications/Visual Studio Code.app/Contents/Resources/app/node_modules.asar.unpacked"
+        "/@github/copilot-sdk-darwin-arm64/prebuilds/darwin-arm64/copilot-runtime",
+        "/usr/share/code/resources/app/node_modules.asar.unpacked/@github/copilot-sdk-linux-x64"
+        "/prebuilds/linux-x64/copilot-runtime",
+    )
+    _TERMINAL_CLI = (r"C:\Users\u\AppData\Roaming\npm\node_modules\@github\copilot\node_modules"
+                     r"\@github\copilot-win32-x64\copilot.exe")
+    _CODE_EXE = r"C:\Users\u\AppData\Local\Programs\Microsoft VS Code\Code.exe"
+
+    def setUp(self):
+        super().setUp()
+        orig = cx_check.os.environ
+        self.addCleanup(setattr, cx_check.os, "environ", orig)
+        self.addCleanup(setattr, cx_check, "_copilot_parent", "none")
+
+    def walk(self, exes):
+        orig = (cx_check._windows_ancestor_exes, cx_check._posix_ancestor_exes)
+        cx_check._windows_ancestor_exes = cx_check._posix_ancestor_exes = lambda: list(exes)
+        cx_check._copilot_parent = None
+        try:
+            return cx_check._nearest_copilot_parent()
+        finally:
+            cx_check._windows_ancestor_exes, cx_check._posix_ancestor_exes = orig
+
+    def test_parent_kinds(self):
+        for exe in self._RUNTIMES:
+            self.assertEqual(cx_check._copilot_parent_kind(exe), "vscode-runtime", exe)
+        self.assertEqual(cx_check._copilot_parent_kind(self._TERMINAL_CLI), "copilot-cli")
+        self.assertEqual(cx_check._copilot_parent_kind("/usr/local/bin/copilot"), "copilot-cli")
+        for exe in (r"C:\Users\u\AppData\Local\Programs\cursor\resources\app\node_modules.asar.unpacked"
+                    r"\@github\copilot-sdk-win32-x64\prebuilds\win32-x64\copilot-runtime.exe",
+                    self._CODE_EXE, r"C:\Program Files\Git\usr\bin\sh.exe", "", None):
+            self.assertIsNone(cx_check._copilot_parent_kind(exe), exe)
+
+    def test_nearest_copilot_ancestor_wins(self):
+        sh = r"C:\Program Files\Git\usr\bin\sh.exe"
+        # VS Code Copilot CLI chat session: hook <- sh <- VS Code's runtime <- Code.exe.
+        self.assertEqual(self.walk([sh, self._RUNTIMES[0], self._CODE_EXE]), "vscode-runtime")
+        # Terminal Copilot CLI in VS Code's integrated terminal: the terminal binary is nearer than Code.exe.
+        self.assertEqual(self.walk([sh, self._TERMINAL_CLI, "pwsh.exe", self._CODE_EXE]), "copilot-cli")
+        # A terminal `copilot` started from a VS Code session's shell tool is still the terminal.
+        self.assertEqual(self.walk([sh, self._TERMINAL_CLI, "pwsh.exe", self._RUNTIMES[0]]), "copilot-cli")
+        self.assertEqual(self.walk([sh, "pwsh.exe"]), "none")
+
+    def test_walk_never_raises(self):
+        orig = (cx_check._windows_ancestor_exes, cx_check._posix_ancestor_exes)
+        self.addCleanup(lambda: (setattr(cx_check, "_windows_ancestor_exes", orig[0]),
+                                 setattr(cx_check, "_posix_ancestor_exes", orig[1])))
+
+        def boom():
+            raise OSError("no process table")
+        cx_check._windows_ancestor_exes = cx_check._posix_ancestor_exes = boom
+        cx_check._copilot_parent = None
+        self.assertEqual(cx_check._nearest_copilot_parent(), "none")
+
+    def test_real_walk_returns_paths(self):
+        exes = cx_check._windows_ancestor_exes() if os.name == "nt" else cx_check._posix_ancestor_exes()
+        self.assertIsInstance(exes, list)
+        self.assertTrue(exes, "expected at least the parent process")
+
+    def test_cli_plugin_root_under_vscode_runtime_is_vscode(self):
+        cx_check._copilot_parent = "vscode-runtime"
+        for env in ({"PLUGIN_ROOT": _ROOT_CLI}, {}):
+            cx_check.os.environ = env
+            self.assertTrue(cx_check._in_vscode(cli("create", {"path": "/a.py"})), env)
+        # Another host's plugin folder stays "not VS Code".
+        cx_check.os.environ = {"PLUGIN_ROOT": r"C:\Users\u\AppData\Roaming\Windsurf\agentPlugins\x\1a"}
+        self.assertFalse(cx_check._in_vscode(cli("create", {"path": "/a.py"})))
+        cx_check._copilot_parent = "copilot-cli"
+        cx_check.os.environ = {"PLUGIN_ROOT": _ROOT_CLI}
+        self.assertFalse(cx_check._in_vscode(cli("create", {"path": "/a.py"})))
+
+    def test_self_healing_off_allows_in_vscode_copilot_cli_session(self):
+        cx_check._copilot_parent = "vscode-runtime"
+        self.write_ide(_IDE_OFF)
+        _raw, parsed, code = self.gate(cli("create", {"path": "/w/app.py", "file_text": "x"}),
+                                       which=None, env={"PLUGIN_ROOT": _ROOT_CLI})
+        self.assertEqual((parsed, code), (None, 0))
+
+    def test_self_healing_on_still_gates_in_vscode_copilot_cli_session(self):
+        cx_check._copilot_parent = "vscode-runtime"
+        self.write_ide(_IDE_ON)
+        _raw, parsed, code = self.gate(cli("create", {"path": "/w/app.py", "file_text": "x"}),
+                                       which=None, env={"PLUGIN_ROOT": _ROOT_CLI})
+        self.assertEqual(code, 0)
+        self.assertEqual(parsed.get("permissionDecision"), "deny")
+
 
 class IdeConfigValidity(_IdeHome):
     def test_missing_file_is_invalid_and_on(self):
@@ -410,6 +510,25 @@ class IdeHostHelper(_ShellHome):
         for fork in (r"C:\Users\u\AppData\Roaming\Windsurf\agentPlugins\x\1a", "/home/u/.config/Kiro/agentPlugins/x/1a"):
             self.assertFalse(self._call("cx_in_vscode", json.dumps(vscode("create_file", {})),
                                         PLUGIN_ROOT=fork), fork)
+
+    def test_in_vscode_runtime_parent_asks_cx_check(self):
+        # Rule 4 is answered by `cx_check.py vscode-runtime-host`; a stub stands in for the process tree.
+        stub_dir = tempfile.mkdtemp(prefix="cx-vscode-stub-")
+        self.addCleanup(shutil.rmtree, stub_dir, True)
+        stub = os.path.join(stub_dir, "cx_check.py")
+        cli_payload = json.dumps(cli("create", {"path": "/a.py"}))
+        hooks = stub_dir.replace("\\", "/")
+        for code, expected in ((0, True), (1, False)):
+            with open(stub, "w", encoding="utf-8") as f:
+                f.write("import sys\nsys.exit(%d if sys.argv[1:] == ['vscode-runtime-host'] else 2)\n" % code)
+            self.assertEqual(self._call("cx_in_vscode", cli_payload, PLUGIN_ROOT=_ROOT_CLI,
+                                        _CXRUN_DIR=hooks), expected, code)
+            self.assertEqual(self._call("cx_in_vscode", cli_payload, _CXRUN_DIR=hooks), expected, code)
+            # Another host's folder never asks.
+            self.assertFalse(self._call("cx_in_vscode", cli_payload, PLUGIN_ROOT=r"D:\other\plugin",
+                                        _CXRUN_DIR=hooks))
+        # No hooks folder known: not VS Code.
+        self.assertFalse(self._call("cx_in_vscode", cli_payload, PLUGIN_ROOT=_ROOT_CLI))
 
     def test_self_healing_matches_python(self):
         cases = [
