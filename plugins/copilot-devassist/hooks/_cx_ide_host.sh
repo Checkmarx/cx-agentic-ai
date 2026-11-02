@@ -18,8 +18,8 @@
 #   4. PLUGIN_ROOT under .../.copilot/installed-plugins/... or not set: the nearest Copilot ancestor
 #      process is VS Code's bundled Copilot runtime (VS Code's Copilot CLI chat sessions). Asked of
 #      cx_check.py (`vscode-runtime-host`), the one place that reads the process tree; no working
-#      Python 3 means not VS Code. Callers check the IDE file first, so this Python spawn only happens
-#      while VS Code's Self-Healing is off.
+#      Python 3 means not VS Code. cx_run.sh asks on every file-write scan and Stop hook, so it can pass
+#      the answer on to cx (CX_COPILOT_HOST); cx_check.sh asks only while VS Code's Self-Healing is off.
 # Never keyed off TERM_PROGRAM / VSCODE_*: the integrated terminal inherits those.
 
 # 0 when this hook runs inside VS Code ("$1" is the raw hook stdin), else 1.

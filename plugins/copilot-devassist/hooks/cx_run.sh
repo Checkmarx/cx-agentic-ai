@@ -53,21 +53,28 @@ case "$(uname -s 2>/dev/null)" in
     *)                        _CX_WINDOWS=0 ;;
 esac
 
-# VS Code "Checkmarx Self-Healing" unticked → this plugin does NOTHING inside VS Code Copilot: the
-# file-write scan and the Stop hook exit 0 without running cx (same rules as cx_check.py). The cheap
-# file test comes FIRST, so stdin is read here only when the IDE file says OFF; a terminal Copilot CLI
-# call then carries on exactly as before, with the already-read stdin replayed to cx below. A missing
-# helper (broken install) degrades to "self-healing ON" — today's behaviour.
+# The file-write scan and the Stop hook tell cx where they run: CX_COPILOT_HOST=vscode inside VS Code,
+# unset otherwise. cx cannot see every VS Code signal itself — VS Code's Copilot CLI chat sessions run
+# the plugin from ~/.copilot/installed-plugins/ (the terminal's folder), which only the process-tree
+# check here tells apart — and without it cx would apply the terminal's cx-onboarding.properties
+# scanner switches and threshold instead of the VS Code extension's cx-onboarding-ide.properties.
+# VS Code "Checkmarx Self-Healing" unticked → this plugin does NOTHING inside VS Code Copilot: those
+# two hooks exit 0 without running cx (same rules as cx_check.py). The stdin read for the host check
+# is replayed to cx below. A missing helper (broken install) leaves CX_COPILOT_HOST unset and
+# self-healing ON — the earlier behaviour.
 _CXRUN_INPUT_READ=0
+unset CX_COPILOT_HOST
 if [ -f "$_CXRUN_DIR/_cx_ide_host.sh" ]; then
     # shellcheck source=_cx_ide_host.sh
     . "$_CXRUN_DIR/_cx_ide_host.sh"
     case "${1:-} ${2:-}" in
         *pre-file-write* | *stop*)
-            if cx_ide_self_healing_off; then
-                _CXRUN_INPUT=$(cat)
-                _CXRUN_INPUT_READ=1
-                cx_in_vscode "$_CXRUN_INPUT" && exit 0
+            _CXRUN_INPUT=$(cat)
+            _CXRUN_INPUT_READ=1
+            if cx_in_vscode "$_CXRUN_INPUT"; then
+                cx_ide_self_healing_off && exit 0
+                CX_COPILOT_HOST=vscode
+                export CX_COPILOT_HOST
             fi
             ;;
     esac
