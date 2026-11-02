@@ -203,7 +203,10 @@ The hooks know they run in VS Code from `PLUGIN_ROOT`: VS Code runs its own copy
 `agentPlugins` folder (also when the plugin was installed from VS Code's marketplace), while the terminal
 runs it from `~/.copilot/installed-plugins/`. Fallbacks when `PLUGIN_ROOT` is not set:
 `GITHUB_COPILOT_INTEGRATION_ID=vscode-chat` (VS Code's Copilot CLI chat sessions), then VS Code-shaped hook
-input. They never use `TERM_PROGRAM` / `VSCODE_*`, so the **terminal Copilot CLI never reads this file and is unchanged** —
+input. When `PLUGIN_ROOT` is under `~/.copilot/installed-plugins/` or not set, the nearest Copilot parent
+process being VS Code's bundled Copilot runtime also means VS Code (VS Code's Copilot CLI chat sessions run
+the terminal's copy). `hooks/cx_run.sh` passes the result to cx as `CX_COPILOT_HOST=vscode`, so the native
+scan uses the IDE file's switches and threshold too. They never use `TERM_PROGRAM` / `VSCODE_*`, so the **terminal Copilot CLI never reads this file and is unchanged** —
 including a Copilot CLI started in VS Code's integrated terminal.
 
 ### Remembered login environments (automatic)

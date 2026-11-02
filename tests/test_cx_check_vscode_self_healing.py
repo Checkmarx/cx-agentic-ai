@@ -564,20 +564,26 @@ class CxRunSh(_ShellHome):
         super().setUp()
         self.mark = os.path.join(self.home, "called")
         self.stdin_copy = os.path.join(self.home, "stdin")
+        self.host_copy = os.path.join(self.home, "host")
         self.stub = os.path.join(self.home, "cx-stub")
         with open(self.stub, "w", newline="\n") as f:
-            f.write('#!/bin/sh\necho called >> "$STUB_MARK"\ncat > "$STUB_STDIN"\nexit 0\n')
+            f.write('#!/bin/sh\necho called >> "$STUB_MARK"\ncat > "$STUB_STDIN"\n'
+                    'printf %s "${CX_COPILOT_HOST-unset}" > "$STUB_HOST"\nexit 0\n')
         os.chmod(self.stub, os.stat(self.stub).st_mode | stat.S_IXUSR)
 
     def run_cx(self, sub, stdin, **extra):
         env = _shell_env(self.home, CX_BINARY=self.stub.replace("\\", "/"), STUB_MARK=self.mark,
-                         STUB_STDIN=self.stdin_copy, **extra)
+                         STUB_STDIN=self.stdin_copy, STUB_HOST=self.host_copy, **extra)
         proc = subprocess.run([_BASH, CX_RUN_SH, "hooks", sub], input=stdin.encode(), env=env,
                               capture_output=True, timeout=60)
         return proc.returncode, proc.stdout.decode("utf-8", "replace")
 
     def called(self):
         return os.path.exists(self.mark)
+
+    def host_seen(self):
+        with open(self.host_copy, encoding="utf-8") as f:
+            return f.read()
 
     def test_off_vscode_cli_engine_skips_cx(self):
         self.write_ide(_IDE_OFF)
@@ -620,6 +626,35 @@ class CxRunSh(_ShellHome):
         self.run_cx("copilot-cli-pre-file-write", json.dumps(cli("create", {"path": "/a.py"})),
                     **_VSCODE_ENV)
         self.assertTrue(self.called())
+
+    def test_vscode_passes_host_to_cx(self):
+        # cx cannot see every VS Code signal itself, so cx_run.sh tells it, with or without an IDE file.
+        payload = json.dumps(cli("create", {"path": "/a.py"}))
+        for ide in (None, _IDE_ON):
+            if ide is not None:
+                self.write_ide(ide)
+            for sub in ("copilot-cli-pre-file-write", "copilot-cli-stop"):
+                self.run_cx(sub, payload, **_VSCODE_ENV)
+                self.assertEqual(self.host_seen(), "vscode", (ide, sub))
+                with open(self.stdin_copy, encoding="utf-8") as f:
+                    self.assertEqual(f.read(), payload, (ide, sub))
+
+    def test_vscode_cli_session_by_integration_id_passes_host(self):
+        self.run_cx("copilot-cli-pre-file-write", json.dumps(cli("create", {"path": "/a.py"})),
+                    GITHUB_COPILOT_INTEGRATION_ID="vscode-chat")
+        self.assertEqual(self.host_seen(), "vscode")
+
+    def test_terminal_does_not_pass_host(self):
+        # An inherited CX_COPILOT_HOST is dropped: only this script's own host check decides.
+        self.write_ide(_IDE_ON)
+        for sub in ("copilot-cli-pre-file-write", "copilot-cli-stop"):
+            self.run_cx(sub, json.dumps(cli("create", {"path": "/a.py"})), PLUGIN_ROOT=_ROOT_CLI,
+                        CX_COPILOT_HOST="vscode")
+            self.assertEqual(self.host_seen(), "unset", sub)
+
+    def test_other_subcommands_do_not_pass_host(self):
+        self.run_cx("version", "", CX_COPILOT_HOST="vscode", **_VSCODE_ENV)
+        self.assertEqual(self.host_seen(), "unset")
 
 
 @unittest.skipUnless(_SH and os.name != "nt", "needs POSIX sh + symlinks (Windows → manual)")

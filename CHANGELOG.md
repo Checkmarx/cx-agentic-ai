@@ -25,6 +25,12 @@ unchanged, including a Copilot CLI started in VS Code's integrated terminal.
   each skill stops with a one-line notice. A missing or invalid file means on (today's behaviour).
 - In VS Code, a valid IDE file's `cx_*_scanner_enabled` keys replace the terminal switches (the gate's
   secrets-only carve-out here; the native scan in a cx CLI build that reads the IDE file).
+- `hooks/cx_run.sh` passes its VS Code decision to cx as `CX_COPILOT_HOST=vscode` (and unsets it
+  otherwise) for the file-write scan and the Stop hook. VS Code's Copilot CLI chat sessions run the
+  plugin from `~/.copilot/installed-plugins/`, which cx alone takes for the terminal, so the native scan
+  used the terminal's `cx-onboarding.properties` scanner switches and threshold there. Needs a cx CLI
+  build that reads `CX_COPILOT_HOST`. Both hooks now read stdin (replayed to cx) and run the host check
+  on every call, which may spawn Python once to read the process tree.
 - New shared shell helper: `hooks/_cx_ide_host.sh`.
 
 ---
