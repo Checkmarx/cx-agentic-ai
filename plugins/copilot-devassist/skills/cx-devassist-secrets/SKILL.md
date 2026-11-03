@@ -194,9 +194,11 @@ to edit. Do not invent extra files such as `.env.example` unless a remediation s
      - If the tool responds → the MCP is live. Proceed with remediation immediately.
      - If the tool is still unavailable → tell the user:
 
-     > "Authentication is valid. Please run `/restart` to reconnect the Checkmarx MCP, then
-     > run `/mcp show Checkmarx` to confirm it shows Connected — then ask me to remediate again.
-     > I won't apply a non-Checkmarx fix in the meantime."
+     > "Authentication is valid, but the Checkmarx MCP isn't connected in this session. Please run
+     > `/mcp reload` to reconnect it — this session and conversation are kept — then run
+     > `/mcp show Checkmarx` to confirm it shows Connected, and say **continue**. If it still isn't
+     > connected, run `/restart` (it also restores this session) and say **continue**. I won't apply
+     > a non-Checkmarx fix in the meantime."
 
   Then end the remediation flow without modifying any code. Report the finding as **unresolved**.
 

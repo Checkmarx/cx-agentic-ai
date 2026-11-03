@@ -269,7 +269,7 @@ if [ -n "$CX_RESOLVED" ]; then
             #
             # For Copilot: this message is informational only. Enforcement happens via the preToolUse
             # hook (cx_check.sh/cx_check.py) on the next file operation — that hook blocks the action
-            # and drives the agent to install/upgrade cx. The MCP reconnects after /restart.
+            # and drives the agent to install/upgrade cx. The MCP reconnects after /mcp reload.
             case "$_CXRUN_MCP_REASON" in
                 below)
                     printf 'cx v%s is below the required v%s. The security hook will prompt you to upgrade automatically on your next file edit, or run /cx-cli-setup now to upgrade immediately.\n' \
