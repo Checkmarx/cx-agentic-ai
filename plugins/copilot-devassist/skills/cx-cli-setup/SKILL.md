@@ -52,7 +52,7 @@ Unix). It needs only `bash` (Git Bash on Windows) — no Python.
 > clears on your **next tool call with no restart** — even though a running GitHub Copilot CLI (copilot-agent) captured its
 > PATH at startup and cannot see the newly-persisted PATH entry. You do **not** need to place cx into
 > an on-PATH folder or "activate" it, and you must **never hand-place a second copy**. (The
-> remediation MCP resolves cx by absolute path too, via `cx_run.sh`; it activates after one `/restart`.)
+> remediation MCP resolves cx by absolute path too, via `cx_run.sh`; it activates after one `/mcp reload`.)
 
 When a hook blocked an operation, its deny message already contains the exact command by resolved
 absolute path — e.g. `bash "/…/plugins/cx-devassist/scripts/cx-bootstrap.sh" install`. Use it
@@ -152,7 +152,7 @@ The hooks resolve `cx` in a separate process with a different PATH snapshot, so 
 1. **The gate clears** — the next gated tool call proceeds (no longer denied) and the `Stop` hook no
    longer errors with `cx: command not found`. After a bootstrap install this happens on the very next
    call with **no restart**, because the gate resolves the canonical store by absolute path.
-2. **The MCP is loaded** — run `/restart`, then `/mcp show Checkmarx` shows `Checkmarx` Connected
+2. **The MCP is loaded** — run `/mcp reload` (or `/restart` if that doesn't reconnect it), then `/mcp show Checkmarx` shows `Checkmarx` Connected
    (`references/mcp.md`).
 
 Only once the gate clears: "Setup complete. The `cx` CLI is installed, configured, and
@@ -180,7 +180,7 @@ developer originally used, then route: **API key →** generate a new key and re
 - `references/windows-path-activation.md` — Windows in-session placement + User-scope PATH persistence.
 - `references/oauth.md` — Path B browser sign-in, token safety, re-auth.
 - `references/upgrade.md` — upgrading a below-minimum CLI.
-- `references/mcp.md` — the remediation MCP and `/restart`.
+- `references/mcp.md` — the remediation MCP and `/mcp reload`.
 - `references/troubleshooting.md` — cx-not-on-PATH, self-hosted URIs, gate-still-denied, `CX_BINARY`.
 
 ## Quick Reference

@@ -197,8 +197,8 @@ of `sast`):
 
 - If the tool is **available**: parse `remediation_steps` and proceed to Step 2.
 - If the tool is **not available**: **STOP.** Do not remediate manually. Follow MCP recovery in
-  `cx-devassist-asca` (Flow 2 → Step 2) — restart the Copilot CLI (`/restart`), or reconnect it via
-  `/mcp` — then end without modifying code. Report the finding as **unresolved** in Step 4; the MCP
+  `cx-devassist-asca` (Flow 2 → Step 2) — ask the user to run `/mcp reload` (session is kept;
+  fall back to `/restart` if still not connected) and say **continue** — then end without modifying code. Report the finding as **unresolved** in Step 4; the MCP
   being unavailable is never a reason to ignore it.
 
 ### Step 2 — Apply the Fix
