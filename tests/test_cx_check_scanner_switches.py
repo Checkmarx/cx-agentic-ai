@@ -33,6 +33,9 @@ CX_CHECK_PY = os.path.join(_HOOKS_DIR, "cx_check.py")
 CX_RUN_SH = os.path.join(_HOOKS_DIR, "cx_run.sh").replace("\\", "/")
 BUNDLED = os.path.join(_PLUGIN, "config", "cx-onboarding.properties")
 _BASH = shutil.which("bash")
+# PLUGIN_ROOT as VS Code sets it for its own plugin copy.
+_ROOT_VSCODE = (r"C:\Users\u\AppData\Roaming\Code\agentPlugins"
+                r"\file-c-3A-Users-u-copilot-installed-plugins-cx-devassist-marketplace-cx-devassist\1a15407167c")
 
 _KEYS = ("cx_asca_scanner_enabled", "cx_sca_scanner_enabled",
          "cx_kics_scanner_enabled", "cx_secret_scanner_enabled")
@@ -55,9 +58,15 @@ class _TempHome(unittest.TestCase):
         self.cfg = os.path.join(self.cfg_dir, "cx-onboarding.properties")
         self._orig = cx_check._user_config_path
         cx_check._user_config_path = lambda: self.cfg
+        # The VS Code IDE state file lives in the same throwaway ~/.checkmarx (absent unless a test
+        # writes it), so the developer's real VS Code Self-Healing setting never leaks in.
+        self.ide_cfg = os.path.join(self.cfg_dir, "cx-onboarding-ide.properties")
+        self._orig_ide = cx_check._ide_config_path
+        cx_check._ide_config_path = lambda: self.ide_cfg
 
     def tearDown(self):
         cx_check._user_config_path = self._orig
+        cx_check._ide_config_path = self._orig_ide
         shutil.rmtree(self.home, ignore_errors=True)
 
     def write(self, body, newline="\n", encoding="utf-8"):
@@ -371,6 +380,50 @@ class SeedOnlyCli(unittest.TestCase):
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
+    def test_vscode_never_seeds(self):
+        # GitHub Copilot in VS Code uses cx-onboarding-ide.properties (from the VS Code extension) instead.
+        for extra in ({"PLUGIN_ROOT": _ROOT_VSCODE},):
+            home = tempfile.mkdtemp(prefix="cx-switches-seed-vscode-")
+            try:
+                env = _home_env(home)
+                env.pop("PLUGIN_ROOT", None)
+                env.pop("GITHUB_COPILOT_INTEGRATION_ID", None)
+                env.update(extra)
+                proc = subprocess.run([sys.executable, "-I", CX_CHECK_PY, "seed-user-config"],
+                                      env=env, capture_output=True, timeout=60)
+                self.assertEqual(proc.returncode, 0)
+                self.assertFalse(os.path.exists(os.path.join(home, ".checkmarx", "cx-onboarding.properties")), extra)
+            finally:
+                shutil.rmtree(home, ignore_errors=True)
+
+
+class SeedHostRule(unittest.TestCase):
+    """Only VS Code's own plugin copy, or a VS Code host environment, stops the seeding."""
+
+    def setUp(self):
+        self._env = cx_check.os.environ
+        cx_check.os.environ = {}
+
+    def tearDown(self):
+        cx_check.os.environ = self._env
+
+    def test_vscode_plugin_copy_paths(self):
+        for p in (_ROOT_VSCODE + r"\hooks\cx_check.py",
+                  "/Users/u/Library/Application Support/Code - Insiders/agentPlugins/x/1a/hooks/cx_check.py",
+                  "/home/u/.config/Code/agentPlugins/x/1a/hooks/cx_check.py"):
+            self.assertTrue(cx_check._is_vscode_plugin_copy(p), p)
+        for p in (r"C:\Users\u\.copilot\installed-plugins\m\cx-devassist\hooks\cx_check.py",
+                  r"C:\Users\u\AppData\Roaming\Cursor\agentPlugins\x\1a\hooks\cx_check.py"):
+            self.assertFalse(cx_check._is_vscode_plugin_copy(p), p)
+
+    def test_terminal_copilot_cli_seeds(self):
+        cx_check.os.environ = {"PLUGIN_ROOT": r"C:\Users\u\.copilot\installed-plugins\m\cx-devassist"}
+        self.assertTrue(cx_check._should_seed_user_config())
+
+    def test_vscode_does_not_seed(self):
+        cx_check.os.environ = {"PLUGIN_ROOT": _ROOT_VSCODE}
+        self.assertFalse(cx_check._should_seed_user_config())
+
 
 @unittest.skipUnless(_BASH, "bash not found on PATH")
 class CxRunShSeeds(unittest.TestCase):
@@ -388,6 +441,22 @@ class CxRunShSeeds(unittest.TestCase):
             subprocess.run([_BASH, CX_RUN_SH, "hooks", "copilot-cli-stop"], input=b"{}", env=env,
                            capture_output=True, timeout=60)
             self.assertTrue(os.path.isfile(os.path.join(home, ".checkmarx", "cx-onboarding.properties")))
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_vscode_call_does_not_seed(self):
+        home = tempfile.mkdtemp(prefix="cx-switches-runseed-vscode-")
+        try:
+            stub = os.path.join(home, "cx-stub")
+            with open(stub, "w", newline="\n") as f:
+                f.write("#!/bin/sh\ncat >/dev/null\n")
+            os.chmod(stub, os.stat(stub).st_mode | stat.S_IXUSR)
+            env = _home_env(home)
+            env.pop("GITHUB_COPILOT_INTEGRATION_ID", None)
+            env.update({"CX_BINARY": stub, "PLUGIN_ROOT": _ROOT_VSCODE})
+            subprocess.run([_BASH, CX_RUN_SH, "hooks", "copilot-cli-stop"], input=b"{}", env=env,
+                           capture_output=True, timeout=60)
+            self.assertFalse(os.path.exists(os.path.join(home, ".checkmarx", "cx-onboarding.properties")))
         finally:
             shutil.rmtree(home, ignore_errors=True)
 

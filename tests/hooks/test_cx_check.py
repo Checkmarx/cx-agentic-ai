@@ -54,6 +54,9 @@ else:
 # they may have turned off would change gate verdicts). A missing user copy falls back to the bundled
 # file, where every scanner is enabled.
 cx_check._user_config_path = lambda: os.path.join(tempfile.gettempdir(), "cx-no-such-user-config.properties")
+# Same for the VS Code IDE state file (~/.checkmarx/cx-onboarding-ide.properties): a developer who
+# unticked Self-Healing in VS Code would otherwise turn VS Code-shaped gate tests into an allow.
+cx_check._ide_config_path = lambda: os.path.join(tempfile.gettempdir(), "cx-no-such-ide-config.properties")
 
 BOOTSTRAP = cx_check._bootstrap_script_path()
 CX_CHECK_SH = os.path.join(_HOOKS_DIR, "cx_check.sh")

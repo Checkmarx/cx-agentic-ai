@@ -73,6 +73,17 @@ _EVENTS = {
         "version_state": _VERSION_STATES,
         "exit_code": _as_int,
     },
+    "host_detect": {
+        # Which signals cx_check.py's _in_vscode saw on a Copilot file-write hook, so a Self-Healing
+        # setting that is not honoured can be traced to the host decision. NEVER carries the PLUGIN_ROOT
+        # path (it holds the user name) or any other raw value — only these constants.
+        "plugin_root_host": _enum({"cli", "vscode", "other", "unset"}),
+        "integration_id": _enum({"vscode-chat", "copilot-developer-cli", "unset"}),
+        "input_shape": _enum({"vscode", "cli"}),
+        "copilot_parent": _enum({"vscode-runtime", "copilot-cli", "none"}),
+        "in_vscode": _as_bool,
+        "tool_name": _token,
+    },
     # CX_ALLOW_UNLICENSED=1 bypass — distinct from unscanned_override (different env var / policy).
     "unlicensed_override": {
         "tool_name": _token,

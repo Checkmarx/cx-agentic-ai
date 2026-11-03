@@ -39,11 +39,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Numeric floor only (capability is decided by the gate's probe, not this number). Keep IDENTICAL
 # to scripts/cx-min-version and the fallback in hooks/cx_check.py. (search marker: CX_MIN_VERSION)
-MIN_CX_VERSION_FALLBACK="2.3.68"
+MIN_CX_VERSION_FALLBACK="2.3.69"
 
 # Pinned GitHub release tag for install/upgrade downloads. Keep IDENTICAL to scripts/cx-release-tag.
 # (search marker: CX_RELEASE_TAG)
-MIN_CX_RELEASE_TAG_FALLBACK="2.3.68"
+MIN_CX_RELEASE_TAG_FALLBACK="2.3.69-selfhealing-fix"
 
 GITHUB_RELEASES="https://github.com/Checkmarx/ast-cli/releases"
 
@@ -540,7 +540,7 @@ main() {
     log "  - The security GATE resolves this canonical cx by ABSOLUTE path, so your NEXT tool call is"
     log "    gated live — no restart needed, even though this session's PATH has not changed."
     log "  - The Checkmarx remediation MCP also resolves cx by absolute path (via cx_run.sh), so it"
-    log "    activates after ONE /restart — no full reinstall needed. (cx was also added to your PATH"
+    log "    activates after ONE /mcp reload — no full reinstall needed. (cx was also added to your PATH"
     log "    for convenience in new terminals.)"
 }
 
