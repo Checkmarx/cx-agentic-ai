@@ -4,6 +4,37 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 
 ---
 
+### Changed in cx-devassist for Copilot (copilot-devassist) — Unreleased
+
+#### Added — Checkmarx Self-Healing setting for GitHub Copilot in VS Code (AST-180812)
+
+GitHub Copilot in VS Code loads the Copilot plugin and runs its hooks. The plugin now respects the
+Checkmarx VS Code extension's **Checkmarx Self-Healing** setting, which the extension writes to
+`~/.checkmarx/cx-onboarding-ide.properties`. The terminal Copilot CLI never reads this file and is
+unchanged, including a Copilot CLI started in VS Code's integrated terminal.
+
+- VS Code detection: `PLUGIN_ROOT` under VS Code's `agentPlugins` folder (VS Code runs its own copy of
+  the plugin there, whether installed by the Copilot CLI or from VS Code's marketplace; the terminal runs
+  it from `~/.copilot/installed-plugins/`). Fallbacks when `PLUGIN_ROOT` is not set:
+  `GITHUB_COPILOT_INTEGRATION_ID=vscode-chat` (VS Code's Copilot CLI chat sessions), then VS Code-shaped
+  hook input (`tool_name` / `tool_input` / `hook_event_name` / `session_id`). `TERM_PROGRAM` /
+  `VSCODE_*` are not used.
+- Self-Healing off (valid file, `cx_self_healing_enabled=false`): in VS Code the file-write gate allows
+  at once, before the bootstrap, cx, version, auth and licence checks, and logs `gate_decision` with
+  `reason_code=self_healing_disabled`. `hooks/cx_run.sh` skips the native scan and the Stop hook, and
+  each skill stops with a one-line notice. A missing or invalid file means on (today's behaviour).
+- In VS Code, a valid IDE file's `cx_*_scanner_enabled` keys replace the terminal switches (the gate's
+  secrets-only carve-out here; the native scan in a cx CLI build that reads the IDE file).
+- `hooks/cx_run.sh` passes its VS Code decision to cx as `CX_COPILOT_HOST=vscode` (and unsets it
+  otherwise) for the file-write scan and the Stop hook. VS Code's Copilot CLI chat sessions run the
+  plugin from `~/.copilot/installed-plugins/`, which cx alone takes for the terminal, so the native scan
+  used the terminal's `cx-onboarding.properties` scanner switches and threshold there. Needs a cx CLI
+  build that reads `CX_COPILOT_HOST`. Both hooks now read stdin (replayed to cx) and run the host check
+  on every call, which may spawn Python once to read the process tree.
+- New shared shell helper: `hooks/_cx_ide_host.sh`.
+
+---
+
 ### Changed in codex-devassist v1.0.1 (18-09-2026)
 
 #### Added — on-demand KICS (IaC) scanning

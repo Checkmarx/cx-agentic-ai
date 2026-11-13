@@ -43,6 +43,10 @@ dependency manifests, anything under `node_modules`, and the Checkmarx ignore fi
 file, and line only. If a scan field contains the literal, omit that field from anything you show
 the user.
 
+## VS Code Self-Healing (check first)
+
+Only when you are running in **VS Code** (GitHub Copilot Chat in VS Code: the environment variable `PLUGIN_ROOT` points into VS Code's `agentPlugins` folder — not the terminal Copilot CLI, including a Copilot CLI started in VS Code's integrated terminal): read `~/.checkmarx/cx-onboarding-ide.properties` (Windows: `%USERPROFILE%\.checkmarx\cx-onboarding-ide.properties`), which the Checkmarx VS Code extension writes. If it contains `cx_self_healing_enabled=false` (also `0`/`no`/`off`/`disabled`) and its `cx_schema_version` is absent or `1`, the user has turned Checkmarx Self-Healing off in VS Code settings: **do not run the scan or remediate**; reply with one line saying Checkmarx Self-Healing is disabled in VS Code settings, then stop. A missing file, a missing key, another `cx_schema_version` or any other value means enabled — continue. While that file is valid, its `cx_secret_scanner_enabled` value (missing = enabled) replaces the one in `cx-onboarding.properties` for the scanner switch below. In VS Code the severity threshold comes only from this file's `cx_severity_threshold` (the extension writes it, `low` by default; a missing file, key or invalid value means `low`, nothing filtered): ignore `cx_severity_threshold` in `cx-onboarding.properties`. In the terminal Copilot CLI skip this step: it never reads that file.
+
 ## Scanner switch (check first)
 
 Read `~/.checkmarx/cx-onboarding.properties` (Windows: `%USERPROFILE%\.checkmarx\cx-onboarding.properties`). If it contains `cx_secret_scanner_enabled=false` (also `0`/`no`/`off`/`disabled`), the user has turned the secrets scanner off: **do not run the scan or remediate**; reply with one line saying secrets scanning is disabled in that file, then stop. A missing file, a missing key or any other value means enabled — continue. If `cx_severity_threshold` is set (`low`|`medium`|`high`|`critical`, default `low`), report and remediate only secret findings at or above that severity; leave findings below it untouched. This switch never blocks a hook.
@@ -190,9 +194,11 @@ to edit. Do not invent extra files such as `.env.example` unless a remediation s
      - If the tool responds → the MCP is live. Proceed with remediation immediately.
      - If the tool is still unavailable → tell the user:
 
-     > "Authentication is valid. Please run `/restart` to reconnect the Checkmarx MCP, then
-     > run `/mcp show Checkmarx` to confirm it shows Connected — then ask me to remediate again.
-     > I won't apply a non-Checkmarx fix in the meantime."
+     > "Authentication is valid, but the Checkmarx MCP isn't connected in this session. Please run
+     > `/mcp reload` to reconnect it — this session and conversation are kept — then run
+     > `/mcp show Checkmarx` to confirm it shows Connected, and say **continue**. If it still isn't
+     > connected, run `/restart` (it also restores this session) and say **continue**. I won't apply
+     > a non-Checkmarx fix in the meantime."
 
   Then end the remediation flow without modifying any code. Report the finding as **unresolved**.
 

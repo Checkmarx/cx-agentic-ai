@@ -9,15 +9,18 @@ Whatever Phase 2 established — an API key (Path A) or an OAuth refresh token (
 bridge uses, so a single sign-in covers both the CLI and the MCP. Nothing is pasted into chat.
 (Requires a `cx` build that includes `cx mcp bridge` — verify with `cx mcp bridge --help`.)
 
-## `/restart` — how to reload the MCP
+## `/mcp reload` — how to reload the MCP
 
 A plugin-declared MCP server loads at session start. After upgrading cx or authenticating in the same
-session, the bridge must be re-spawned to pick up the change. **`/restart` re-spawns the bridge**
-against the current `cx` and credential.
-Everywhere else in this skill that says "reload the MCP" means run `/restart`.
+session, the bridge must be re-spawned to pick up the change. **`/mcp reload` re-spawns the bridge**
+against the current `cx` and credential ("Reload MCP configuration and restart servers") without
+leaving the session — the conversation is kept, so the developer just says "continue" afterwards.
+If `/mcp reload` doesn't bring `Checkmarx` back to Connected, fall back to **`/restart`**, which
+restarts the CLI and restores the live session.
+Everywhere else in this skill that says "reload the MCP" means run `/mcp reload`.
 
-> "The Checkmarx MCP is bundled with the plugin. Run `/restart` to re-spawn it — after that it
-> connects automatically on every launch — no registration and no re-auth."
+> "The Checkmarx MCP is bundled with the plugin. Run `/mcp reload` to re-spawn it — this session is
+> kept. After that it connects automatically on every launch — no registration and no re-auth."
 
 ## Verify
 
@@ -27,7 +30,7 @@ Everywhere else in this skill that says "reload the MCP" means run `/restart`.
 
 - **`Checkmarx` shows Connected** → remediation is ready.
 - **Not connected?** The bridge needs a valid credential to derive the URL and authenticate. Confirm
-  `cx auth validate` passes (Phases 2–3) and `cx mcp bridge --help` works, then run `/restart`. If
+  `cx auth validate` passes (Phases 2–3) and `cx mcp bridge --help` works, then run `/mcp reload` (then `/restart` if needed). If
   still not connected, for dev/on-prem hosts whose `iam`→`ast` mapping doesn't hold, pass the full URL
   via the `--mcp-url` flag in `.mcp.json` args. The bridge's stderr is captured in the Copilot MCP log
   under the Copilot cache directory for the OS:
