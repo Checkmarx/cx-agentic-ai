@@ -114,7 +114,8 @@ be evaluated at all without it. If the config file is unreadable or empty, every
 fail-closed, never fail-open.
 
 Editing it is how an administrator adjusts coverage; distribute it in your forked/internal copy of the
-plugin, not in a live install directory (same boundary as `config/cx-onboarding.properties`).
+plugin, not in a live install directory (the same place an administrator sets the URL / tenant pre-fill in
+`config/cx-onboarding.properties`).
 
 ---
 
@@ -127,7 +128,7 @@ plugins/cx-devassist/
 ├── .mcp.json                    # declares the Checkmarx MCP server (cx mcp bridge); auto-discovered
 ├── README.md
 ├── config/
-│   ├── cx-onboarding.properties # OPTIONAL admin pre-fill of Checkmarx One URL + tenant (onboarding)
+│   ├── cx-onboarding.properties # URL + tenant pre-fill, scanner switches, severity threshold (seeded to ~/.checkmarx)
 │   └── cx-scannable-files       # the file types the gate blocks on — mirrors ASCA/KICS/SCA filters
 ├── hooks/
 │   ├── hooks.json               # Claude Code PreToolUse / Stop wiring
@@ -166,15 +167,33 @@ Beyond the automatic PreToolUse gate, three skills scan on request and remediate
 A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA;
 an IaC file (Dockerfile, `.tf`, `.yaml`/`.yml`, …) → KICS.
 
-### Admin onboarding pre-fill (optional)
+### URL / tenant pre-fill (optional)
 
-An administrator can pre-seed the Checkmarx One **URL** and **tenant** for browser (OAuth) sign-in by
-editing `config/cx-onboarding.properties`. When set (and valid), the values are embedded straight into
-the gate's `cx auth login` recovery command and the `cx-cli-setup` skill skips the URL/tenant question.
-Edit the file in your **forked / internal marketplace copy** (the reviewed, versioned artifact) — not
-in an end-user's live install, which is overwritten on plugin update. Values are strictly validated
-(https-only host for the URL; a shell-inert charset for the tenant); an invalid value is ignored and
-the developer is asked as usual. There is deliberately no out-of-tree (`~/.checkmarx` / env) override.
+Set `cx_base_auth_uri` and `cx_tenant` in `~/.checkmarx/cx-onboarding.properties` (the developer's copy) or
+in the bundled `config/cx-onboarding.properties` (an administrator, in the **forked / internal marketplace
+copy**; a live install is overwritten on update). A valid value in the user copy wins over the bundled one,
+per key. When both resolve, they are embedded straight into the gate's `cx auth login` recovery command and
+the `cx-cli-setup` skill skips the URL/tenant question. Values are strictly validated for both files (https-only
+host for the URL; a shell-inert charset for the tenant); an invalid value is ignored and the developer is
+asked as usual.
+
+### Scanner switches and severity threshold (user-editable)
+
+The first time a hook runs after install (or the MCP bridge starts), the plugin copies
+`config/cx-onboarding.properties` to `~/.checkmarx/cx-onboarding.properties` (Windows:
+`%USERPROFILE%\.checkmarx\`). It is never overwritten afterwards, so edits survive plugin updates; an update
+only appends settings it newly introduced (delete the file to re-seed). The copy is shared with other
+cx-devassist plugins on the machine (e.g. Copilot CLI). Every scanner is **enabled by default**; set
+`cx_asca_scanner_enabled`, `cx_sca_scanner_enabled` or `cx_kics_scanner_enabled` to `false` to skip that
+scanner's skill. `cx_severity_threshold` (`low`…`critical`; blank or invalid = `low`) limits what the skills
+report and remediate; malicious packages are never relaxed. Switches only narrow behaviour and never cause a
+hook to deny; a typo leaves the scanner enabled.
+
+> **Limitation (Claude Code):** the native pre-write scan (`cx hooks claude-*`) does not read this file yet —
+> ast-cli honours the switches and threshold for Copilot CLI but not for Claude. So a disabled scanner, or a
+> finding below the threshold, can still block a write; the skills then report those findings as ignored
+> rather than fixing them, and the write stays blocked until the scanner is re-enabled, the threshold is
+> lowered, or the developer suppresses the finding.
 
 ### Remembered login environments (automatic)
 

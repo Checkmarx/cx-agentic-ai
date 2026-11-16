@@ -33,6 +33,12 @@ Pick by the target, and ask if it is ambiguous:
 A bare "scan this file" refers to whatever file is in context: an IaC file → this skill; source code →
 `cx-devassist-asca`; a manifest/lockfile → `cx-devassist-sca`. If it is unclear which, ask the user.
 
+## Scanner switch (check first)
+
+Read `~/.checkmarx/cx-onboarding.properties` (Windows: `%USERPROFILE%\.checkmarx\cx-onboarding.properties`). If it contains `cx_kics_scanner_enabled=false` (also `0`/`no`/`off`/`disabled`), the user has turned the KICS scanner off: **do not run the scan or remediate**; reply with one line saying KICS scanning is disabled in that file, then stop. A missing file, a missing key or any other value means enabled — continue. If `cx_severity_threshold` is set (`low`|`medium`|`high`|`critical`, default `low`), report and remediate only findings at or above that severity. This switch never blocks a hook.
+
+**Hook denies in Claude Code.** The native pre-write hook (`cx hooks claude-*`) does not read this file yet, so it can still block a write with KICS findings while the KICS switch is off, or with findings below `cx_severity_threshold`. Do not remediate those findings and do not suppress them (the Suppression rule still applies unchanged). List each one in the summary as `Ignored — KICS scanner disabled in cx-onboarding.properties` or `Ignored — below cx_severity_threshold (<value>)`, remediate any remaining findings at or above the threshold as usual, and tell the user the write stays blocked by the native hook until they re-enable the scanner, lower the threshold, or suppress the finding themselves.
+
 ## Prerequisites
 
 - Checkmarx `cx` CLI installed. On a first-install session `cx` is in the **canonical store** but not

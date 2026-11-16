@@ -4,6 +4,31 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 
 ---
 
+### Changed in cx-devassist v1.0.4 — Unreleased
+
+#### Added — user-editable onboarding config (port of the Copilot plugin's cx-onboarding.properties)
+
+- **User copy:** the bundled `config/cx-onboarding.properties` is copied to
+  `~/.checkmarx/cx-onboarding.properties` on the first gate run, record-login observer run, or
+  `cx_run.sh` call (the MCP bridge spawn at session start). It is never overwritten; a plugin update only
+  appends keys it newly introduced, with their comment block. The copy is shared with the other
+  cx-devassist plugins on the machine; keys this plugin does not know are ignored. New
+  `cx_check.py seed-user-config` mode. The copy is created owner-only (0600) on POSIX.
+- **URL / tenant precedence:** a valid `cx_base_auth_uri` / `cx_tenant` in the user copy now wins over
+  the bundled value, per key. Both files use the same strict validation.
+- **Scanner switches and severity threshold:** `cx_asca_scanner_enabled`, `cx_sca_scanner_enabled`,
+  `cx_kics_scanner_enabled` (default on; only `false`/`0`/`no`/`off`/`disabled` turns one off) and
+  `cx_severity_threshold` (`low`…`critical`, default `low`) are honoured by the `cx-devassist-asca`,
+  `-sca` and `-kics` skills. No gate decision changes.
+- **Limitation:** the native `cx hooks claude-*` scan does not read the file yet (ast-cli applies it to
+  Copilot CLI only), so a disabled scanner or a below-threshold finding can still block a write. The
+  skills report those findings as ignored instead of remediating them.
+- `cx_log.py`: `admin_config` results `seeded_user_copy` / `merged_user_copy`; declares the
+  `unlicensed_override` event the gate already emitted.
+- The secrets scanner switch is out of scope: the Claude plugin has no secrets skill or secrets gating.
+
+---
+
 ### Changed in cx-devassist for Copilot (copilot-devassist) — Unreleased
 
 #### Added — Checkmarx Self-Healing setting for GitHub Copilot in VS Code (AST-180812)

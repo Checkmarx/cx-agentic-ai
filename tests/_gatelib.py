@@ -46,6 +46,11 @@ else:
 # re-enables logging itself.
 os.environ.setdefault("CX_LOG_DISABLE", "1")
 
+# Hermetic user config: never read the developer's real ~/.checkmarx/cx-onboarding.properties (its
+# URL/tenant would win over the bundled values). A suite that exercises the user copy repoints this.
+_NO_USER_CONFIG = os.path.join(tempfile.gettempdir(), "cx-no-such-user-config.properties")
+cx_check._user_config_path = lambda: _NO_USER_CONFIG
+
 _URL_EU = "https://eu.ast.checkmarx.net"
 _URL_US = "https://ast.checkmarx.net"
 _URL_ANZ = "https://anz.ast.checkmarx.net"

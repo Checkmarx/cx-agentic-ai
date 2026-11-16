@@ -86,12 +86,17 @@ _EVENTS = {
         "action": _enum({"recorded", "promoted", "offered", "invalid", "pruned", "skipped"}),
         "count": _as_int,
     },
+    # CX_ALLOW_UNLICENSED=1 bypass — distinct from unscanned_override (different env var / policy).
+    "unlicensed_override": {
+        "tool_name": _token,
+    },
     "admin_config": {
-        # Outcome of loading the bundled admin onboarding config
-        # (config/cx-onboarding.properties). NEVER carries the offending VALUE (which an admin — or a
-        # tamperer — controls); only WHICH known key was accepted/rejected and the outcome, so a bad
-        # config leaves an audit trail without echoing its payload into the log.
-        "result": _enum({"loaded", "invalid", "absent"}),
+        # Outcome of loading the onboarding config (bundled config/cx-onboarding.properties or the
+        # user copy ~/.checkmarx/cx-onboarding.properties), or of seeding / appending new keys to that
+        # user copy. NEVER carries the offending VALUE (which an admin — or a tamperer — controls); only
+        # WHICH known key was accepted/rejected and the outcome, so a bad config leaves an audit trail
+        # without echoing its payload into the log.
+        "result": _enum({"loaded", "invalid", "absent", "seeded_user_copy", "merged_user_copy"}),
         "key": _enum({"cx_base_auth_uri", "cx_tenant"}),
     },
     "scan_decision": {

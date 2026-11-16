@@ -31,9 +31,9 @@
 #
 # HOW TO DISTRIBUTE: edit this file in your FORKED / internal copy of the plugin (the
 # versioned, reviewed marketplace artifact) — NOT in an end-user's live install
-# directory, which is overwritten on every plugin update. Same security boundary as
-# config/cx-onboarding.properties: the reviewed bundle is the boundary, so there is
-# deliberately no out-of-tree override.
+# directory, which is overwritten on every plugin update. The reviewed bundle is the
+# boundary, so there is deliberately no out-of-tree override for this file (unlike
+# config/cx-onboarding.properties, which has a user copy in ~/.checkmarx).
 #
 # FORMAT: one `kind:value` per line. Lines starting with `#` and blank lines ignored.
 #   ext:<.x>        exact final extension      — mirrors Go filepath.Ext(...)
