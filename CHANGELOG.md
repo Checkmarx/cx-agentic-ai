@@ -19,13 +19,33 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 - **Scanner switches and severity threshold:** `cx_asca_scanner_enabled`, `cx_sca_scanner_enabled`,
   `cx_kics_scanner_enabled` (default on; only `false`/`0`/`no`/`off`/`disabled` turns one off) and
   `cx_severity_threshold` (`low`…`critical`, default `low`) are honoured by the `cx-devassist-asca`,
-  `-sca` and `-kics` skills. No gate decision changes.
+  `-sca` and `-kics` skills. Only the secrets switch (below) changes a gate decision.
 - **Limitation:** the native `cx hooks claude-*` scan does not read the file yet (ast-cli applies it to
   Copilot CLI only), so a disabled scanner or a below-threshold finding can still block a write. The
   skills report those findings as ignored instead of remediating them.
 - `cx_log.py`: `admin_config` results `seeded_user_copy` / `merged_user_copy`; declares the
   `unlicensed_override` event the gate already emitted.
-- The secrets scanner switch is out of scope: the Claude plugin has no secrets skill or secrets gating.
+
+#### Added — secret detection (port of the Copilot plugin's secrets support, AST-181538)
+
+- **Gate:** the native `cx hooks claude-pre-file-write` scan runs the secret engine from cx 2.3.71, and
+  that engine scans every file. So while `cx_secret_scanner_enabled` is on (the default) every
+  `Write` / `Edit` / `MultiEdit` / `NotebookEdit` goes through the readiness chain, including `.md`,
+  `.txt`, `.env`, `.sh` and the other types ASCA, KICS and SCA skip. With it off, only the ASCA / KICS /
+  SCA files in `config/cx-scannable-files` are gated, as before. The switch only narrows the gate.
+- **Config:** `cx_secret_scanner_enabled=true` added to `config/cx-onboarding.properties` (appended to an
+  existing user copy by the merge); `config/cx-scannable-files` documents the secrets block (no entries).
+- **New skill `cx-devassist-secrets`:** on-demand `cx scan secrets-realtime` and remediation via
+  `mcp__Checkmarx__codeRemediation` (`type: secret`). Never prints a secret value; re-scans to verify
+  (max 3 retries); suppression via `cx ignore-vulnerability --scan-type secrets --data @<temp-file>`.
+  Honours the switch and `cx_severity_threshold`. The asca, kics and sca skills route secrets to it.
+- **Minimum cx 2.3.67 → 2.3.71** at all four `CX_MIN_VERSION` sites.
+- **Pinned cx download:** new `scripts/cx-release-tag` (2.3.71). `cx-bootstrap.sh` downloads and
+  verifies checksums from `/releases/download/<tag>/` via `load_release_tag()` instead of resolving
+  `latest`; `cx-asset-resolver.sh` takes the tag as an optional third argument
+  (`ast-cli_<tag>_<os>_<arch>.<ext>`).
+- **Limitation:** as for the other engines, the native scan does not read the switches or threshold yet,
+  so with secrets off a secret finding can still block a write; the skill reports it as ignored.
 
 ---
 

@@ -143,29 +143,48 @@ class TestMinVersionSync(unittest.TestCase):
         self._check_four_sites(_GEMINI_PLUGIN_ROOT)
 
 
-class TestGeminiReleaseTagSync(unittest.TestCase):
-    """Gemini bootstrap pins ast-cli downloads to scripts/cx-release-tag (search: CX_RELEASE_TAG)."""
+class TestReleaseTagSync(unittest.TestCase):
+    """Each bootstrap pins ast-cli downloads to scripts/cx-release-tag (search: CX_RELEASE_TAG).
+    The Gemini, Claude and Copilot plugin roots are checked independently."""
 
-    def _canonical_tag(self):
-        for line in _read(_GEMINI_PLUGIN_ROOT, "scripts", "cx-release-tag").splitlines():
+    def _first_line(self, plugin_root, name):
+        for line in _read(plugin_root, "scripts", name).splitlines():
             s = line.strip()
             if s and not s.startswith("#"):
                 return s
-        self.fail("no tag line found in scripts/cx-release-tag")
+        self.fail("no value line found in %s/scripts/%s" % (plugin_root, name))
 
-    def test_release_tag_two_sites_agree(self):
-        canon = self._canonical_tag()
+    def _check_two_sites(self, plugin_root):
+        canon = self._first_line(plugin_root, "cx-release-tag")
         self.assertTrue(canon, "cx-release-tag is empty")
-        sh = _read(_GEMINI_PLUGIN_ROOT, "scripts", "cx-bootstrap.sh")
+        sh = _read(plugin_root, "scripts", "cx-bootstrap.sh")
         m = re.search(r'MIN_CX_RELEASE_TAG_FALLBACK="([^"]+)"', sh)
         self.assertIsNotNone(m, "cx-bootstrap.sh: MIN_CX_RELEASE_TAG_FALLBACK not found")
         self.assertEqual(m.group(1), canon, "cx-bootstrap.sh fallback != cx-release-tag")
-
-    def test_bootstrap_uses_load_release_tag(self):
-        sh = _read(_GEMINI_PLUGIN_ROOT, "scripts", "cx-bootstrap.sh")
         self.assertIn("load_release_tag", sh)
         self.assertRegex(sh, r'tag="\$\(load_release_tag\)"')
         self.assertNotIn("resolve_latest_tag", sh)
+
+    def _check_tag_meets_floor(self, plugin_root):
+        """A pinned download below the plugin's own floor would install a cx the gate rejects."""
+        tag = tuple(int(p) for p in self._first_line(plugin_root, "cx-release-tag").split("."))
+        floor = tuple(int(p) for p in self._first_line(plugin_root, "cx-min-version").split("."))
+        self.assertGreaterEqual(tag, floor, "cx-release-tag is below cx-min-version")
+
+    def test_gemini_release_tag_two_sites_agree(self):
+        self._check_two_sites(_GEMINI_PLUGIN_ROOT)
+
+    def test_claude_release_tag_two_sites_agree(self):
+        self._check_two_sites(_CLAUDE_PLUGIN_ROOT)
+
+    def test_copilot_release_tag_two_sites_agree(self):
+        self._check_two_sites(_COPILOT_PLUGIN_ROOT)
+
+    def test_claude_release_tag_meets_min_version(self):
+        self._check_tag_meets_floor(_CLAUDE_PLUGIN_ROOT)
+
+    def test_copilot_release_tag_meets_min_version(self):
+        self._check_tag_meets_floor(_COPILOT_PLUGIN_ROOT)
 
 
 class TestGeminiExtension(unittest.TestCase):
@@ -391,11 +410,17 @@ class TestShippedBytes(unittest.TestCase):
                           "(would crash the gate under LANG=C): %s" % (
                               os.path.basename(plugin_root), e))
 
-    def test_gemini_cx_release_tag_file_is_pure_ascii(self):
-        try:
-            self._bytes(_GEMINI_PLUGIN_ROOT, "scripts", "cx-release-tag").decode("ascii")
-        except UnicodeDecodeError as e:
-            self.fail("cx-release-tag is not pure ASCII (would break bootstrap under LANG=C): %s" % e)
+    def test_cx_release_tag_file_is_pure_ascii_and_lf(self):
+        for plugin_root in (_GEMINI_PLUGIN_ROOT, _CLAUDE_PLUGIN_ROOT, _COPILOT_PLUGIN_ROOT):
+            raw = self._bytes(plugin_root, "scripts", "cx-release-tag")
+            self.assertNotIn(b"\r", raw, "%s/scripts/cx-release-tag contains CR bytes" % (
+                os.path.basename(plugin_root)))
+            try:
+                raw.decode("ascii")
+            except UnicodeDecodeError as e:
+                self.fail("%s/scripts/cx-release-tag is not pure ASCII "
+                          "(would break bootstrap under LANG=C): %s" % (
+                              os.path.basename(plugin_root), e))
 
 
 class TestHookWiring(unittest.TestCase):

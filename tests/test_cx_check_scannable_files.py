@@ -1,7 +1,8 @@
 """Tests for the two behaviour changes on this branch:
 
-  1. The readiness gate blocks only writes to files a Checkmarx engine can actually scan
-     (ASCA / KICS / SCA). Everything else — other file types, and all shell commands — proceeds.
+  1. The readiness gate blocks only writes to files a Checkmarx engine can actually scan. The secret
+     engine scans every file, so while cx_secret_scanner_enabled is on (the default) every file write
+     is gated; with it off, only ASCA / KICS / SCA files are. Shell commands always proceed.
   2. The `Bash|PowerShell` matcher carries ONLY the login-history observer, which must never block.
 
 Covers, in order:
@@ -39,6 +40,24 @@ def _notebook(path):
                                                         "new_source": "x"}}
 
 
+class _SecretsSwitchMixin(unittest.TestCase):
+    """Pin cx_secret_scanner_enabled for the test (the other switches stay on). Subclasses set
+    SECRETS_ENABLED; restoring the real loader keeps the other suites' view untouched."""
+
+    SECRETS_ENABLED = True
+
+    def setUp(self):
+        super().setUp()
+        self._orig_switches = cx_check._load_scanner_switches
+        switches = {key: True for key in cx_check._SCANNER_SWITCH_KEYS}
+        switches["cx_secret_scanner_enabled"] = self.SECRETS_ENABLED
+        cx_check._load_scanner_switches = lambda path=None: dict(switches)
+
+    def tearDown(self):
+        cx_check._load_scanner_switches = self._orig_switches
+        super().tearDown()
+
+
 # Files every engine block must gate. Kept as a flat list because it doubles as the parity fixture
 # for the shell matcher — both implementations must agree on every entry.
 _SCANNABLE = [
@@ -63,7 +82,8 @@ _SCANNABLE = [
     "App.JAVA", "DOCKERFILE", "Pom.XML", "MAIN.TF",
 ]
 
-# Files no engine can scan — these must stop being gated.
+# Files ASCA, KICS and SCA cannot scan. Only the secret engine scans them, so they are gated exactly
+# while cx_secret_scanner_enabled is on.
 _NOT_SCANNABLE = [
     "README.md", "notes.txt", "index.html", "style.css", "query.sql", "deploy.sh", "app.rb",
     "index.php", "main.c", "main.cpp", "lib.rs", "App.kt", "notebook.ipynb",
@@ -163,7 +183,12 @@ class LoadScannableFiles(unittest.TestCase):
         self.assertIsNone(cx_check._load_scannable_files(tempfile.gettempdir()))
 
 
-class IsScannableFile(unittest.TestCase):
+class IsScannableFile(_SecretsSwitchMixin):
+    """The ASCA / KICS / SCA file filter, observed with the secrets scanner switched OFF — the only
+    state in which a file outside that filter is not gated. SecretsScannerGatesEveryFile covers ON."""
+
+    SECRETS_ENABLED = False
+
     def test_scannable_are_gated(self):
         for name in _SCANNABLE:
             for payload in (_write("/proj/" + name), _edit("/proj/src/" + name)):
@@ -278,6 +303,33 @@ class IsScannableFile(unittest.TestCase):
         re-wiring the gate onto shell in future can never silently open it."""
         self.assertTrue(cx_check._is_scannable_file(_bash("npm test")))
         self.assertTrue(cx_check._is_scannable_file(_pwsh("Get-ChildItem")))
+
+
+class SecretsScannerGatesEveryFile(_SecretsSwitchMixin):
+    """Secrets on (the shipped default): the secret engine scans every file the hook sees, so every
+    file write is gated — including the ones ASCA, KICS and SCA skip."""
+
+    def test_unscannable_by_other_engines_are_gated(self):
+        for name in _NOT_SCANNABLE + [".env", ".env.example", "app.env", ".gitignore", "id_rsa"]:
+            for payload in (_write("/proj/" + name), _edit("/proj/docs/" + name),
+                            _write("C:\\proj\\" + name)):
+                self.assertTrue(cx_check._is_scannable_file(payload), "%s must be gated" % name)
+
+    def test_notebook_is_gated(self):
+        self.assertTrue(cx_check._is_scannable_file(_notebook("/proj/nb.ipynb")))
+
+    def test_other_engines_files_stay_gated(self):
+        for name in _SCANNABLE:
+            self.assertTrue(cx_check._is_scannable_file(_write("/proj/" + name)), name)
+
+    def test_shipped_default_is_on(self):
+        """Without the pin, the bundled config (the hermetic user path does not exist) is used."""
+        self.tearDown()
+        try:
+            self.assertTrue(cx_check._load_scanner_switches()["cx_secret_scanner_enabled"])
+            self.assertTrue(cx_check._is_scannable_file(_write("/proj/README.md")))
+        finally:
+            self.setUp()
 
 
 class RecordLoginObserver(_HistoryFileMixin):
@@ -549,12 +601,27 @@ class CxAbsentStageTwo(unittest.TestCase):
         self.assertNotIn("deny", out)
 
     def test_stage1_still_denies_scannable_write_when_cx_absent(self):
-        """The other half of the contract: deferring is only safe because stage 1 holds the line."""
+        """The other half of the contract: deferring is only safe because stage 1 holds the line.
+        With the shipped config the secrets scanner is on, so every file write is denied."""
+        for path in ("/kode/app.py", "/kode/main.tf", "/kode/list_files.sh", "/kode/README.md"):
+            with self.subTest(path=path):
+                code, _ = self._stage(self.check_sh, [], _write(path))
+                self.assertEqual(2, code)
+
+    def test_stage1_allows_secrets_only_write_when_secrets_off(self):
+        """The developer's ~/.checkmarx copy switches secrets off: a file only the secret engine
+        would scan no longer needs cx, while an ASCA / KICS file still does."""
         for path, expect_deny in (("/kode/app.py", True), ("/kode/main.tf", True),
                                   ("/kode/list_files.sh", False), ("/kode/README.md", False)):
             with self.subTest(path=path):
-                code, _ = self._stage(self.check_sh, [], _write(path))
-                self.assertEqual(2 if expect_deny else 0, code)
+                env = self._env_without_cx()
+                cfg_dir = os.path.join(self._store, ".checkmarx")
+                os.makedirs(cfg_dir, exist_ok=True)
+                with open(os.path.join(cfg_dir, "cx-onboarding.properties"), "w") as f:
+                    f.write("cx_secret_scanner_enabled=false\n")
+                p = subprocess.run([self.sh, self.check_sh], input=json.dumps(_write(path)).encode(),
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=60)
+                self.assertEqual(2 if expect_deny else 0, p.returncode)
 
     def test_stage2_still_denies_mcp_when_cx_absent(self):
         """Only the file-write case defers; a Checkmarx MCP call has no stage-1-equivalent fallback

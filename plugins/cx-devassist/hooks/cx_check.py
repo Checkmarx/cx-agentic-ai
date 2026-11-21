@@ -53,7 +53,7 @@ def _log(event, **fields):
 # is a fast pre-filter: capability is decided by the probe below (_capabilities_present), not by
 # this number. Keep IDENTICAL to scripts/cx-min-version and scripts/cx-bootstrap.sh.
 # (search marker: CX_MIN_VERSION)
-_MIN_VERSION_FALLBACK = (2, 3, 67)
+_MIN_VERSION_FALLBACK = (2, 3, 71)
 
 # The cx executable the GATE invokes for its own probes, resolved by ABSOLUTE path where possible so
 # the gate works the instant cx is installed — even before it is on PATH. A freshly-installed cx in
@@ -271,13 +271,14 @@ _READONLY_COMMANDS = frozenset({
     "df", "du", "ps", "grep", "rg", "cut", "uniq", "cmp", "cksum", "md5sum", "sha256sum",
 })
 
-# --- Scannable files: what the three Checkmarx engines can actually analyse ------------------------
+# --- Scannable files: what the Checkmarx engines can actually analyse -----------------------------
 # The readiness chain (cx present → recent → capable → authenticated → licensed → really scanning) is
-# only worth ENFORCING for a file one of the engines would look at. Blocking a README.md write because
-# cx is unauthenticated helps nobody: ASCA, KICS and SCA each self-skip an unsupported path
-# (guardrails/asca/asca.go:49, guardrails/kics/kics.go:56,
-# services/realtimeengine/ossrealtime/oss-realtime.go:236 in ast-cli), so that write would have gone
-# through UNSCANNED even on a perfectly healthy cx — the block was friction, not protection.
+# only worth ENFORCING for a file one of the engines would look at. ASCA, KICS and SCA each self-skip
+# an unsupported path (guardrails/asca/asca.go:49, guardrails/kics/kics.go:56,
+# services/realtimeengine/ossrealtime/oss-realtime.go:236 in ast-cli). The secret engine does not: it
+# scans every file the hook sees (cx 2.3.71+). A README.md write is therefore gated while the secrets
+# scanner is on; with it off, such a write would go through UNSCANNED even on a healthy cx, so it is
+# not gated (see the tail of _is_scannable_file).
 #
 # The set lives in config/cx-scannable-files so an administrator can adjust coverage without editing
 # code. THIS is its only reader — see that file's header for why a second, POSIX-shell implementation
@@ -386,8 +387,9 @@ def _is_scannable_file(hook_input):
         whose tool names this gate does not know) → True
       - a missing / empty / non-string path → True
       - an unloadable or empty config → True
-    Only a positively identified non-scannable path on a known file-write tool returns False.
-    Force-gate everything with CX_GATE_ALL_FILES=1.
+    Every other file is scanned by the secret engine, so it returns False only while the user has
+    switched that scanner off (cx_secret_scanner_enabled=false) and the path is positively identified
+    as one ASCA, KICS and SCA skip. Force-gate everything with CX_GATE_ALL_FILES=1.
 
     The tool-name check is not redundant with the path lookup: an `mcp__Checkmarx__*` remediation call
     can legitimately carry a `file_path` argument, and keying only off the PRESENCE of that key let
@@ -433,7 +435,9 @@ def _is_scannable_file(hook_input):
     prefix_kind = _PREFIX_KINDS_BY_EXT.get(ext)
     if prefix_kind and any(base.startswith(prefix) for prefix in table[prefix_kind]):
         return True
-    return False
+    # Secrets scan every remaining file. ASCA, KICS and SCA would skip it; secrets would not — so such a
+    # file is only worth gating while the secrets scanner is switched on. (Default: on.)
+    return _load_scanner_switches()["cx_secret_scanner_enabled"]
 
 
 def _normalize_path(p):
@@ -655,13 +659,15 @@ def _load_admin_config(path=None):
 # may be shared with other cx-devassist plugins on the machine (e.g. Copilot CLI); whichever seeds
 # first wins and the others only append missing keys. Precedence of the URL/tenant pre-fill: see
 # _load_admin_config. The scanner switches and cx_severity_threshold are applied by the cx-devassist-*
-# skills; no gate decision here reads them — they can only NARROW what the plugin does, never cause a
-# deny. (The native `cx hooks claude-*` scan does not read them yet: ast-cli excludes Claude.)
+# skills; the only gate decision that reads one is _is_scannable_file (the secrets switch) — they can
+# only NARROW what the plugin does, never cause a deny. (The native `cx hooks claude-*` scan does not
+# read them yet: ast-cli excludes Claude.)
 _USER_CONFIG_NAME = "cx-onboarding.properties"
 _SCANNER_SWITCH_KEYS = (
     "cx_asca_scanner_enabled",
     "cx_sca_scanner_enabled",
     "cx_kics_scanner_enabled",
+    "cx_secret_scanner_enabled",
 )
 _FALSE_VALUES = frozenset({"false", "0", "no", "off", "disabled"})
 
@@ -1584,9 +1590,10 @@ def cx_check():
         _log("gate_decision", decision="allow", reason_code="read_only", tool_name=tool)
         return
 
-    # 2b. Files no Checkmarx engine can scan are not worth gating: ASCA, KICS and SCA each self-skip
-    #     an unsupported path, so a README.md / .css / .sql write would have gone through UNSCANNED
-    #     even on a healthy cx — blocking it on "cx isn't authenticated" is pure friction. Placed
+    # 2b. Files no enabled Checkmarx engine can scan are not worth gating: ASCA, KICS and SCA each
+    #     self-skip an unsupported path, so with the secrets scanner switched off a README.md / .css /
+    #     .sql write would have gone through UNSCANNED even on a healthy cx — blocking it on "cx isn't
+    #     authenticated" is pure friction. (With secrets on, the default, every file is scanned.) Placed
     #     BEFORE the CX_BINARY check below so such a write is not blocked by a bad CX_BINARY either.
     #     Fails CLOSED on any uncertainty (unknown tool, missing path, unreadable config), so MCP
     #     calls and unrecognised assistants stay gated exactly as before. Restore the previous

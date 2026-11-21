@@ -1,6 +1,7 @@
 """Tests for the user-editable onboarding config (~/.checkmarx/cx-onboarding.properties) in the Claude
 Code plugin (cx-devassist): first-run seeding, append-only merge on update, URL/tenant precedence, the
-ASCA/SCA/KICS switch reader, and that no switch changes a gate decision.
+ASCA/SCA/KICS/secrets switch reader, and that only the secrets switch changes a gate decision (and
+only by narrowing it).
 
 Dependency-free (stdlib unittest) so it runs on every OS. Run from the repo root:
     python -m unittest discover -s tests -p test_cx_check_scanner_switches_claude.py -v
@@ -31,7 +32,10 @@ CX_RUN_SH = os.path.join(_HOOKS_DIR, "cx_run.sh").replace("\\", "/")
 BUNDLED = os.path.join(_PLUGIN, "config", "cx-onboarding.properties")
 _BASH = shutil.which("bash")
 
-_KEYS = ("cx_asca_scanner_enabled", "cx_sca_scanner_enabled", "cx_kics_scanner_enabled")
+_KEYS = ("cx_asca_scanner_enabled", "cx_sca_scanner_enabled", "cx_kics_scanner_enabled",
+         "cx_secret_scanner_enabled")
+_SECRET_SWITCH = _KEYS[3]
+_OTHER_SWITCHES = _KEYS[:3]
 
 
 def _props(**values):
@@ -62,11 +66,12 @@ class _TempHome(unittest.TestCase):
 
 
 class BundledFile(unittest.TestCase):
-    def test_ships_switches_on_threshold_low_no_secrets(self):
+    def test_ships_switches_on_threshold_low(self):
         with open(BUNDLED, "r", encoding="utf-8") as f:
             active = [l.strip() for l in f if l.strip() and not l.lstrip().startswith("#")]
         self.assertEqual(active, ["cx_asca_scanner_enabled=true", "cx_sca_scanner_enabled=true",
-                                  "cx_kics_scanner_enabled=true", "cx_severity_threshold=low"])
+                                  "cx_kics_scanner_enabled=true", "cx_secret_scanner_enabled=true",
+                                  "cx_severity_threshold=low"])
 
     def test_bundle_has_no_url_or_tenant(self):
         # The shipped defaults must not pre-fill anyone's environment.
@@ -98,10 +103,12 @@ class LoadScannerSwitches(_TempHome):
             got = cx_check._load_scanner_switches()
             self.assertEqual([k for k, v in got.items() if not v], [key])
 
-    def test_secret_key_from_other_plugin_ignored(self):
-        # A copy seeded by the Copilot plugin carries cx_secret_scanner_enabled; Claude ignores it.
-        self.write(_props() + "cx_secret_scanner_enabled=false\n")
-        self.assertEqual(cx_check._load_scanner_switches(), {k: True for k in _KEYS})
+    def test_secret_key_is_read(self):
+        # The same key the Copilot plugin writes; a shared copy switches secrets off for both.
+        self.write(_props(**{_SECRET_SWITCH: "false"}))
+        got = cx_check._load_scanner_switches()
+        self.assertFalse(got[_SECRET_SWITCH])
+        self.assertTrue(all(got[k] for k in _OTHER_SWITCHES))
 
     def test_comments_unknown_ignored(self):
         self.write("# cx_asca_scanner_enabled=false\nsome_other=false\n")
@@ -184,7 +191,7 @@ class MergeNewProperties(_TempHome):
         self.assertIn("# New engine\n# second line\ncx_new_scanner_enabled=true", text)
 
     def test_copilot_seeded_copy_gets_nothing_new(self):
-        # Copilot's bundle is a superset of ours (adds the secrets key), so a copy it seeded is complete.
+        # Copilot's bundle carries the same keys as ours (incl. secrets), so a copy it seeded is complete.
         copilot = os.path.join(_REPO_ROOT, "plugins", "copilot-devassist", "config",
                                "cx-onboarding.properties")
         shutil.copyfile(copilot, self.cfg)
@@ -301,22 +308,38 @@ class AdminConfigPrecedence(_TempHome):
         self.assertIn("PRECONFIGURED", bullet)
 
 
-class SwitchesNeverChangeTheGate(_TempHome):
-    """All switches off still gates a scannable write: the switches are applied by the skills only."""
+class SwitchesOnlyNarrowTheGate(_TempHome):
+    """The secrets switch is the only one the gate reads, and it can only narrow it: with secrets off,
+    a file only the secret engine would scan is not gated. ASCA / KICS / SCA files stay gated whatever
+    their switches say (those are applied by the skills only)."""
 
     _PY_WRITE = {"tool_name": "Write", "tool_input": {"file_path": "app.py", "content": "x=1"}}
     _MD_WRITE = {"tool_name": "Write", "tool_input": {"file_path": "README.md", "content": "x"}}
+    _ENV_EDIT = {"tool_name": "Edit", "tool_input": {"file_path": "config/app.env",
+                                                     "old_string": "a", "new_string": "b"}}
 
-    def test_scannable_classification_unchanged(self):
-        for body in (_props(), _props(**{k: "false" for k in _KEYS})):
+    def test_secrets_on_gates_every_file(self):
+        for body in (_props(), _props(**{k: "false" for k in _OTHER_SWITCHES})):
             self.write(body)
-            self.assertTrue(cx_check._is_scannable_file(self._PY_WRITE))
-            self.assertFalse(cx_check._is_scannable_file(self._MD_WRITE))
+            for payload in (self._PY_WRITE, self._MD_WRITE, self._ENV_EDIT):
+                self.assertTrue(cx_check._is_scannable_file(payload))
 
-    def test_all_off_still_denies_when_cx_absent(self):
-        self.write(_props(**{k: "false" for k in _KEYS}))
+    def test_secrets_off_narrows_to_other_engines(self):
+        self.write(_props(**{_SECRET_SWITCH: "false"}))
+        self.assertTrue(cx_check._is_scannable_file(self._PY_WRITE))
+        self.assertFalse(cx_check._is_scannable_file(self._MD_WRITE))
+        self.assertFalse(cx_check._is_scannable_file(self._ENV_EDIT))
+
+    def test_secrets_off_non_file_tools_stay_gated(self):
+        self.write(_props(**{_SECRET_SWITCH: "false"}))
+        self.assertTrue(cx_check._is_scannable_file({"tool_name": "Bash",
+                                                     "tool_input": {"command": "x"}}))
+        self.assertTrue(cx_check._is_scannable_file({"tool_name": "mcp__Checkmarx__codeRemediation",
+                                                     "tool_input": {"file_path": "README.md"}}))
+
+    def _gate(self, hook_input):
         orig = (cx_check._read_hook_input, cx_check.shutil.which, cx_check._cx_exe_with_tier)
-        cx_check._read_hook_input = lambda: self._PY_WRITE
+        cx_check._read_hook_input = lambda: hook_input
         cx_check.shutil.which = lambda name: None
         cx_check._cx_exe_with_tier = lambda: ("cx", "path")   # hermetic: no canonical-store cx
         buf, code = io.StringIO(), 0
@@ -328,9 +351,27 @@ class SwitchesNeverChangeTheGate(_TempHome):
                     code = e.code or 0
         finally:
             cx_check._read_hook_input, cx_check.shutil.which, cx_check._cx_exe_with_tier = orig
-        out = json.loads(buf.getvalue().strip())
+        out = buf.getvalue().strip()
+        return (json.loads(out) if out else None), code
+
+    def _assert_denied(self, hook_input):
+        out, code = self._gate(hook_input)
         self.assertEqual(code, 2)
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_all_off_still_denies_scannable_write_when_cx_absent(self):
+        self.write(_props(**{k: "false" for k in _KEYS}))
+        self._assert_denied(self._PY_WRITE)
+
+    def test_secrets_on_denies_any_write_when_cx_absent(self):
+        self.write(_props(**{k: "false" for k in _OTHER_SWITCHES}))
+        self._assert_denied(self._MD_WRITE)
+
+    def test_secrets_off_allows_secrets_only_write_when_cx_absent(self):
+        self.write(_props(**{_SECRET_SWITCH: "false"}))
+        out, code = self._gate(self._MD_WRITE)
+        self.assertEqual(code, 0)
+        self.assertIsNone(out)
 
 
 def _home_env(home):
