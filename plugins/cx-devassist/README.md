@@ -202,7 +202,7 @@ authenticated cx for a file only the secret engine would scan (e.g. `app.env`). 
 that includes the ast-cli change, what ASCA/KICS/SCA block; the secrets skill applies it too. Malicious packages
 are never relaxed. Switches only narrow behaviour and never cause a hook to deny; a typo leaves the scanner
 enabled. A cx CLI build that reads this file (ast-cli `agenthooks/scannerconfig`) also skips each disabled engine
-in the native pre-write scan; older builds ignore the switches.
+in the native pre-write scan (Claude Code and GitHub Copilot; other agents ignore it for now); older builds ignore the switches.
 
 ### Remembered login environments (automatic)
 
