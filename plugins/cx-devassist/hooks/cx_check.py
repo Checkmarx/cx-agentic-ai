@@ -659,9 +659,9 @@ def _load_admin_config(path=None):
 # may be shared with other cx-devassist plugins on the machine (e.g. Copilot CLI); whichever seeds
 # first wins and the others only append missing keys. Precedence of the URL/tenant pre-fill: see
 # _load_admin_config. The scanner switches and cx_severity_threshold are applied by the cx-devassist-*
-# skills; the only gate decision that reads one is _is_scannable_file (the secrets switch) — they can
-# only NARROW what the plugin does, never cause a deny. (The native `cx hooks claude-*` scan does not
-# read them yet: ast-cli excludes Claude.)
+# skills and by the native `cx hooks claude-*` scan (ast-cli agenthooks/scannerconfig); the only gate
+# decision in this file that reads one is _is_scannable_file (the secrets switch) — they can only
+# NARROW what the plugin does, never cause a deny.
 _USER_CONFIG_NAME = "cx-onboarding.properties"
 _SCANNER_SWITCH_KEYS = (
     "cx_asca_scanner_enabled",

@@ -198,15 +198,11 @@ cx-devassist plugins on the machine (e.g. Copilot CLI). Every scanner is **enabl
 `cx_asca_scanner_enabled`, `cx_sca_scanner_enabled`, `cx_kics_scanner_enabled` or `cx_secret_scanner_enabled`
 to `false` to skip that scanner's skill. With the secrets scanner off, the gate also stops requiring a ready,
 authenticated cx for a file only the secret engine would scan (e.g. `app.env`). `cx_severity_threshold`
-(`low`…`critical`; blank or invalid = `low`) limits what the skills report and remediate; malicious packages
+(`low`…`critical`; blank or invalid = `low`) limits what the skills report and remediate and, with a cx build
+that includes the ast-cli change, what ASCA/KICS/SCA block; the secrets skill applies it too. Malicious packages
 are never relaxed. Switches only narrow behaviour and never cause a hook to deny; a typo leaves the scanner
-enabled.
-
-> **Limitation (Claude Code):** the native pre-write scan (`cx hooks claude-*`) does not read this file yet —
-> ast-cli honours the switches and threshold for Copilot CLI but not for Claude. So a disabled scanner, or a
-> finding below the threshold, can still block a write; the skills then report those findings as ignored
-> rather than fixing them, and the write stays blocked until the scanner is re-enabled, the threshold is
-> lowered, or the developer suppresses the finding.
+enabled. A cx CLI build that reads this file (ast-cli `agenthooks/scannerconfig`) also skips each disabled engine
+in the native pre-write scan; older builds ignore the switches.
 
 ### Remembered login environments (automatic)
 
