@@ -2,9 +2,9 @@
 # =============================================================================
 # The gate (hooks/cx_check.py) requires cx to be installed, current, authenticated,
 # licensed and actually scanning BEFORE a file write is allowed. That readiness check
-# is only worth enforcing for files one of the three engines can scan — blocking a
+# is only worth enforcing for files one of the engines can scan — blocking a
 # README.md write because cx is unauthenticated helps nobody, since no engine would
-# have looked at it.
+# have looked at it. Engines: ASCA (SAST), KICS (IaC), SCA (manifests), secrets.
 #
 # EXACTLY ONE piece of code reads this file: hooks/cx_check.py's _load_scannable_files, used by
 # _is_scannable_file. That is deliberate and worth preserving.
@@ -31,9 +31,9 @@
 #
 # HOW TO DISTRIBUTE: edit this file in your FORKED / internal copy of the plugin (the
 # versioned, reviewed marketplace artifact) — NOT in an end-user's live install
-# directory, which is overwritten on every plugin update. Same security boundary as
-# config/cx-onboarding.properties: the reviewed bundle is the boundary, so there is
-# deliberately no out-of-tree override.
+# directory, which is overwritten on every plugin update. The reviewed bundle is the
+# boundary, so there is deliberately no out-of-tree override for this file (unlike
+# config/cx-onboarding.properties, which has a user copy in ~/.checkmarx).
 #
 # FORMAT: one `kind:value` per line. Lines starting with `#` and blank lines ignored.
 #   ext:<.x>        exact final extension      — mirrors Go filepath.Ext(...)
@@ -127,3 +127,9 @@ txtprefix:constraint
 
 # oss-realtime.go:252-255 — Swift PM multi-toolchain variant (Package@swift-5.9.swift, …).
 swiftprefix:package@swift-
+
+# --- Secrets (realtime) ------------------------------------------------------
+# No entries. The secret engine has no extension or path filter: the cx hook scans the proposed
+# content of every Write/Edit/MultiEdit/NotebookEdit (cx 2.3.71+), so every file write is gated while
+# cx_secret_scanner_enabled is on (the default). With it off, only the ASCA/KICS/SCA blocks above
+# decide what is gated.

@@ -3,14 +3,19 @@
 A **fail-closed security gate** for **Claude Code**, backed by
 [Checkmarx CxOne](https://checkmarx.com/).
 
-Before Claude writes or edits a file the Checkmarx engines can scan — source code, IaC, or a dependency
-manifest — the plugin asks the `cx` CLI to scan the proposed content. If a real vulnerability or policy
-violation is found — **or if the scanner can't be trusted to run** — the write is **blocked**, not
-silently allowed. Found issues are remediated interactively through the bundled Checkmarx MCP server.
+Before Claude writes or edits a file, the plugin asks the `cx` CLI to scan the proposed content —
+source code, IaC, dependency manifests, and **hardcoded secrets** in any file. If a real vulnerability,
+secret or policy violation is found — **or if the scanner can't be trusted to run** — the write is
+**blocked**, not silently allowed. Found issues are remediated interactively through the bundled
+Checkmarx MCP server; a secret value is never shown in chat.
 
-Shell commands and file types no engine can scan are **not** gated: nothing would have been scanned
-there, so blocking them cost developers time without buying protection. See
-[Scannable file types](#scannable-file-types).
+Shell commands are **not** gated, and with the secrets scanner switched off neither are file types no
+other engine can scan: nothing would have been scanned there, so blocking them cost developers time
+without buying protection. See [Scannable file types](#scannable-file-types).
+
+> **Secrets engine caveat:** the native secret scan in `cx hooks claude-pre-file-write` needs cx
+> 2.3.71 or later (the plugin's minimum). It fails open on a scanner error, a licence or feature-flag
+> miss, or a crash, and on an `Edit` only **new** secrets block.
 
 Part of [Checkmarx Agentic AI](../../README.md).
 
@@ -30,8 +35,8 @@ Every gated tool call runs a **two-stage PreToolUse chain**:
 
 | Tool event | Gate | Native scanner | What it checks |
 |---|---|---|---|
-| `Write` / `Edit` / `MultiEdit` / `NotebookEdit` — **scannable file** | `cx_check` | `cx hooks claude-pre-file-write` | Static analysis of the proposed content: ASCA (SAST), KICS (IaC), SCA (manifests) |
-| `Write` / `Edit` / … — any other file type | — | — | Nothing: no engine can scan it, so the write proceeds |
+| `Write` / `Edit` / `MultiEdit` / `NotebookEdit` — **scannable file** | `cx_check` | `cx hooks claude-pre-file-write` | Static analysis of the proposed content: ASCA (SAST), KICS (IaC), SCA (manifests), secrets |
+| `Write` / `Edit` / … — any other file type, **secrets scanner off** | — | — | Nothing: no enabled engine scans it, so the write proceeds |
 | `Bash` / `PowerShell` | — | — | **Not gated.** One non-blocking observer runs (`cx_record_login`) — see below |
 | MCP calls (`mcp__Checkmarx__*`) | `cx_check` | `cx hooks claude-pre-tool-use` | Policy check before the MCP call is allowed |
 | Session stop | — | `cx hooks claude-stop` | Session-end hook |
@@ -80,28 +85,31 @@ unauthenticated, the gate denies with a clear, actionable message pointing at `/
 **What that deny covers:** writes to [scannable files](#scannable-file-types) and Checkmarx MCP calls.
 **What it does not:** shell commands — ever. So a developer whose cx is broken can still run `git`,
 `npm`, `mvn`, `pytest` and `docker`, and — crucially — install and authenticate cx to unblock
-themselves. Writes to other file types also proceed, except in the two states where the gate cannot
-evaluate the file type at all (cx unresolvable, or no Python 3), which deny every write.
+themselves. With the secrets scanner on (the default) every file write is scannable; with it off,
+writes to other file types also proceed, except in the two states where the gate cannot evaluate the
+file type at all (cx unresolvable, or no Python 3), which deny every write.
 
 ### Scannable file types
 
-The gate blocks a file write only when one of the three engines can analyse that file. The list is
-[`config/cx-scannable-files`](config/cx-scannable-files), and it mirrors the engines' own filters in
-`ast-cli`:
+The gate blocks a file write only when one of the engines can analyse that file. The ASCA / KICS / SCA
+list is [`config/cx-scannable-files`](config/cx-scannable-files), and it mirrors the engines' own filters
+in `ast-cli`; the secret engine has no filter:
 
 | Engine | Files |
 |---|---|
 | **ASCA** (SAST) | `.java` `.js` `.jsx` `.ts` `.tsx` `.mjs` `.cjs` `.cs` `.go` `.py` `.pyw` |
 | **KICS** (IaC) | `.tf` `.yaml` `.yml` `.json` `.proto` `.dockerfile` `.auto.tfvars` `.terraform.tfvars`, and `Dockerfile` |
 | **SCA** (manifests) | `.csproj` `.sbt`; `pom.xml` `package.json` `bower.json` `yarn.lock` `Directory.Packages.props` `packages.config` `go.mod` `build.gradle` `build.gradle.kts` `libs.versions.toml` `setup.cfg` `setup.py` `pyproject.toml`; and `*.txt` starting `requirement`/`packages`/`constraint` |
+| **Secrets** | Every other file — `.md`, `.txt`, `.env`, `.html`, `.css`, `.sql`, `.sh`, `.rb`, `.php`, `.c`, `.rs`, … — while `cx_secret_scanner_enabled` is on (the default) |
 
-Everything else — `.md`, `.txt`, `.html`, `.css`, `.sql`, `.sh`, `.rb`, `.php`, `.c`, `.rs` — is not
-gated, because no engine would scan it; the write would have gone through unscanned even on a healthy
-cx, so blocking it was friction rather than protection. Two consequences worth knowing:
+So with the shipped settings **every file write is gated**. With `cx_secret_scanner_enabled=false` in
+`~/.checkmarx/cx-onboarding.properties`, everything outside the ASCA / KICS / SCA rows is not gated,
+because no enabled engine would scan it; the write would have gone through unscanned even on a healthy
+cx, so blocking it would be friction rather than protection. Two consequences worth knowing:
 
 - `.json` and `.yaml` **are** gated, because KICS scans them. A `tsconfig.json` write still runs the
   full readiness check even though it is not IaC.
-- A plain `.tfvars` is **not** gated: KICS lists only the compound `.auto.tfvars` /
+- With secrets off, a plain `.tfvars` is **not** gated: KICS lists only the compound `.auto.tfvars` /
   `.terraform.tfvars` suffixes, so it would not be scanned either.
 
 The file has exactly one reader — `cx_check.py`'s `_is_scannable_file`. An earlier revision mirrored
@@ -114,7 +122,8 @@ be evaluated at all without it. If the config file is unreadable or empty, every
 fail-closed, never fail-open.
 
 Editing it is how an administrator adjusts coverage; distribute it in your forked/internal copy of the
-plugin, not in a live install directory (same boundary as `config/cx-onboarding.properties`).
+plugin, not in a live install directory (the same place an administrator sets the URL / tenant pre-fill in
+`config/cx-onboarding.properties`).
 
 ---
 
@@ -127,8 +136,8 @@ plugins/cx-devassist/
 ├── .mcp.json                    # declares the Checkmarx MCP server (cx mcp bridge); auto-discovered
 ├── README.md
 ├── config/
-│   ├── cx-onboarding.properties # OPTIONAL admin pre-fill of Checkmarx One URL + tenant (onboarding)
-│   └── cx-scannable-files       # the file types the gate blocks on — mirrors ASCA/KICS/SCA filters
+│   ├── cx-onboarding.properties # URL + tenant pre-fill, scanner switches, severity threshold (seeded to ~/.checkmarx)
+│   └── cx-scannable-files       # the file types the gate blocks on — mirrors ASCA/KICS/SCA filters (secrets: every file)
 ├── hooks/
 │   ├── hooks.json               # Claude Code PreToolUse / Stop wiring
 │   ├── cx_check.sh              # POSIX launcher — resolves Git Bash + Python 3, then runs the gate
@@ -142,39 +151,58 @@ plugins/cx-devassist/
 │   ├── cx-asset-resolver.sh     # OS/arch → release asset name
 │   ├── cx-mcp-guard.sh          # shared version/capability decision for `cx mcp bridge`
 │   ├── cx-path-probe.sh         # first writable on-PATH directory
-│   └── cx-min-version           # minimum cx version (numeric floor)
+│   ├── cx-min-version           # minimum cx version (numeric floor)
+│   └── cx-release-tag           # pinned ast-cli release the bootstrap downloads
 └── skills/
     ├── cx-cli-setup/            # guided cx install + authentication (router + references/)
     ├── cx-devassist-asca/       # on-demand SAST (ASCA) scan + remediation for source files
     ├── cx-devassist-sca/        # on-demand SCA (OSS) scan + remediation for dependency manifests
-    └── cx-devassist-kics/       # on-demand IaC (KICS) scan + remediation for Dockerfile/Terraform/K8s YAML
+    ├── cx-devassist-kics/       # on-demand IaC (KICS) scan + remediation for Dockerfile/Terraform/K8s YAML
+    └── cx-devassist-secrets/    # on-demand secret scan + remediation for hardcoded secrets in any file
 ```
 
 > Tests live at the **repo root** (`tests/`), outside the shipped plugin, so they aren't distributed.
 
 ### On-demand scanning (skills)
 
-Beyond the automatic PreToolUse gate, three skills scan on request and remediate via the Checkmarx MCP:
+Beyond the automatic PreToolUse gate, four skills scan on request and remediate via the Checkmarx MCP:
 
 | Ask | Skill | Engine |
 |---|---|---|
 | "scan this file" / "check app.py" (source code) | `cx-devassist-asca` | SAST (ASCA) → `mcp__Checkmarx__codeRemediation` |
 | "scan my dependencies" / "check package.json" (manifest/lockfile) | `cx-devassist-sca` | SCA / OSS → `mcp__Checkmarx__packageRemediation` |
 | "scan this Dockerfile" / "check main.tf" (IaC file) | `cx-devassist-kics` | IaC (KICS) → `mcp__Checkmarx__codeRemediation` |
+| "scan this file for secrets" / "check .env.example" (hardcoded secrets) | `cx-devassist-secrets` | Secrets → `mcp__Checkmarx__codeRemediation` (`type: secret`) |
 | whole project / cloud-scale scan | Checkmarx MCP (Cx1 cloud) tools | — |
 
 A bare "scan this file" routes by the target: source code → ASCA; a dependency manifest/lockfile → SCA;
-an IaC file (Dockerfile, `.tf`, `.yaml`/`.yml`, …) → KICS.
+an IaC file (Dockerfile, `.tf`, `.yaml`/`.yml`, …) → KICS; hardcoded secrets → secrets.
 
-### Admin onboarding pre-fill (optional)
+### URL / tenant pre-fill (optional)
 
-An administrator can pre-seed the Checkmarx One **URL** and **tenant** for browser (OAuth) sign-in by
-editing `config/cx-onboarding.properties`. When set (and valid), the values are embedded straight into
-the gate's `cx auth login` recovery command and the `cx-cli-setup` skill skips the URL/tenant question.
-Edit the file in your **forked / internal marketplace copy** (the reviewed, versioned artifact) — not
-in an end-user's live install, which is overwritten on plugin update. Values are strictly validated
-(https-only host for the URL; a shell-inert charset for the tenant); an invalid value is ignored and
-the developer is asked as usual. There is deliberately no out-of-tree (`~/.checkmarx` / env) override.
+Set `cx_base_auth_uri` and `cx_tenant` in `~/.checkmarx/cx-onboarding.properties` (the developer's copy) or
+in the bundled `config/cx-onboarding.properties` (an administrator, in the **forked / internal marketplace
+copy**; a live install is overwritten on update). A valid value in the user copy wins over the bundled one,
+per key. When both resolve, they are embedded straight into the gate's `cx auth login` recovery command and
+the `cx-cli-setup` skill skips the URL/tenant question. Values are strictly validated for both files (https-only
+host for the URL; a shell-inert charset for the tenant); an invalid value is ignored and the developer is
+asked as usual.
+
+### Scanner switches and severity threshold (user-editable)
+
+The first time a hook runs after install (or the MCP bridge starts), the plugin copies
+`config/cx-onboarding.properties` to `~/.checkmarx/cx-onboarding.properties` (Windows:
+`%USERPROFILE%\.checkmarx\`). It is never overwritten afterwards, so edits survive plugin updates; an update
+only appends settings it newly introduced (delete the file to re-seed). The copy is shared with other
+cx-devassist plugins on the machine (e.g. Copilot CLI). Every scanner is **enabled by default**; set
+`cx_asca_scanner_enabled`, `cx_sca_scanner_enabled`, `cx_kics_scanner_enabled` or `cx_secret_scanner_enabled`
+to `false` to skip that scanner's skill. With the secrets scanner off, the gate also stops requiring a ready,
+authenticated cx for a file only the secret engine would scan (e.g. `app.env`). `cx_severity_threshold`
+(`low`…`critical`; blank or invalid = `low`) limits what the skills report and remediate and, with a cx build
+that includes the ast-cli change, what ASCA/KICS/SCA block; the secrets skill applies it too. Malicious packages
+are never relaxed. Switches only narrow behaviour and never cause a hook to deny; a typo leaves the scanner
+enabled. A cx CLI build that reads this file (ast-cli `agenthooks/scannerconfig`) also skips each disabled engine
+in the native pre-write scan (Claude Code and GitHub Copilot; other agents ignore it for now); older builds ignore the switches.
 
 ### Remembered login environments (automatic)
 

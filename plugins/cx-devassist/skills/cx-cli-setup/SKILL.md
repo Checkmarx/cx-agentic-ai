@@ -92,7 +92,8 @@ Two methods: **API key** (simplest — the key encodes server URL, auth URL, and
 sign-in (OAuth)** (logs in via browser/MFA; saves a refresh token as `cx_apikey`).
 
 > **Admin pre-fill (OAuth only):** if an administrator filled the plugin's
-> `config/cx-onboarding.properties` with a URL + tenant, those values are embedded directly into the
+> `config/cx-onboarding.properties` (or the developer's `~/.checkmarx/cx-onboarding.properties`, which
+> wins per key) with a URL + tenant, those values are embedded directly into the
 > gate's `cx auth login` recovery command, and the OAuth flow **skips the URL/tenant question**. See
 > `references/oauth.md`. An API key needs neither, so this pre-fill does not affect Path A.
 

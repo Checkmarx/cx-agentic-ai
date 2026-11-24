@@ -16,7 +16,8 @@ burns a failed login round-trip.
 **First check whether the values are already provided — if so, SKIP Question 2:**
 - If the gate's deny recovery command already shows a **real** `--base-auth-uri <URL> --tenant
   <tenant>` (concrete values, not the literal `<url>` / `<tenant>` placeholders), your administrator
-  preconfigured them in the plugin's `config/cx-onboarding.properties`. Use those values as-is: go
+  preconfigured them in `cx-onboarding.properties` (the plugin's bundled copy or the developer's
+  `~/.checkmarx` copy). Use those values as-is: go
   straight to running that login command and do **not** ask Question 2.
 - Only when the flags are still **bare placeholders** (`<url>` / `<tenant>`) do you ask Question 2
   below.

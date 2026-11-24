@@ -1,0 +1,92 @@
+[
+  {
+    "FileName": "cx_check.py",
+    "Line": 740,
+    "RuleID": 4002
+  },
+  {
+    "FileName": "cx_check.py",
+    "Line": 691,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "cx_check.py",
+    "Line": 693,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "cx_check.py",
+    "Line": 716,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "cx_check.py",
+    "Line": 740,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "cx_check.py",
+    "Line": 971,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "test_cx_check_scanner_switches_claude.py",
+    "Line": 60,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "test_cx_check_scanner_switches_claude.py",
+    "Line": 66,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "test_cx_check_scanner_switches_claude.py",
+    "Line": 119,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "test_cx_check_scanner_switches_claude.py",
+    "Line": 127,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "test_cx_check_scanner_switches_claude.py",
+    "Line": 179,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "test_cx_check_scanner_switches_claude.py",
+    "Line": 197,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "test_cx_check_scanner_switches_claude.py",
+    "Line": 203,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "test_cx_check_scanner_switches_claude.py",
+    "Line": 206,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "test_cx_check_scanner_switches_claude.py",
+    "Line": 212,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "test_cx_check_scanner_switches_claude.py",
+    "Line": 219,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "test_cx_check_scanner_switches_claude.py",
+    "Line": 227,
+    "RuleID": 4008
+  },
+  {
+    "FileName": "test_cx_check_scanner_switches_claude.py",
+    "Line": 256,
+    "RuleID": 4008
+  }
+]

@@ -11,11 +11,12 @@
 # OS/arch is signalled explicitly (stderr + non-zero), never guessed.
 set -euo pipefail
 
-# resolve_cx_asset <uname_s> <uname_m>
-#   stdout: "ast-cli_<os>_<arch>.<ext>" and return 0 on success
+# resolve_cx_asset <uname_s> <uname_m> [<release_tag>]
+#   stdout: "ast-cli_<os>_<arch>.<ext>" (or "ast-cli_<tag>_<os>_<arch>.<ext>" when <release_tag>
+#   is set) and return 0 on success
 #   stderr: "unsupported: <reason>" and return 1 when the OS or arch has no published asset
 resolve_cx_asset() {
-    local uname_s="${1:-}" uname_m="${2:-}" os arch ext
+    local uname_s="${1:-}" uname_m="${2:-}" release_tag="${3:-}" os arch ext
     case "$uname_s" in
         Darwin)                            os="darwin" ;;
         Linux)                             os="linux" ;;
@@ -37,10 +38,25 @@ resolve_cx_asset() {
         windows) [ "$arch" = "arm64" ] && arch="x64" ;;
     esac
     if [ "$os" = "windows" ]; then ext="zip"; else ext="tar.gz"; fi
-    printf 'ast-cli_%s_%s.%s\n' "$os" "$arch" "$ext"
+    if [[ -n "$release_tag" ]]; then
+        printf 'ast-cli_%s_%s_%s.%s\n' "$release_tag" "$os" "$arch" "$ext"
+    else
+        printf 'ast-cli_%s_%s.%s\n' "$os" "$arch" "$ext"
+    fi
 }
 
-# Run directly → resolve for the current machine.
+# Run directly → resolve for the current machine. When scripts/cx-release-tag sits beside this
+# file, include that tag so the printed asset name matches the pinned download.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    resolve_cx_asset "$(uname -s)" "$(uname -m)"
+    _cx_tag=""
+    _cx_tag_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cx-release-tag"
+    if [[ -r "$_cx_tag_file" ]]; then
+        while IFS= read -r _cx_line || [[ -n "$_cx_line" ]]; do
+            _cx_line="${_cx_line#"${_cx_line%%[![:space:]]*}"}"
+            [[ -z "$_cx_line" || "${_cx_line:0:1}" == "#" ]] && continue
+            _cx_tag="$_cx_line"
+            break
+        done < "$_cx_tag_file"
+    fi
+    resolve_cx_asset "$(uname -s)" "$(uname -m)" "$_cx_tag"
 fi
