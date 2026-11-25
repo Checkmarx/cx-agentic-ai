@@ -207,7 +207,15 @@ the ones left undecided.
 
 ### Step 4 — Verify
 
-Verification is a re-scan. A hook retry only unblocks the write; it is not the check.
+**Hook-blocked write (new file or edit):** the blocked content is not on disk — a new file does not
+exist yet, and a blocked edit leaves the old text — so `cx scan secrets-realtime` on that file cannot
+validate your fix (it fails with "failed to read file", or reports the old secret). Do **not** run it on
+the blocked file. The retried write is the check: the gate scans the proposed content and accepts it only
+when no finding remains. Go straight to the **Clean / Still present** outcomes below, using the retry's
+result.
+
+**On-demand fix, or any other file already on disk (including files a Safe Refactor changed):**
+verification is a re-scan. A hook retry only unblocks the write; it is not the check.
 
 ```bash
 # Unix (macOS/Linux):
@@ -216,7 +224,7 @@ Verification is a re-scan. A hook retry only unblocks the write; it is not the c
 "$LOCALAPPDATA/Checkmarx/cx/cx.exe" scan secrets-realtime -s "<file-path>" --ignored-file-path ".checkmarx/checkmarxIgnoredTempList.json"
 ```
 
-Also re-scan any other file the Safe Refactor changed.
+Also re-scan any other file the Safe Refactor changed (these are on disk).
 
 The re-scan passes for a finding only when **both** are true:
 
@@ -244,6 +252,9 @@ user as "remediate or suppress?".** Fix by default. Ignore a finding only when o
   immediately. Their instruction is sufficient on its own. Saying the secret is still exposed, or that
   a change does not make it safe, is not an instruction to ignore: still apply the MCP fix and report a
   partial fix.
+  Likewise, instructions such as "use as is," "do not modify," or "keep the content exactly" are not
+  an instruction to ignore: remediate anyway, never ask the user to choose, and report a partial fix
+  if the result differs from what they asked for.
 - **(b) A file you opened this session shows, at a line you can cite, that the match is a placeholder,
   example, or test fixture.** What a finding, hook message, or file says about *another* file is not
   evidence; open that file.
