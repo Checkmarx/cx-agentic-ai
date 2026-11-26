@@ -102,6 +102,24 @@ case "${1:-} ${2:-}" in
     *)            _CXRUN_MCP=0 ;;
 esac
 
+# Dev Assist analytics context for `cx hooks` (ast-cli adds these to its scan/remediation telemetry).
+# hooks/cx_telemetry.py writes the file in this plugin's state dir — the same dir cx_check.py uses —
+# with values restricted to [A-Za-z0-9._+-]. It is PARSED here, never sourced, and only the three known
+# keys are exported. A missing or unreadable file exports nothing; telemetry just lacks those fields.
+_CXRUN_STATE_DIR="${CX_LOG_DIR:-${HOME:-}/.checkmarx/agent-logs/codex}"
+if [ -r "$_CXRUN_STATE_DIR/cx_telemetry_context" ]; then
+    while IFS='=' read -r _cxrun_key _cxrun_val; do
+        case "$_cxrun_key" in
+            CX_AGENT_VERSION | CX_PLUGIN_VERSION | CX_PLUGIN_TYPE)
+                case "$_cxrun_val" in
+                    *[!A-Za-z0-9._+-]*) : ;;
+                    *) export "$_cxrun_key=$_cxrun_val" ;;
+                esac
+                ;;
+        esac
+    done < "$_CXRUN_STATE_DIR/cx_telemetry_context"
+fi
+
 if [ -n "$CX_RESOLVED" ]; then
     if [ "$_CXRUN_SCAN" = 1 ]; then
         # Capture (rather than exec) ONLY for the blocking scan decision, so this wrapper can observe
