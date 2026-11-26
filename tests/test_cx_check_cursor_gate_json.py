@@ -2,6 +2,7 @@
 
 import json
 import os
+os.environ.setdefault("CX_TELEMETRY_DISABLE", "1")  # never start a real telemetry worker from a test
 import subprocess
 import sys
 import unittest

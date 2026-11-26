@@ -16,6 +16,7 @@ import importlib.util
 import io
 import json
 import os
+os.environ.setdefault("CX_TELEMETRY_DISABLE", "1")  # never start a real telemetry worker from a test
 import shutil
 import stat
 import subprocess
@@ -121,6 +122,8 @@ class _IdeHome(unittest.TestCase):
         cx_check._scanner_state = lambda identity=None: cx_check._SCANNER_SCAN
         environ = {"CX_LOG_DIR": log_dir} if log_dir else {"CX_LOG_DISABLE": "1"}
         environ.update(env or {})
+        # Never start the analytics worker from a test (it could send a real event with the user's cx).
+        environ.setdefault("CX_TELEMETRY_DISABLE", "1")
         cx_check.os.environ = environ
         sys.argv = ["cx_check.py", "--copilot-cli"] if copilot_cli else ["cx_check.py"]
         buf = io.StringIO()

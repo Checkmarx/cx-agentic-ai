@@ -22,6 +22,7 @@ Run from the repo root:  python -m unittest discover -s tests -v
 import importlib.util
 import json
 import os
+os.environ.setdefault("CX_TELEMETRY_DISABLE", "1")  # never start a real telemetry worker from a test
 import shutil
 import subprocess
 import sys

@@ -14,6 +14,7 @@ import importlib.util
 import io
 import json
 import os
+os.environ.setdefault("CX_TELEMETRY_DISABLE", "1")  # never start a real telemetry worker from a test
 import shutil
 import sys
 import unittest
@@ -81,6 +82,8 @@ def run(hook_input, *, which="cx", version_state="ok", authed=True,
     e = dict(env) if env is not None else {}
     if "CX_LOG_DIR" not in e:
         e.setdefault("CX_LOG_DISABLE", "1")
+    # Never start the analytics worker from a test (it could send a real event with the user's cx).
+    e.setdefault("CX_TELEMETRY_DISABLE", "1")
     cx_check.os.environ = e
 
     out = io.StringIO()

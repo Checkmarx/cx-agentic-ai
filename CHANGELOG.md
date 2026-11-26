@@ -4,6 +4,43 @@ All notable changes to the Checkmarx Security MCP Server will be documented belo
 
 ---
 
+### Changed in all Dev Assist CLI plugins (Claude, Copilot, Gemini, Cursor, Codex) — Unreleased
+
+#### Added — Dev Assist analytics telemetry (AST-184026, AST-184125, AST-184127, AST-184129, AST-184131)
+
+Each plugin now sends the Dev Assist analytics events the CLI plugins own, per the "Enhance Dev Assist
+Analytics Dashboard" technical design. The installation event is out of scope. Scan and remediation
+events are still sent by `cx hooks` itself (ast-cli, AST-195928); the plugin adds the context only it
+knows.
+
+- **Authentication event.** On the first gate pass with cx authenticated, and again after each new
+  login (the gate saw cx unauthenticated and the credential file has changed since, so a backend
+  timeout is not counted), the plugin runs
+  `cx telemetry ai --type authentication --sub-type authentication --status success` with `--agent`
+  (`Claude-cli`, `Copilot-cli` / `Copilot-VSCode`, `Gemini-cli`, `Cursor-cli`, `Codex-cli`),
+  `--agent-version`, `--cx-plugin-version`, `--plugin-type CLI` and, when the gate saw the login
+  command, `--event-attributes "authMethod=OAuth|APIKey"`. This call also creates the session id the
+  later scan and remediation events carry. The event is marked sent only when cx reports success; a
+  failed send (or a cx too old to send) is retried after 30 minutes.
+- **The session-id write is not a credential change.** cx rewrites `checkmarxcli.yaml` when it sends
+  the event. The worker records that mtime change in `~/.checkmarx/cx_telemetry_cred.json` (shared by
+  all plugins) and the gate's `_credential_mtime()` maps it back, so the scanner cache, the fresh-login
+  window and the login history are unaffected.
+- **Context for `cx hooks`.** `hooks/cx_run.sh` exports `CX_AGENT_VERSION`, `CX_PLUGIN_VERSION` and
+  `CX_PLUGIN_TYPE` (read from `cx_telemetry_context` in the plugin's state dir, refreshed daily) so
+  ast-cli can add them to its scan and remediation events.
+- **No ASTCLI login noise.** The gate's `cx auth validate` probe now passes `--agent <label>`. With the
+  default agent, cx counted every cached probe as an AST-CLI authentication event.
+- **Never in the way.** The version lookups, the cx capability check and the `cx telemetry ai` call
+  run in a detached worker (`hooks/cx_telemetry.py`), so the gate never waits on them. Nothing is sent
+  when the installed cx lacks the analytics flags. Any telemetry error is swallowed and logged as a
+  `telemetry` event; it never changes a gate decision. `CX_TELEMETRY_DISABLE=1` turns it off; the test
+  suites set it.
+- Plugin versions: cx-devassist 1.0.4, copilot-devassist 1.0.5 (marketplace too), Gemini extension
+  1.0.3, cursor-devassist 1.0.3, codex-devassist 1.0.3.
+
+---
+
 ### Changed in cx-devassist for Copilot (copilot-devassist) — Unreleased
 
 #### Added — Checkmarx Self-Healing setting for GitHub Copilot in VS Code (AST-180812)
