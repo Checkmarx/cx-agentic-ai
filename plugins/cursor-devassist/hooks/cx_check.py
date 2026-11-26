@@ -34,6 +34,16 @@ try:
 except Exception:
     cx_log = None
 
+# Dev Assist analytics telemetry is OPTIONAL in the same way: a missing/broken cx_telemetry never
+# changes a gate decision (see _telemetry below).
+try:
+    import cx_telemetry
+except Exception:
+    cx_telemetry = None
+
+# This plugin's client key for cx_telemetry (agent label "Cursor-cli").
+_TELEMETRY_CLIENT = "cursor"
+
 # hooks/cx_shell.py owns EVERY shell-specific concern (unwrapping PowerShell/cmd/bash wrappers,
 # variable expansion, chaining/redirect checks, and rendering commands per shell) so this gate and
 # hooks/_cx_bootstrap_match.sh cannot drift apart on what a command means. Unlike cx_log, it is NOT
@@ -260,7 +270,29 @@ def _cx_binary_pin_note(tier):
 # Keep this one attempt bounded and cheap so the grace retry + the scanner probe all fit the
 # cx_check.sh 45s hook budget. Built per call so it honors a CX_BINARY override.
 def _auth_validate_cmd():
-    return [_cx_exe(), "auth", "validate", "--retry", "0", "--timeout", "10s"]
+    # --agent: with the default agent (ASTCLI), `cx auth validate` sends its own authentication
+    # telemetry event, which would count every cached probe as an AST-CLI login. The plugin sends
+    # the real authentication event itself (cx_telemetry).
+    return [_cx_exe(), "auth", "validate", "--retry", "0", "--timeout", "10s",
+            "--agent", _telemetry_agent_label()]
+
+
+def _telemetry_agent_label():
+    label = cx_telemetry.agent_label(_TELEMETRY_CLIENT) if cx_telemetry is not None else ""
+    return label or "Cursor-cli"
+
+
+def _telemetry(fn_name, *args, **kwargs):
+    """Call a cx_telemetry hook with this plugin's state dir. Never raises: telemetry must not change
+    a gate decision (and a crash here would otherwise reach _fail_closed_on_crash)."""
+    if cx_telemetry is None or not _AGENT_LOG_DIR:
+        return
+    try:
+        mode = getattr(cx_telemetry, fn_name)(_AGENT_LOG_DIR, *args, **kwargs)
+        if mode:
+            _log("telemetry", result="started", mode=mode)
+    except Exception as e:
+        _log("telemetry", result="error", reason_code=type(e).__name__)
 
 def _chmod_600(path):
     """Best-effort 0600 on a per-user state file. POSIX only — on Windows the file already
@@ -1405,10 +1437,18 @@ def _credential_mtime():
     invalidates a cached 'will-scan' pass and forces a re-probe. None on any error (then the cache
     keys on binary identity alone)."""
     try:
-        return os.path.getmtime(
+        mtime = os.path.getmtime(
             os.path.join(os.path.expanduser("~"), ".checkmarx", "checkmarxcli.yaml"))
     except OSError:
         return None
+    # Sending the Dev Assist authentication event makes cx rewrite this file (the session id). That
+    # write is not a credential change: cx_telemetry maps its mtime back to the value before it.
+    if cx_telemetry is not None:
+        try:
+            return cx_telemetry.credential_mtime(_AGENT_LOG_DIR, mtime)
+        except Exception as e:
+            _log("telemetry", result="error", reason_code=type(e).__name__)
+    return mtime
 
 
 def _credential_is_fresh(within_seconds=180):
@@ -2098,6 +2138,8 @@ def cx_check():
 
     # 6. Authenticated? (the gate's notion: `cx auth validate`, which accepts an OAuth token.)
     if not _is_authenticated(identity):
+        # The next authenticated pass is a new login → it sends the authentication event.
+        _telemetry("note_unauthenticated", _credential_mtime())
         # Fresh-login window: the credential was just written but `cx auth validate` is still returning
         # invalid — a transient backend-propagation lag, NOT a real auth failure. The critical guidance
         # is DON'T re-run `cx auth login`: it revokes the token and reissues a new one, resetting the
@@ -2228,6 +2270,11 @@ def cx_check():
         )
 
     # cx is installed, recent enough, authenticated, and the scanner WILL actually scan.
+    # Analytics: send the authentication event when due and keep the cx hooks context fresh. Detached
+    # and cheap — one small read and one stat on the steady-state path.
+    _telemetry("on_gate_pass", _TELEMETRY_CLIENT, _cx_exe(),
+               hook_input.get("cursor_version", "") if isinstance(hook_input, dict) else "",
+               cred_mtime=_credential_mtime())
     _allow(reason_code="ok", tool_name=tool, version_state=state)
 
 
@@ -2394,6 +2441,7 @@ def cx_record_login():
     hook_input = _read_hook_input()
     if _is_observable_login_command(hook_input):
         _record_login_attempt(_bare_bash_command(hook_input))
+        _telemetry("note_login_command", _bare_bash_command(hook_input))
 
 
 def main():
