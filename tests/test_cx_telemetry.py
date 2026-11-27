@@ -314,6 +314,25 @@ class SendTest(_TempDirs):
         self.assertIn("CX_AGENT_VERSION=1.7.2\n", context)
         self.assertIn("CX_PLUGIN_TYPE=CLI\n", context)
 
+    def test_worker_defers_cli_auth_to_supported_login_command(self):
+        args = ["auth", "--state-dir", self.dir, "--client", "copilot-cli",
+                "--cx", "cx", "--agent-version", "1.7.2"]
+        with mock.patch.object(cx_telemetry, "_run", return_value=(0, "sends authentication telemetry")) as run, \
+                mock.patch.object(cx_telemetry, "send_auth_event") as send:
+            self.assertEqual(cx_telemetry.worker_main(args), 0)
+            run.assert_called_once_with(("cx", "auth", "login", "--help"), timeout=15)
+            send.assert_not_called()
+            self.assertTrue(os.path.exists(os.path.join(self.dir, cx_telemetry.CONTEXT_FILE)))
+
+    def test_worker_keeps_legacy_auth_for_older_builds(self):
+        args = ["auth", "--state-dir", self.dir, "--client", "copilot-cli",
+                "--cx", "cx", "--agent-version", "1.7.2"]
+        with mock.patch.object(cx_telemetry, "_run", return_value=(0, "Browser sign-in")) as run, \
+                mock.patch.object(cx_telemetry, "send_auth_event") as send:
+            self.assertEqual(cx_telemetry.worker_main(args), 0)
+            run.assert_called_once_with(("cx", "auth", "login", "--help"), timeout=15)
+            send.assert_called_once()
+
     def test_bad_arguments_exit_cleanly(self):
         self.assertEqual(cx_telemetry.worker_main([]), 0)
         self.assertEqual(cx_telemetry.worker_main(["auth", "--client", "claude"]), 0)

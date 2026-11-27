@@ -385,6 +385,12 @@ def telemetry_supported(cx_exe):
     return code == 0 and "--event-attributes" in out and "--agent-version" in out
 
 
+def login_sends_auth_telemetry(cx_exe):
+    """Check whether cx owns authentication events for explicit CLI logins."""
+    code, out = _run((cx_exe, "auth", "login", "--help"), timeout=15)
+    return code == 0 and "sends authentication telemetry" in out
+
+
 def auth_command(cx_exe, client, agent_version, plugin_ver, auth_method):
     cmd = [cx_exe, "telemetry", "ai",
            "--type", "authentication", "--sub-type", "authentication",
@@ -435,8 +441,9 @@ def worker_main(argv):
     except (OSError, ValueError) as e:
         _LOG.error("write_context failed: %s", type(e).__name__)
     if mode == "auth":
-        send_auth_event(state_dir, client, opts.get("cx", "cx"), agent_ver, plugin_ver,
-                        opts.get("auth-method", ""))
+        cx_exe = opts.get("cx", "cx")
+        if client == "copilot-vscode" or not login_sends_auth_telemetry(cx_exe):
+            send_auth_event(state_dir, client, cx_exe, agent_ver, plugin_ver, opts.get("auth-method", ""))
     return 0
 
 

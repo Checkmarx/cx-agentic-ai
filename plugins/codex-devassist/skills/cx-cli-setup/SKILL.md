@@ -19,8 +19,8 @@ Resources); this router is the spine.
 
 ## Run every `cx` command in the foreground
 
-Every `cx` invocation in this skill — `cx version`, `cx auth --help`, `cx auth login`,
-`cx auth validate`, `cx configure set …`, and the bootstrap install/upgrade command — is run with the
+Every `cx` command the skill runs — `cx version`, `cx auth --help`, `cx auth login`,
+`cx auth validate`, and the bootstrap install/upgrade command — is run with the
 shell tool's normal, **synchronous** (foreground) execution. Never background any of them (the tool's
 own async/background option). A backgrounded command hides its real exit status and hides a hang, so
 you cannot tell a genuine failure from a Windows-sandbox stall (see the `cx auth login` /
@@ -185,18 +185,27 @@ key → Path A** (below); **Browser sign-in → Path B** (`references/oauth.md`)
 
 ### Path A — API key
 
-Give the full instructions in one message; do not ask the developer to paste the key into chat:
+Check `cx auth login --help` if the `login` subcommand is available. When the login help explicitly
+documents API-key sign-in, give the developer this command to run in their own terminal:
 
-> "1. In the Checkmarx One portal: **Settings → Identity and Access Management → API Keys → Create
-> Key**. 2. Copy the key (it is shown once). 3. Run, replacing `<your-api-key>`:
-> ```
-> cx configure set --prop-name cx_apikey --prop-value <your-api-key>
-> ```
-> Let me know once you've run it. Docs: https://docs.checkmarx.com/en/34965-188712-creating-api-keys.html"
+```bash
+cx auth login --apikey <your-api-key> --agent=codex-cli
+```
 
-Wait for confirmation. The CLI extracts the server URL, auth URL, and tenant from the key — no
-further questions. The credential is stored in plaintext in `~/.checkmarx/checkmarxcli.yaml`
-(Windows: `%USERPROFILE%\.checkmarx\checkmarxcli.yaml`) — protect it like an SSH key (`chmod 600`).
+If the login help only lists `--apikey` as a global flag, or `login` is unavailable, give the existing
+API-key setup command:
+
+```bash
+cx configure set --prop-name cx_apikey --prop-value <your-api-key>
+```
+
+Give the instructions and the applicable command in one message. Tell the developer to go to
+**Settings → Identity and Access Management → API Keys → Create Key** in Checkmarx One, copy the
+key shown once, and replace `<your-api-key>` in their own terminal. Keep the key out of chat.
+Wait for confirmation, then continue to Phase 3. The key supplies the server URL, auth URL, and
+tenant. If the CLI stores credentials in `~/.checkmarx/checkmarxcli.yaml` (Windows:
+`%USERPROFILE%\.checkmarx\checkmarxcli.yaml`), restrict access to that file.
+[Create an API key](https://docs.checkmarx.com/en/34965-188712-creating-api-keys.html)
 
 ## Phase 3 — Verify Connectivity
 
@@ -237,8 +246,8 @@ version` works in the shell, see `references/troubleshooting.md`.
 If invoked only because credentials expired (CLI already installed and configured), skip Phases 0–1
 and start at Phase 2: "Your Checkmarx One credentials have expired. Let's re-authenticate — no
 reconfiguration needed." Re-show the Question 1 auth-method choice, pre-selecting the method the
-developer originally used, then route: **API key →** generate a new key and re-run the Phase 2 Path A
-`cx configure set` (keys expire after 30–365 days per tenant policy); **Browser sign-in →**
+developer originally used, then route: **API key →** generate a new key and follow Phase 2 Path A
+(keys expire after 30–365 days per tenant policy); **Browser sign-in →**
 `references/oauth.md` (re-auth section) — the gate's deny message usually lists the previously used
 environment(s), offered there as choices via the history form of Question 2.
 
@@ -256,8 +265,9 @@ environment(s), offered there as choices via the history form of Question 2.
 | Command | Purpose |
 |---|---|
 | `cx version` | Verify CLI is installed |
-| `cx configure set --prop-name cx_apikey --prop-value <key>` | Path A: set API key (extracts server/tenant automatically) |
-| `cx auth login --base-auth-uri <URL> --tenant <tenant>` | Path B: browser OAuth — both flags every login; needs a build that supports it |
+| `cx auth login --apikey <key> --agent=codex-cli` | Path A: API-key sign-in on supported builds |
+| `cx configure set --prop-name cx_apikey --prop-value <key>` | Path A: API-key setup on older builds |
+| `cx auth login --base-auth-uri <URL> --tenant <tenant> --agent=codex-cli` | Path B: browser sign-in on supported builds |
 | `cx auth logout` | Revoke the current refresh token and clear stored credentials |
 | `cx auth validate` | Verify authentication |
 | `cx utils env` | Show current configuration |
