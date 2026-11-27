@@ -19,6 +19,7 @@ import shutil
 import sys
 import unittest
 from contextlib import redirect_stdout, redirect_stderr
+from unittest import mock
 
 # Source under test lives in the plugin's hooks/ (tests live at the repo root, outside the plugin).
 # Loaded under a unique sys.modules-free name (not a bare `import cx_check`) because every plugin
@@ -181,13 +182,25 @@ class TestCodexOutputEnvelope(unittest.TestCase):
         self.assertIn("$cx-cli-setup", LAST_OUTPUT["permissionDecisionReason"])
 
     def test_unauthenticated_denies_with_dollar_invocation(self):
-        decision, code = run(bash("npm test"), authed=False)
+        with mock.patch.object(cx_check.cx_telemetry, "login_sends_auth_telemetry",
+                               return_value=False):
+            decision, code = run(bash("npm test"), authed=False)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 0)
         context = LAST_OUTPUT["permissionDecisionReason"]
         self.assertIn("$cx-cli-setup", context)
         self.assertIn("Path A in $cx-cli-setup", context)
         self.assertIn("--agent=codex-cli", context)
+
+    def test_unauthenticated_supported_cli_shows_api_key_login(self):
+        with mock.patch.object(cx_check.cx_telemetry, "login_sends_auth_telemetry",
+                               return_value=True):
+            decision, code = run(bash("npm test"), authed=False)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(code, 0)
+        context = LAST_OUTPUT["permissionDecisionReason"]
+        self.assertIn("auth login --apikey <your-api-key> --agent=codex-cli", context)
+        self.assertNotIn("configure set --prop-name cx_apikey", context)
 
     def test_allowed_when_ready(self):
         decision, code = run(bash("npm test"))

@@ -385,9 +385,9 @@ def telemetry_supported(cx_exe):
     return code == 0 and "--event-attributes" in out and "--agent-version" in out
 
 
-def login_sends_auth_telemetry(cx_exe):
+def login_sends_auth_telemetry(cx_exe, timeout=15):
     """Check whether cx owns authentication events for explicit CLI logins."""
-    code, out = _run((cx_exe, "auth", "login", "--help"), timeout=15)
+    code, out = _run((cx_exe, "auth", "login", "--help"), timeout=timeout)
     return code == 0 and "sends authentication telemetry" in out
 
 

@@ -901,6 +901,17 @@ _API_KEY_RECOVERY_BULLET = (
 )
 
 
+def _api_key_recovery_bullet():
+    if cx_telemetry is not None and cx_telemetry.login_sends_auth_telemetry(_cx_exe(), timeout=3):
+        args = "auth login --apikey <your-api-key> --agent=" + _telemetry_agent_label().lower()
+        return (
+            "- API key (ask this first): this CLI supports API-key sign-in. Give the developer "
+            "this command to run in their own terminal. Keep the key out of chat.\n    "
+            + _cx_recovery_command_str(args)
+        )
+    return _API_KEY_RECOVERY_BULLET
+
+
 def _oauth_recovery_command(base, tenant):
     args = "auth login --base-auth-uri {0} --tenant {1} --agent={2}".format(
         base, tenant, _telemetry_agent_label().lower())
@@ -2023,7 +2034,7 @@ def cx_check():
                 "(/cx-cli-setup) for the guided flow. ASK THE DEVELOPER WHICH METHOD FIRST — do not "
                 "assume OAuth and do not ask for a URL/tenant before this choice is made. There are two "
                 "ways to authenticate, and they differ in who runs them:\n"
-                + _API_KEY_RECOVERY_BULLET
+                + _api_key_recovery_bullet()
                 + "\n" + _oauth_recovery_bullet(_load_admin_config())
 
                 + "\n  It blocks until the developer finishes (~5 min) — run it with a long timeout or "
@@ -2104,7 +2115,7 @@ def cx_check():
                 "allow everything UNSCANNED. Re-authenticate via the cx-cli-setup skill (/cx-cli-setup). "
                 "ASK THE DEVELOPER WHICH METHOD FIRST — do not assume OAuth and do not ask for a "
                 "URL/tenant before this choice is made.\n"
-                + _API_KEY_RECOVERY_BULLET
+                + _api_key_recovery_bullet()
                 + "\n" + _oauth_recovery_bullet(_load_admin_config())
 
                 + "\nOnly `cx auth …` / `cx configure …` commands run until the scanner is authenticated."

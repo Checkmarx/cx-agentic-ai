@@ -1087,6 +1087,22 @@ _API_KEY_RECOVERY_BULLET = (
 )
 
 
+def _api_key_recovery_bullet(client):
+    if (client == _TELEMETRY_CLIENT and cx_telemetry is not None
+            and cx_telemetry.login_sends_auth_telemetry(_cx_exe(), timeout=3)):
+        return (
+            "- API key (ask this first): this CLI supports API-key sign-in. Give the developer "
+            "this command to run in their own terminal. Keep the key out of chat.\n    "
+            + _cx_recovery_command_str("auth login --apikey <your-api-key> --agent=" + _TELEMETRY_CLIENT)
+        )
+    return _API_KEY_RECOVERY_BULLET
+
+
+def _auth_recovery_options(hook_input):
+    client = _telemetry_client(hook_input)
+    return _api_key_recovery_bullet(client) + "\n" + _oauth_recovery_bullet(_load_admin_config(), client=client)
+
+
 def _oauth_recovery_command(base, tenant, client):
     args = "auth login --base-auth-uri {0} --tenant {1}".format(base, tenant)
     if client == _TELEMETRY_CLIENT:
@@ -2276,8 +2292,7 @@ def cx_check():
                 "(/cx-cli-setup) for the guided flow. ASK THE DEVELOPER WHICH METHOD FIRST — do not "
                 "assume OAuth and do not ask for a URL/tenant before this choice is made. There are two "
                 "ways to authenticate, and they differ in who runs them:\n"
-                + _API_KEY_RECOVERY_BULLET
-                + "\n" + _oauth_recovery_bullet(_load_admin_config(), client=_telemetry_client(hook_input))
+                + _auth_recovery_options(hook_input)
 
                 + "\n  It blocks until the developer finishes (~5 min) — run it with a long timeout or "
                 "in the background.\n"
@@ -2359,8 +2374,7 @@ def cx_check():
                 "allow everything UNSCANNED. Re-authenticate via the cx-cli-setup skill (/cx-cli-setup). "
                 "ASK THE DEVELOPER WHICH METHOD FIRST — do not assume OAuth and do not ask for a "
                 "URL/tenant before this choice is made.\n"
-                + _API_KEY_RECOVERY_BULLET
-                + "\n" + _oauth_recovery_bullet(_load_admin_config(), client=_telemetry_client(hook_input))
+                + _auth_recovery_options(hook_input)
 
                 + "\nOnly `cx auth …` / `cx configure …` commands run until the scanner is authenticated."
             ),

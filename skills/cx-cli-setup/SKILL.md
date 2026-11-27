@@ -119,15 +119,17 @@ key → Path A** (below); **Browser sign-in → Path B** (`references/oauth.md`)
 
 ### Path A — API key
 
-Check `cx auth login --help` if the `login` subcommand is available. When the login help explicitly
-documents API-key sign-in, give the developer this command to run in their own terminal:
+If the recovery message provides an API-key sign-in command, use it. Otherwise run
+`auth login --help` with the resolved `cx` executable before giving the developer a command.
+When the login help documents API-key sign-in, give the developer this command to run in their
+own terminal:
 
 ```bash
 cx auth login --apikey <your-api-key> --agent=gemini-cli
 ```
 
-If the login help only lists `--apikey` as a global flag, or `login` is unavailable, give the existing
-API-key setup command:
+Use this fallback only after confirming that the installed CLI lacks API-key sign-in. A global
+`--apikey` flag alone does not indicate support:
 
 ```bash
 cx configure set --prop-name cx_apikey --prop-value <your-api-key>

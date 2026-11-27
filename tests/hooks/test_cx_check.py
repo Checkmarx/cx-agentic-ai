@@ -394,6 +394,10 @@ class TestRecoveryMessaging(unittest.TestCase):
             patcher = mock.patch.object(cx_check, name, return_value=value)
             patcher.start()
             self.addCleanup(patcher.stop)
+        capability = mock.patch.object(cx_check.cx_telemetry, "login_sends_auth_telemetry",
+                                       return_value=False)
+        self.login_support = capability.start()
+        self.addCleanup(capability.stop)
 
     def _assert_oauth_apikey_split(self, ctx):
         self.assertIn("auth login", ctx)
@@ -416,6 +420,16 @@ class TestRecoveryMessaging(unittest.TestCase):
         decision, code = run(write("x"), authed=True, scanner_state=cx_check._SCANNER_PASSTHROUGH)
         self.assertEqual(decision, "deny")
         self._assert_oauth_apikey_split(LAST_OUTPUT["additionalContext"])
+
+    def test_supported_cli_recovery_shows_agent_attributed_api_key_login(self):
+        self.login_support.return_value = True
+        decision, _ = run(write("x"), authed=False)
+        self.assertEqual(decision, "deny")
+        context = LAST_OUTPUT["additionalContext"]
+        self.assertIn("auth login --apikey <your-api-key> --agent=copilot-cli", context)
+        self.assertNotIn("configure set --prop-name cx_apikey", context)
+        self.login_support.assert_called_once()
+        self.assertEqual(self.login_support.call_args[1]["timeout"], 3)
 
     def test_recovery_command_uses_resolved_absolute_path_first_session(self):
         # When cx resolves to a canonical absolute path (first-install session, not yet on PATH), the
