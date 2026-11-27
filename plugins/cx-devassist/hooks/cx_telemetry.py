@@ -22,10 +22,9 @@ records the file's mtime before and after its own send (cx_telemetry_cred.json, 
 plugin), and credential_mtime() maps the "after" value back to "before", so the gate's credential
 checks (scanner cache key, fresh-login window, login history) never mistake that write for a login.
 
-Everything slow — `<agent> --version`, the cx capability check, the `cx telemetry ai` call itself —
-runs in a DETACHED worker (this file run as a script), so the gate never waits on telemetry. Every
-public function catches its own errors: telemetry must never change a gate decision. Errors go to a
-module logger with only a NullHandler, so nothing is ever printed into a hook's output.
+The capability check and authentication telemetry POST run in a detached worker. Copilot CLI can
+also prepare the context synchronously before its first scan, using a bounded local version probe.
+Errors go to a module logger with only a NullHandler, keeping hook output clear.
 
 This file is IDENTICAL in every plugin (cx-devassist, copilot-devassist, cursor-devassist,
 codex-devassist, and the Gemini extension's root hooks/); tests/test_cx_telemetry.py enforces that.
@@ -47,6 +46,7 @@ _LOG.propagate = False
 STATE_FILE = "cx_telemetry_state.json"
 CONTEXT_FILE = "cx_telemetry_context"
 CONTEXT_TTL = 24 * 60 * 60  # refresh the agent/plugin versions once a day
+HOOK_VERSION_TIMEOUT = 3  # bound the local version probe on a cold scan
 _CLOCK_SKEW = 5 * 60
 # An authentication send that has not reported success within this window is retried. It also spaces
 # out retries when the installed cx cannot send (too old), instead of a worker on every gate pass.
@@ -144,7 +144,7 @@ def _write_atomic(path, text):
     tmp = os.path.normpath(os.path.abspath("%s.%d.tmp" % (target, os.getpid())))
     if os.path.dirname(tmp) != parent:
         raise ValueError("temporary telemetry file escapes the state directory")
-    with open(tmp, "w", encoding="utf-8") as f:
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
     if os.name != "nt":
         os.chmod(tmp, 0o600)
@@ -358,7 +358,7 @@ def plugin_version():
     return ""
 
 
-def detect_agent_version(client, given=""):
+def detect_agent_version(client, given="", timeout=10):
     if given:
         return _safe(given)
     entry = _CLIENTS.get(client)
@@ -367,7 +367,7 @@ def detect_agent_version(client, given=""):
     exe = shutil.which(entry[1][0])
     if not exe:
         return ""
-    code, out = _run((exe,) + tuple(entry[1][1:]), timeout=10)
+    code, out = _run((exe,) + tuple(entry[1][1:]), timeout=timeout)
     match = _VERSION_RE.search(out) if code == 0 else None
     return _safe(match.group(0)) if match else ""
 
@@ -413,19 +413,28 @@ def _parse_args(argv):
 
 
 def worker_main(argv):
-    if not argv or argv[0] not in ("auth", "context"):
+    if not argv or argv[0] not in ("auth", "context", "hook-context"):
         return 0
+    mode = argv[0]
     opts = _parse_args(argv[1:])
     state_dir, client = opts.get("state-dir", ""), opts.get("client", "")
     if not state_dir or client not in _CLIENTS:
         return 0
-    agent_ver = detect_agent_version(client, opts.get("agent-version", ""))
+    if mode == "hook-context" and (disabled() or _context_is_fresh(state_dir)):
+        return 0
+    version_timeout = HOOK_VERSION_TIMEOUT if mode == "hook-context" else 10
+    agent_ver = detect_agent_version(client, opts.get("agent-version", ""), timeout=version_timeout)
     plugin_ver = plugin_version()
     try:
+        if mode == "hook-context":
+            # The scanner can start before the readiness gate creates the state directory.
+            os.makedirs(state_dir, mode=0o700, exist_ok=True)
+            if _context_is_fresh(state_dir):
+                return 0
         write_context(state_dir, agent_ver, plugin_ver)
     except (OSError, ValueError) as e:
         _LOG.error("write_context failed: %s", type(e).__name__)
-    if argv[0] == "auth":
+    if mode == "auth":
         send_auth_event(state_dir, client, opts.get("cx", "cx"), agent_ver, plugin_ver,
                         opts.get("auth-method", ""))
     return 0

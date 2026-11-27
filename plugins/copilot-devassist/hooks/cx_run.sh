@@ -172,13 +172,30 @@ case "${1:-} ${2:-}" in
     *)            _CXRUN_MCP=0 ;;
 esac
 
-# Dev Assist analytics context for `cx hooks` (ast-cli adds these to its scan/remediation telemetry).
-# hooks/cx_telemetry.py writes the file in this plugin's state dir — the same dir cx_check.py uses —
-# with values restricted to [A-Za-z0-9._+-]. It is PARSED here, never sourced, and only the three known
-# keys are exported. A missing or unreadable file exports nothing; telemetry just lacks those fields.
-_CXRUN_STATE_DIR="${CX_LOG_DIR:-${HOME:-}/.checkmarx/agent-logs/copilot-cli}"
-if [ -r "$_CXRUN_STATE_DIR/cx_telemetry_context" ]; then
+# Seed cold telemetry context in the scanner process, before it can send an event. The readiness
+# gate may still be preparing the same data in its detached authentication worker.
+_CXRUN_HOME="${HOME:-}"
+if [ "$_CX_WINDOWS" = 1 ] && [ -n "${USERPROFILE:-}" ]; then
+    _CXRUN_HOME="$USERPROFILE"
+fi
+_CXRUN_STATE_DIR="${CX_LOG_DIR:-$_CXRUN_HOME/.checkmarx/agent-logs/copilot-cli}"
+_CXRUN_TELEMETRY_CONTEXT="$_CXRUN_STATE_DIR/cx_telemetry_context"
+if [ "${1:-} ${2:-}" = "hooks copilot-cli-pre-file-write" ] && [ -n "$CX_RESOLVED" ] \
+    && [ "${CX_COPILOT_HOST:-}" != vscode ] && [ "${CX_TELEMETRY_DISABLE:-}" != 1 ] \
+    && [ ! -r "$_CXRUN_TELEMETRY_CONTEXT" ]; then
+    for _cxrun_py in python3 python "py -3"; do
+        command -v "${_cxrun_py%% *}" >/dev/null 2>&1 || continue
+        # shellcheck disable=SC2086
+        $_cxrun_py "$_CXRUN_DIR/cx_telemetry.py" hook-context --client copilot-cli \
+            --state-dir "$_CXRUN_STATE_DIR" >/dev/null 2>&1 </dev/null && break
+    done
+fi
+
+# Parse the three known values. Remove a trailing CR written by older Windows installers.
+if [ -r "$_CXRUN_TELEMETRY_CONTEXT" ]; then
+    _cxrun_cr=$(printf '\r')
     while IFS='=' read -r _cxrun_key _cxrun_val; do
+        _cxrun_val=${_cxrun_val%"$_cxrun_cr"}
         case "$_cxrun_key" in
             CX_AGENT_VERSION | CX_PLUGIN_VERSION | CX_PLUGIN_TYPE)
                 case "$_cxrun_val" in
@@ -187,7 +204,7 @@ if [ -r "$_CXRUN_STATE_DIR/cx_telemetry_context" ]; then
                 esac
                 ;;
         esac
-    done < "$_CXRUN_STATE_DIR/cx_telemetry_context"
+    done < "$_CXRUN_TELEMETRY_CONTEXT"
 fi
 
 if [ -n "$CX_RESOLVED" ]; then

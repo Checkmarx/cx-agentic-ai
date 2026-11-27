@@ -290,6 +290,20 @@ class SendTest(_TempDirs):
         self.send(rewrite_to=3000.0)
         self.assertEqual(cx_telemetry.credential_mtime(self.dir, 3000.0), 1000.0)
 
+    def test_hook_context_prepares_cold_copilot_scan_without_sending_authentication(self):
+        state_dir = os.path.join(self.dir, "cold")
+        args = ["hook-context", "--state-dir", state_dir, "--client", "copilot-cli"]
+        with mock.patch.object(cx_telemetry, "detect_agent_version", return_value="1.0.116") as version, \
+                mock.patch.object(cx_telemetry, "plugin_version", return_value="1.0.5"), \
+                mock.patch.object(cx_telemetry, "send_auth_event") as auth:
+            self.assertEqual(cx_telemetry.worker_main(args), 0)
+            self.assertEqual(cx_telemetry.worker_main(args), 0)
+        version.assert_called_once_with("copilot-cli", "", timeout=cx_telemetry.HOOK_VERSION_TIMEOUT)
+        auth.assert_not_called()
+        with open(os.path.join(state_dir, cx_telemetry.CONTEXT_FILE), "rb") as f:
+            self.assertEqual(f.read(),
+                             b"CX_AGENT_VERSION=1.0.116\nCX_PLUGIN_VERSION=1.0.5\nCX_PLUGIN_TYPE=CLI\n")
+
     def test_worker_writes_the_context(self):
         run, _ = self.fake_run()
         args = ["context", "--state-dir", self.dir, "--client", "cursor", "--cx", "cx", "--agent-version", "1.7.2"]
