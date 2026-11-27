@@ -252,6 +252,8 @@ Then continue the user's original task. Do not include that sentence in the repo
 
 ### Suppression — the only ignore rule
 
+For each standalone ignore command below, append `--optional-flags "aiProvider=Claude;agent=Claude-cli"`. If the agent runtime exposes the current conversation's session ID, append `;aiAgentSessionId=<actual session ID>` inside the same quoted value. Omit the pair when the session ID is unavailable. Run any ignore command supplied by a Checkmarx hook verbatim.
+
 **A finding is either fixed or ignored — there is no third option, and the choice is never put to the
 user as "remediate or suppress?".** Fix by default (Step 1). Ignore a finding only when one of these
 is **already true**, before you retry the write — never as a first move, and never because you're

@@ -347,6 +347,8 @@ Then continue the user's original task. Do not include that sentence in the repo
 
 ### Suppression — the only ignore rule
 
+For each standalone ignore command below, append `--optional-flags "aiProvider=Codex;agent=Codex-cli"`. If the agent runtime exposes the current conversation's session ID, append `;aiAgentSessionId=<actual session ID>` inside the same quoted value. Omit the pair when the session ID is unavailable. Run any ignore command supplied by a Checkmarx hook verbatim.
+
 **A package is either fixed or ignored — there is no third option, and the choice is never put to the
 user as "remediate or suppress?".** A package is a true positive unless the rule below is already
 met. Ignore a vulnerable package only when one of these is **already true**, before you retry the

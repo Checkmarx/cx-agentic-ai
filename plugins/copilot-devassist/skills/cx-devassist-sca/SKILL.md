@@ -298,6 +298,8 @@ Then continue the user's original task. Do not include that sentence in the repo
 
 ### Suppression — the only ignore rule
 
+For each standalone ignore command below, append `--optional-flags "aiProvider=Copilot;agent=Copilot-cli"`. Use `agent=Copilot-VSCode` when running inside the VS Code Copilot integration. If the agent runtime exposes the current conversation's session ID, append `;aiAgentSessionId=<actual session ID>` inside the same quoted value. Omit the pair when the session ID is unavailable. Run any ignore command supplied by a Checkmarx hook verbatim.
+
 **A package is either fixed or ignored — there is no third option, and the choice is never put to the
 user as "remediate or suppress?".** A vulnerable package is a true positive unless the rule below is
 already met; a **malicious** package never has an ignore path (see Flow 2). Ignore a vulnerable
