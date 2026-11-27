@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+os.environ.setdefault("CX_TELEMETRY_DISABLE", "1")  # never start a real telemetry worker from a test
 import sys
 import tempfile
 import unittest
@@ -67,7 +68,7 @@ def _run_gemini_deny(hook_input, *, log_dir, repeat_env=None, authed=False,
     cx_check._scanner_state = lambda identity=None: scanner_state
     cx_check._read_hook_input = lambda: hook_input
     cx_check._credential_mtime = lambda: 1000.0
-    env = {"CX_LOG_DIR": log_dir, "CX_LOG_DISABLE": "1"}
+    env = {"CX_LOG_DIR": log_dir, "CX_LOG_DISABLE": "1", "CX_TELEMETRY_DISABLE": "1"}
     if repeat_env is not None:
         env["CX_GATE_REPEAT_DENY_MESSAGES"] = repeat_env
     cx_check.os.environ = env

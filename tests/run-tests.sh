@@ -8,6 +8,10 @@
 # printed; otherwise they run with plain Python. Coverage data stays under tests/ (gitignored).
 set -uo pipefail
 
+# Tests drive the real gate. Without this, a passing gate starts the Dev Assist telemetry worker
+# (hooks/cx_telemetry.py), which could send a real authentication event with the developer's cx.
+export CX_TELEMETRY_DISABLE=1
+
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Three plugins are covered: copilot-devassist (the older suites under hooks/ and scripts/),
 # cx-devassist (the Claude gate suites directly under tests/), and the Gemini CLI extension

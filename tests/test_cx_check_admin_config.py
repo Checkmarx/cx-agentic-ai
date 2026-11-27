@@ -6,6 +6,7 @@ Run from the repo root:  python -m unittest discover -s tests -v
 
 import importlib.util
 import os
+os.environ.setdefault("CX_TELEMETRY_DISABLE", "1")  # never start a real telemetry worker from a test
 import sys
 import tempfile
 import unittest
@@ -126,7 +127,7 @@ class OAuthRecoveryBullet(unittest.TestCase):
             "cx_base_auth_uri": "https://eu.ast.checkmarx.net", "cx_tenant": "acme",
         })
         self.assertIn("--base-auth-uri https://eu.ast.checkmarx.net", b)
-        self.assertIn("--tenant acme", b)
+        self.assertIn("--tenant acme --agent=copilot-cli", b)
         self.assertIn("PRECONFIGURED", b)
         self.assertNotIn("<url>", b)
         self.assertNotIn("<tenant>", b)
@@ -134,7 +135,7 @@ class OAuthRecoveryBullet(unittest.TestCase):
     def test_placeholder_branch(self):
         b = cx_check._oauth_recovery_bullet({}, history=[])
         self.assertIn("<url>", b)
-        self.assertIn("<tenant>", b)
+        self.assertIn("<tenant> --agent=copilot-cli", b)
         self.assertIn("34965-68530", b)  # env-URLs doc link present (logging-in-to-checkmarx-one)
         self.assertIn("ast.checkmarx.net", b)  # inline region examples present
 
@@ -142,6 +143,17 @@ class OAuthRecoveryBullet(unittest.TestCase):
         # Only one of the two values → must NOT embed a half-command; use placeholders.
         b = cx_check._oauth_recovery_bullet({"cx_tenant": "acme"}, history=[])
         self.assertIn("<url>", b)
+
+    def test_vscode_recovery_omits_copilot_cli_attribution(self):
+        b = cx_check._oauth_recovery_bullet({}, history=[], client="copilot-vscode")
+        self.assertNotIn("--agent=copilot-cli", b)
+
+    def test_remembered_environments_include_copilot_cli_attribution(self):
+        history = [("https://eu.ast.checkmarx.net", "acme"),
+                   ("https://ast.checkmarx.net", "beta")]
+        b = cx_check._oauth_recovery_bullet({}, history)
+        self.assertIn("--tenant acme --agent=copilot-cli", b)
+        self.assertIn("--tenant beta --agent=copilot-cli", b)
 
 
 class CarveOutAcceptsComposedCommand(unittest.TestCase):

@@ -247,6 +247,8 @@ shifts everything below it. Do not match on the secret value.
 
 ### Suppression — the only ignore rule
 
+For each standalone ignore command below, append `--optional-flags "aiProvider=Copilot;agent=Copilot-cli"`. Use `agent=Copilot-VSCode` when running inside the VS Code Copilot integration. If the agent runtime exposes the current conversation's session ID, append `;aiAgentSessionId=<actual session ID>` inside the same quoted value. Omit the pair when the session ID is unavailable. Run any ignore command supplied by a Checkmarx hook verbatim.
+
 **A finding is either fixed or ignored — there is no third option, and the choice is never put to the
 user as "remediate or suppress?".** Fix by default in self-healing mode. Ignore a finding only when
 one of these is **already true**:

@@ -110,6 +110,15 @@ _EVENTS = {
         "skip_reason": _enum({"engine_not_running", "all_engines_not_running", "engine_not_found", "image_pull_failed",
                                "scan_error", "unknown"}),
     },
+    "telemetry": {
+        # Dev Assist analytics (hooks/cx_telemetry.py): which detached worker the gate started
+        # ("auth" sends the authentication event, "context" refreshes the versions cx hooks reports),
+        # or that a telemetry hook failed (reason_code is the exception type only). Never carries a
+        # command line, version string, path or any value sent to Checkmarx.
+        "result": _enum({"started", "error"}),
+        "mode": _enum({"auth", "context"}),
+        "reason_code": _token,
+    },
     "mcp_connect": {
         # Every attempt by hooks/cx_run.sh to spawn/respawn `cx mcp bridge` (session start,
         # Developer: Reload Window, MCP reconnect) — success or denial — so a connect failure always

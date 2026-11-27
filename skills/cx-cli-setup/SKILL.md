@@ -119,18 +119,29 @@ key → Path A** (below); **Browser sign-in → Path B** (`references/oauth.md`)
 
 ### Path A — API key
 
-Give the full instructions in one message; do not ask the developer to paste the key into chat:
+If the recovery message provides an API-key sign-in command, use it. Otherwise run
+`auth login --help` with the resolved `cx` executable before giving the developer a command.
+When the login help documents API-key sign-in, give the developer this command to run in their
+own terminal:
 
-> "1. In the Checkmarx One portal: **Settings → Identity and Access Management → API Keys → Create
-> Key**. 2. Copy the key (it is shown once). 3. Run, replacing `<your-api-key>`:
-> ```
-> cx configure set --prop-name cx_apikey --prop-value <your-api-key>
-> ```
-> Let me know once you've run it. Docs: https://docs.checkmarx.com/en/34965-188712-creating-api-keys.html"
+```bash
+cx auth login --apikey <your-api-key> --agent=gemini-cli
+```
 
-Wait for confirmation. The CLI extracts the server URL, auth URL, and tenant from the key — no
-further questions. The credential is stored in plaintext in `~/.checkmarx/checkmarxcli.yaml`
-(Windows: `%USERPROFILE%\.checkmarx\checkmarxcli.yaml`) — protect it like an SSH key (`chmod 600`).
+Use this fallback only after confirming that the installed CLI lacks API-key sign-in. A global
+`--apikey` flag alone does not indicate support:
+
+```bash
+cx configure set --prop-name cx_apikey --prop-value <your-api-key>
+```
+
+Give the instructions and the applicable command in one message. Tell the developer to go to
+**Settings → Identity and Access Management → API Keys → Create Key** in Checkmarx One, copy the
+key shown once, and replace `<your-api-key>` in their own terminal. Keep the key out of chat.
+Wait for confirmation, then continue to Phase 3. The key supplies the server URL, auth URL, and
+tenant. If the CLI stores credentials in `~/.checkmarx/checkmarxcli.yaml` (Windows:
+`%USERPROFILE%\.checkmarx\checkmarxcli.yaml`), restrict access to that file.
+[Create an API key](https://docs.checkmarx.com/en/34965-188712-creating-api-keys.html)
 
 ## Phase 3 — Verify Connectivity
 
@@ -175,8 +186,8 @@ Checkmarx MCP calls require a ready `cx`.
 If invoked only because credentials expired (CLI already installed and configured), skip Phases 0–1
 and start at Phase 2: "Your Checkmarx One credentials have expired. Let's re-authenticate — no
 reconfiguration needed." Re-show the Question 1 auth-method choice, pre-selecting the method the
-developer originally used, then route: **API key →** generate a new key and re-run the Phase 2 Path A
-`cx configure set` (keys expire after 30–365 days per tenant policy); **Browser sign-in →**
+developer originally used, then route: **API key →** generate a new key and follow Phase 2 Path A
+(keys expire after 30–365 days per tenant policy); **Browser sign-in →**
 `references/oauth.md` (re-auth section).
 
 ## Additional Resources
@@ -193,8 +204,9 @@ developer originally used, then route: **API key →** generate a new key and re
 | Command | Purpose |
 |---|---|
 | `cx version` | Verify CLI is installed |
-| `cx configure set --prop-name cx_apikey --prop-value <key>` | Path A: set API key (extracts server/tenant automatically) |
-| `cx auth login --base-auth-uri <URL> --tenant <tenant>` | Path B: browser OAuth — both flags every login; needs a build that supports it |
+| `cx auth login --apikey <key> --agent=gemini-cli` | Path A: API-key sign-in on supported builds |
+| `cx configure set --prop-name cx_apikey --prop-value <key>` | Path A: API-key setup on older builds |
+| `cx auth login --base-auth-uri <URL> --tenant <tenant> --agent=gemini-cli` | Path B: browser sign-in on supported builds |
 | `cx auth logout` | Revoke the current refresh token and clear stored credentials |
 | `cx auth validate` | Verify authentication |
 | `cx utils env` | Show current configuration |

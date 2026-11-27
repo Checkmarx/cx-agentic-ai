@@ -281,6 +281,8 @@ Then continue the user's original task. Do not include that sentence in the repo
 
 ### Suppression — the only ignore rule
 
+For each standalone ignore command below, append `--optional-flags "aiProvider=Cursor;agent=Cursor-cli"`. If the agent runtime exposes the current conversation's session ID, append `;aiAgentSessionId=<actual session ID>` inside the same quoted value. Omit the pair when the session ID is unavailable. Run any ignore command supplied by a Checkmarx hook verbatim.
+
 **A finding is either fixed or ignored — there is no third option, and the choice is never put to the
 user as "remediate or suppress?".** Fix by default (Step 1), whether reached from an on-demand scan or
 a hook deny on Write/StrReplace/EditNotebook. Ignore a finding only when one of these is **already

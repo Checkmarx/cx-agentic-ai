@@ -16,6 +16,7 @@ Dependency-free (stdlib only), like the sibling suites.
 
 import json
 import os
+os.environ.setdefault("CX_TELEMETRY_DISABLE", "1")  # never start a real telemetry worker from a test
 import shutil
 import subprocess
 import sys

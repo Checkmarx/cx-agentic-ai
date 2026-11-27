@@ -48,8 +48,8 @@ value or no URL token, re-show the same combined prompt once. If `cx auth login`
 *"realm not found — check --tenant and --base-auth-uri"* (a rare deployment that doesn't redirect
 `/auth` to IAM), fall back to Path A.
 
-**Run the login command (both flags required on every login).** The CLI does not persist these and
-(by design) ignores the realm embedded in any stored token, so omitting `--base-auth-uri` fails with
+**Run the login command with the URL, tenant, and agent label shown below.** The CLI does not
+persist the URL or tenant and ignores the realm embedded in any stored token. Omitting `--base-auth-uri` fails with
 a "missing URI" error and omitting `--tenant` fails with "please provide tenant". Run it with stdout
 discarded (see the security note).
 
@@ -61,7 +61,7 @@ Windows — while cx isn't yet on PATH). Take that exact cx invocation and appen
 
 ```bash
 # Use the resolved cx path from the deny message (bare `cx` works only once it is on PATH):
-"$HOME/.checkmarx/bin/cx" auth login --base-auth-uri <your Checkmarx One URL> --tenant <tenant> 1>/dev/null
+"$HOME/.checkmarx/bin/cx" auth login --base-auth-uri <your Checkmarx One URL> --tenant <tenant> --agent=claude-cli 1>/dev/null
 ```
 
 **Run this YOURSELF with the Bash tool — do NOT hand it to the developer with the `!` prefix.** This
@@ -105,7 +105,7 @@ macOS/Linux) and exclude it from backups and version control.
 ## Re-authentication (Path B)
 
 When credentials expired and the developer originally used browser sign-in, re-run the **same**
-`cx auth login --base-auth-uri <URL> --tenant <tenant>` command (both flags every time; stdout
-discarded; never capture the token). If a gate deny message triggered the re-auth, use the resolved
-cx invocation it embeds (absolute path while cx isn't on PATH) rather than a bare `cx`. No MCP action
+`cx auth login --base-auth-uri <URL> --tenant <tenant> --agent=claude-cli` command (stdout
+discarded; never capture the token). If the gate displays a recovery command, use its resolved
+cx path and connection flags. Include `--agent=claude-cli` once. No MCP action
 is needed — the bundled remediation MCP re-reads the credential from cx config on its next call.

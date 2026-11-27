@@ -20,6 +20,16 @@ try:
 except Exception:
     cx_log = None
 
+# Dev Assist analytics telemetry is OPTIONAL in the same way: a missing/broken cx_telemetry never
+# changes a gate decision (see _telemetry below).
+try:
+    import cx_telemetry
+except Exception:
+    cx_telemetry = None
+
+# This plugin's client key for cx_telemetry (agent label "Copilot-cli"; "Copilot-VSCode" inside VS Code, see _telemetry_client).
+_TELEMETRY_CLIENT = "copilot-cli"
+
 
 def _log(event, **fields):
     """Emit a redacted structured event, dropping None-valued kwargs. Never raises."""
@@ -147,7 +157,39 @@ def _cx_binary_pin_note(tier):
 # Keep this one attempt bounded and cheap so the grace retry + the scanner probe all fit the
 # cx_check.sh 45s hook budget. Built per call so it honors a CX_BINARY override.
 def _auth_validate_cmd():
-    return [_cx_exe(), "auth", "validate", "--retry", "0", "--timeout", "10s"]
+    # --agent: with the default agent (ASTCLI), `cx auth validate` sends its own authentication
+    # telemetry event, which would count every cached probe as an AST-CLI login. The plugin sends
+    # the real authentication event itself (cx_telemetry).
+    return [_cx_exe(), "auth", "validate", "--retry", "0", "--timeout", "10s",
+            "--agent", _telemetry_agent_label()]
+
+
+def _telemetry_agent_label():
+    label = cx_telemetry.agent_label(_TELEMETRY_CLIENT) if cx_telemetry is not None else ""
+    return label or "Copilot-cli"
+
+
+def _telemetry(fn_name, *args, **kwargs):
+    """Call a cx_telemetry hook with this plugin's state dir. Never raises: telemetry must not change
+    a gate decision (and a crash here would otherwise reach _fail_closed_on_crash)."""
+    if cx_telemetry is None or not _AGENT_LOG_DIR:
+        return
+    try:
+        mode = getattr(cx_telemetry, fn_name)(_AGENT_LOG_DIR, *args, **kwargs)
+        if mode:
+            _log("telemetry", result="started", mode=mode)
+    except Exception as e:
+        _log("telemetry", result="error", reason_code=type(e).__name__)
+
+
+def _telemetry_client(hook_input):
+    """cx_telemetry client key for this hook: Copilot inside VS Code reports as Copilot-VSCode, matching
+    the label ast-cli's scan/remediation events use there."""
+    try:
+        return "copilot-vscode" if _in_vscode(hook_input) else _TELEMETRY_CLIENT
+    except Exception as e:
+        _log("telemetry", result="error", reason_code=type(e).__name__)
+        return _TELEMETRY_CLIENT
 
 def _chmod_600(path):
     """Best-effort 0600 on a per-user state file. POSIX only — on Windows the file already
@@ -1038,9 +1080,37 @@ _OAUTH_BULLET_LEAD = (
     "(it opens the developer's browser with MFA; no secret passes through you; it resolves cx "
     "by absolute path so it works before cx is on PATH). "
 )
+_API_KEY_RECOVERY_BULLET = (
+    "- API key (ask this first): follow Path A in /cx-cli-setup to choose the command "
+    "supported by the installed cx. The developer runs it in their own terminal and keeps "
+    "the key out of chat."
+)
 
 
-def _oauth_recovery_bullet(cfg, history=None):
+def _api_key_recovery_bullet(client):
+    if (client == _TELEMETRY_CLIENT and cx_telemetry is not None
+            and cx_telemetry.login_sends_auth_telemetry(_cx_exe(), timeout=3)):
+        return (
+            "- API key (ask this first): this CLI supports API-key sign-in. Give the developer "
+            "this command to run in their own terminal. Keep the key out of chat.\n    "
+            + _cx_recovery_command_str("auth login --apikey <your-api-key> --agent=" + _TELEMETRY_CLIENT)
+        )
+    return _API_KEY_RECOVERY_BULLET
+
+
+def _auth_recovery_options(hook_input):
+    client = _telemetry_client(hook_input)
+    return _api_key_recovery_bullet(client) + "\n" + _oauth_recovery_bullet(_load_admin_config(), client=client)
+
+
+def _oauth_recovery_command(base, tenant, client):
+    args = "auth login --base-auth-uri {0} --tenant {1}".format(base, tenant)
+    if client == _TELEMETRY_CLIENT:
+        args += " --agent=" + _TELEMETRY_CLIENT
+    return _cx_recovery_command_str(args)
+
+
+def _oauth_recovery_bullet(cfg, history=None, client=_TELEMETRY_CLIENT):
     """The 'Browser sign-in (OAuth)' bullet for an auth-recovery deny context, in precedence order:
 
       1. the admin config supplied a VALIDATED base-auth-uri AND tenant → embed the real values and
@@ -1057,8 +1127,7 @@ def _oauth_recovery_bullet(cfg, history=None):
     base = cfg.get("cx_base_auth_uri")
     tenant = cfg.get("cx_tenant")
     if base and tenant:
-        cmd = _cx_recovery_command_str(
-            "auth login --base-auth-uri {0} --tenant {1}".format(base, tenant))
+        cmd = _oauth_recovery_command(base, tenant, client)
         return _OAUTH_BULLET_LEAD + (
             "The --base-auth-uri and --tenant "
             "below were PRECONFIGURED (cx-onboarding.properties: the plugin's bundled "
@@ -1071,8 +1140,7 @@ def _oauth_recovery_bullet(cfg, history=None):
         pairs = "".join(
             "\n    [{0}] {1} @ {2}\n        {3}".format(
                 i + 1, t, b,
-                _cx_recovery_command_str(
-                    "auth login --base-auth-uri {0} --tenant {1}".format(b, t)))
+                _oauth_recovery_command(b, t, client))
             for i, (b, t) in enumerate(history))
         _log("login_history", action="offered", count=len(history))
         return _OAUTH_BULLET_LEAD + (
@@ -1088,7 +1156,7 @@ def _oauth_recovery_bullet(cfg, history=None):
             "URL/tenant per the cx-cli-setup skill's oauth.md Question 2 (free-text form) -- NEVER "
             "guess or default values that are not listed. Ready-to-run command for each:" + pairs
         )
-    cmd = _cx_recovery_command_str("auth login --base-auth-uri <url> --tenant <tenant>")
+    cmd = _oauth_recovery_command("<url>", "<tenant>", client)
     return _OAUTH_BULLET_LEAD + (
         "Only AFTER OAuth is chosen, ask for the "
         "URL/tenant -- NEVER guess or default the --base-auth-uri or --tenant values (e.g. do not try "
@@ -1314,10 +1382,18 @@ def _credential_mtime():
     invalidates a cached 'will-scan' pass and forces a re-probe. None on any error (then the cache
     keys on binary identity alone)."""
     try:
-        return os.path.getmtime(
+        mtime = os.path.getmtime(
             os.path.join(os.path.expanduser("~"), ".checkmarx", "checkmarxcli.yaml"))
     except OSError:
         return None
+    # Sending the Dev Assist authentication event makes cx rewrite this file (the session id). That
+    # write is not a credential change: cx_telemetry maps its mtime back to the value before it.
+    if cx_telemetry is not None:
+        try:
+            return cx_telemetry.credential_mtime(_AGENT_LOG_DIR, mtime)
+        except Exception as e:
+            _log("telemetry", result="error", reason_code=type(e).__name__)
+    return mtime
 
 
 def _credential_is_fresh(within_seconds=180):
@@ -2174,6 +2250,8 @@ def cx_check():
 
     # 6. Authenticated? (the gate's notion: `cx auth validate`, which accepts an OAuth token.)
     if not _is_authenticated(identity):
+        # The next authenticated pass is a new login → it sends the authentication event.
+        _telemetry("note_unauthenticated", _credential_mtime())
         # Fresh-login window: the credential was just written but `cx auth validate` is still returning
         # invalid — a transient backend-propagation lag, NOT a real auth failure. The critical guidance
         # is DON'T re-run `cx auth login`: it revokes the token and reissues a new one, resetting the
@@ -2214,10 +2292,7 @@ def cx_check():
                 "(/cx-cli-setup) for the guided flow. ASK THE DEVELOPER WHICH METHOD FIRST — do not "
                 "assume OAuth and do not ask for a URL/tenant before this choice is made. There are two "
                 "ways to authenticate, and they differ in who runs them:\n"
-                "- API key (ask this first / simplest): the DEVELOPER runs this in their own terminal "
-                "(it is a plaintext secret — do not type an API key yourself):\n    "
-                + _cx_recovery_command_str("configure set --prop-name cx_apikey --prop-value <key>")
-                + "\n" + _oauth_recovery_bullet(_load_admin_config())
+                + _auth_recovery_options(hook_input)
 
                 + "\n  It blocks until the developer finishes (~5 min) — run it with a long timeout or "
                 "in the background.\n"
@@ -2299,10 +2374,7 @@ def cx_check():
                 "allow everything UNSCANNED. Re-authenticate via the cx-cli-setup skill (/cx-cli-setup). "
                 "ASK THE DEVELOPER WHICH METHOD FIRST — do not assume OAuth and do not ask for a "
                 "URL/tenant before this choice is made.\n"
-                "- API key (ask this first / simplest): the DEVELOPER runs this in their own terminal "
-                "(do not type an API key yourself):\n    "
-                + _cx_recovery_command_str("configure set --prop-name cx_apikey --prop-value <key>")
-                + "\n" + _oauth_recovery_bullet(_load_admin_config())
+                + _auth_recovery_options(hook_input)
 
                 + "\nOnly `cx auth …` / `cx configure …` commands run until the scanner is authenticated."
             ),
@@ -2312,6 +2384,10 @@ def cx_check():
         )
 
     # cx is installed, recent enough, authenticated, and the scanner WILL actually scan.
+    # Analytics: send the authentication event when due and keep the cx hooks context fresh. Detached
+    # and cheap — one small read and one stat on the steady-state path.
+    _telemetry("on_gate_pass", _telemetry_client(hook_input), _cx_exe(),
+               cred_mtime=_credential_mtime())
     _log("gate_decision", decision="pass", reason_code="ok", tool_name=tool, version_state=state)
 
 
@@ -2409,6 +2485,7 @@ def cx_record_login():
     command = _observable_login_command(hook_input)
     if command:
         _record_login_attempt(command)
+        _telemetry("note_login_command", command)
 
 
 def main():

@@ -12,6 +12,7 @@ ONE PROCESS: this imports copilot-devassist's cx_check, so run-tests.sh gives it
 import io
 import json
 import os
+os.environ.setdefault("CX_TELEMETRY_DISABLE", "1")  # never start a real telemetry worker from a test
 import shutil
 import stat
 import subprocess

@@ -5,6 +5,7 @@ Run: python3 hooks/test_cx_log.py   (stdlib only)
 
 import json
 import os
+os.environ.setdefault("CX_TELEMETRY_DISABLE", "1")  # never start a real telemetry worker from a test
 import subprocess
 import sys
 import tempfile

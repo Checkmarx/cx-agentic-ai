@@ -6,6 +6,7 @@ Run from the repo root:  python -m unittest discover -s tests -v
 
 import json
 import os
+os.environ.setdefault("CX_TELEMETRY_DISABLE", "1")  # never start a real telemetry worker from a test
 import tempfile
 import time
 import unittest
@@ -605,8 +606,8 @@ class OAuthRecoveryBulletHistory(unittest.TestCase):
     def test_history_branch_lists_pairs_most_recent_first(self):
         b = cx_check._oauth_recovery_bullet({}, self._HISTORY)
         self.assertLess(b.index("acme-corp"), b.index("beta-inc"))
-        self.assertIn("--base-auth-uri %s --tenant acme-corp" % _URL_EU, b)
-        self.assertIn("--base-auth-uri %s --tenant beta-inc" % _URL_US, b)
+        self.assertIn("--base-auth-uri %s --tenant acme-corp --agent=claude-cli" % _URL_EU, b)
+        self.assertIn("--base-auth-uri %s --tenant beta-inc --agent=claude-cli" % _URL_US, b)
 
     def test_history_branch_instructs_askuserquestion_and_no_autopick(self):
         b = cx_check._oauth_recovery_bullet({}, self._HISTORY)
