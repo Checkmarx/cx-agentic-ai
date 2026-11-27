@@ -19,6 +19,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout, redirect_stderr
+from unittest import mock
 
 # Source under test: the Copilot CLI plugin (separate from the Gemini extension at repo root).
 # Gemini hook behaviour is covered by tests/test_gemini_cx_check_*.py.
@@ -388,10 +389,18 @@ class TestRecoveryMessaging(unittest.TestCase):
     reference cx by its RESOLVED path so the recovery command works on a first-install session before
     cx is on PATH."""
 
+    def setUp(self):
+        for name, value in (("_in_vscode", False), ("_confirmed_login_pairs", [])):
+            patcher = mock.patch.object(cx_check, name, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def _assert_oauth_apikey_split(self, ctx):
         self.assertIn("auth login", ctx)
         self.assertIn("browser", ctx.lower())
-        self.assertIn("configure set", ctx)
+        self.assertIn("Path A in /cx-cli-setup", ctx)
+        self.assertNotIn("configure set --prop-name cx_apikey", ctx)
+        self.assertIn("--agent=copilot-cli", ctx)
         self.assertIn("developer", ctx.lower())
         # Injection-shaped phrasing must be gone.
         self.assertNotIn("YOURSELF", ctx)

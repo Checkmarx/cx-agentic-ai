@@ -587,8 +587,8 @@ class OAuthRecoveryBulletHistory(unittest.TestCase):
     def test_history_branch_lists_pairs_most_recent_first(self):
         b = cx_check._oauth_recovery_bullet({}, self._HISTORY)
         self.assertLess(b.index("acme-corp"), b.index("beta-inc"))
-        self.assertIn("--base-auth-uri %s --tenant acme-corp" % _URL_EU, b)
-        self.assertIn("--base-auth-uri %s --tenant beta-inc" % _URL_US, b)
+        self.assertIn("--base-auth-uri %s --tenant acme-corp --agent=gemini-cli" % _URL_EU, b)
+        self.assertIn("--base-auth-uri %s --tenant beta-inc --agent=gemini-cli" % _URL_US, b)
 
     def test_history_branch_instructs_pick_and_no_autopick(self):
         orig = cx_check._GEMINI_CLI_MODE

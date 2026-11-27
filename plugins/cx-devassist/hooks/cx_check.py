@@ -672,6 +672,19 @@ _OAUTH_BULLET_LEAD = (
 )
 
 
+_API_KEY_RECOVERY_BULLET = (
+    "- API key (ask this first): follow Path A in /cx-cli-setup to choose the command "
+    "supported by the installed cx. The developer runs it in their own terminal and keeps "
+    "the key out of chat."
+)
+
+
+def _oauth_recovery_command(base, tenant):
+    args = "auth login --base-auth-uri {0} --tenant {1} --agent={2}".format(
+        base, tenant, _telemetry_agent_label().lower())
+    return _cx_recovery_command_str(args)
+
+
 def _oauth_recovery_bullet(cfg, history=None):
     """The 'Browser sign-in (OAuth)' bullet for an auth-recovery deny context, in precedence order:
 
@@ -689,8 +702,7 @@ def _oauth_recovery_bullet(cfg, history=None):
     base = cfg.get("cx_base_auth_uri")
     tenant = cfg.get("cx_tenant")
     if base and tenant:
-        cmd = _cx_recovery_command_str(
-            "auth login --base-auth-uri {0} --tenant {1}".format(base, tenant))
+        cmd = _oauth_recovery_command(base, tenant)
         return _OAUTH_BULLET_LEAD + (
             "The --base-auth-uri and --tenant "
             "below were PRECONFIGURED BY YOUR ADMINISTRATOR (the plugin's "
@@ -703,8 +715,7 @@ def _oauth_recovery_bullet(cfg, history=None):
         pairs = "".join(
             "\n    [{0}] {1} @ {2}\n        {3}".format(
                 i + 1, t, b,
-                _cx_recovery_command_str(
-                    "auth login --base-auth-uri {0} --tenant {1}".format(b, t)))
+                _oauth_recovery_command(b, t))
             for i, (b, t) in enumerate(history))
         _log("login_history", action="offered", count=len(history))
         return _OAUTH_BULLET_LEAD + (
@@ -720,7 +731,7 @@ def _oauth_recovery_bullet(cfg, history=None):
             "URL/tenant per the cx-cli-setup skill's oauth.md Question 2 (free-text form) — NEVER "
             "guess or default values that are not listed. Ready-to-run command for each:" + pairs
         )
-    cmd = _cx_recovery_command_str("auth login --base-auth-uri <url> --tenant <tenant>")
+    cmd = _oauth_recovery_command("<url>", "<tenant>")
     return _OAUTH_BULLET_LEAD + (
         "Only AFTER OAuth is chosen, ask for the "
         "URL/tenant — NEVER guess or default the --base-auth-uri or --tenant values (e.g. do not try "
@@ -1673,9 +1684,7 @@ def cx_check():
                 "(/cx-cli-setup) for the guided flow. ASK THE DEVELOPER WHICH METHOD FIRST — do not "
                 "assume OAuth and do not ask for a URL/tenant before this choice is made. There are two "
                 "ways to authenticate, and they differ in who runs them:\n"
-                "- API key (ask this first / simplest): the DEVELOPER runs this in their own terminal "
-                "(it is a plaintext secret — do not type an API key yourself):\n    "
-                + _cx_recovery_command_str("configure set --prop-name cx_apikey --prop-value <key>")
+                + _API_KEY_RECOVERY_BULLET
                 + "\n" + _oauth_recovery_bullet(_load_admin_config())
                 + "\n  It blocks until the developer finishes (~5 min) — run it with a long timeout or "
                 "in the background.\n"
@@ -1762,9 +1771,7 @@ def cx_check():
                 "allow everything UNSCANNED. Re-authenticate via the cx-cli-setup skill (/cx-cli-setup). "
                 "ASK THE DEVELOPER WHICH METHOD FIRST — do not assume OAuth and do not ask for a "
                 "URL/tenant before this choice is made.\n"
-                "- API key (ask this first / simplest): the DEVELOPER runs this in their own terminal "
-                "(do not type an API key yourself):\n    "
-                + _cx_recovery_command_str("configure set --prop-name cx_apikey --prop-value <key>")
+                + _API_KEY_RECOVERY_BULLET
                 + "\n" + _oauth_recovery_bullet(_load_admin_config())
                 + "\nOnly `cx auth …` / `cx configure …` commands run until the scanner is authenticated."
             ),

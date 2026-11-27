@@ -126,5 +126,5 @@ macOS/Linux) and exclude it from backups and version control.
 When credentials expired and the developer originally used browser sign-in, re-run the **same**
 `cx auth login --base-auth-uri <URL> --tenant <tenant> --agent=cursor-cli` command (stdout
 discarded; never capture the token). If the gate displays a recovery command, use its resolved
-cx path and connection flags and include the agent flag shown above. No MCP action
+cx path and connection flags. Include `--agent=cursor-cli` once. No MCP action
 is needed — the bundled remediation MCP re-reads the credential from cx config on its next call.

@@ -59,7 +59,7 @@ discarded (see the security note).
 session `cx` is **not on PATH**, so a **bare** `cx auth login` exits 127 (`command not found`).
 The auth deny message **embeds the resolved recovery command with cx's absolute path** (the canonical
 store — `~/.checkmarx/bin/cx` on Unix, `%LOCALAPPDATA%\Checkmarx\cx\cx.exe` on Windows — while cx
-isn't yet on PATH). Use the path and connection flags from the deny message and append `--agent=gemini-cli`:
+isn't yet on PATH). Use the path and connection flags from the deny message. Include `--agent=gemini-cli` once:
 
 **Unix / macOS / Linux** (`run_shell_command`):
 ```bash
@@ -122,5 +122,5 @@ macOS/Linux) and exclude it from backups and version control.
 When credentials expired and the developer originally used browser sign-in, re-run the **same**
 `cx auth login --base-auth-uri <URL> --tenant <tenant> --agent=gemini-cli` command (stdout
 discarded; never capture the token). If the gate displays a recovery command, use its resolved
-cx path and connection flags and include the agent flag shown above. No MCP action
+cx path and connection flags. Include `--agent=gemini-cli` once. No MCP action
 is needed — the bundled remediation MCP re-reads the credential from cx config on its next call.

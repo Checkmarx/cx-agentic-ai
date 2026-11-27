@@ -211,7 +211,7 @@ class TestCxCheckCursorGateJson(unittest.TestCase):
             self.skipTest("canonical cx not installed at {0}".format(cx_path))
         inner = (
             '"{0}" auth login --base-auth-uri https://eu.ast.checkmarx.net '
-            "--tenant cx_seg 1>/dev/null"
+            "--tenant cx_seg --agent=cursor-cli 1>/dev/null"
         ).format(cx_path.replace("\\", "/"))
         command = "bash -c '{0}'".format(inner)
         proc = self._run_gate({

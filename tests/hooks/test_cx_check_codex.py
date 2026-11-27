@@ -184,7 +184,10 @@ class TestCodexOutputEnvelope(unittest.TestCase):
         decision, code = run(bash("npm test"), authed=False)
         self.assertEqual(decision, "deny")
         self.assertEqual(code, 0)
-        self.assertIn("$cx-cli-setup", LAST_OUTPUT["permissionDecisionReason"])
+        context = LAST_OUTPUT["permissionDecisionReason"]
+        self.assertIn("$cx-cli-setup", context)
+        self.assertIn("Path A in $cx-cli-setup", context)
+        self.assertIn("--agent=codex-cli", context)
 
     def test_allowed_when_ready(self):
         decision, code = run(bash("npm test"))
